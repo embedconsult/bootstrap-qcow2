@@ -1,0 +1,13 @@
+name: bootstrap-qcow2
+version: 0.1.0
+
+authors:
+  - Jason Kridner <jkridner@beagleboard.org>
+
+targets:
+  bootstrap-qcow2:
+    main: src/bootstrap-qcow2.cr
+
+crystal: '>= 1.14.0'
+
+license: MIT
