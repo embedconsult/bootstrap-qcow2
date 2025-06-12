@@ -14,9 +14,8 @@ describe Bootstrap::Qcow2 do
     qcow2.checkDeps.should be_true
   end
 
-  it "has a helper to find executalbes" do
-    qimg = Bootstrap::Qcow2.findExe("qemu-img")
-    qimg.should be_a(String)
-    Log.info { "Found qemu-image at #{qimg}" }
+  it "has a helper to find executables" do
+    qimg = Bootstrap::Qcow2.findExe?("qemu-img")
+    qimg.should be_a(Bool)
   end
 end

@@ -12,11 +12,15 @@ module Bootstrap
     def checkDeps()
       File.exists?("../fossil-scm.fossil") &&
       File.exists?("../bootstrap-qcow2.fossil") &&
+      self.class.findExe?("qemu-img") &&
+      self.class.findExe?("docker") &&
       true
     end
 
-    def self.findExe(exeName : String)
-      Process.find_executable(exeName)
+    def self.findExe?(exeName : String)
+      exePath = Process.find_executable(exeName)
+      Log.info { "Found #{exeName} at #{exePath}" }
+      exePath && File::Info.executable?(exePath)
     end
   end
 end
