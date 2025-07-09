@@ -22,5 +22,12 @@ module Bootstrap
       Log.info { "Found #{exeName} at #{exePath}" }
       exePath && File::Info.executable?(exePath)
     end
+
+    def genRootfs()
+    end
   end
 end
+# cd data
+# docker build -t jkridner/bootstrap-qcow2 .
+# docker create --name temp-img jkridner/bootstrap-qcow2
+# docker cp temp-img:/tmp/genimage/images/bootstrap.qcow2 .
