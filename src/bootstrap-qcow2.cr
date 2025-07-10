@@ -23,11 +23,21 @@ module Bootstrap
       exePath && File::Info.executable?(exePath)
     end
 
-    def genRootfs()
+    def self.exec(command : String, args : Array(String) = [] of String, chdir = "./data")
+      proc = Process.new(command: command, args: args, chdir: chdir)
+      result = proc.wait
+      Log.info { "#{command} #{args}: #{result}" }
+      if !result.normal_exit?
+        raise RuntimeError.new("#{result}")
+      end
+      result.success?
+    end
+
+    def genQcow2()
+      self.class.exec(command: "docker", args: ["build", "-t", "jkridner/bootstrap-qcow2", "."])
+      self.class.exec(command: "docker", args: ["rm", "temp-img"])
+      self.class.exec(command: "docker", args: ["create", "--name", "temp-img", "jkridner/bootstrap-qcow2"])
+      self.class.exec(command: "docker", args: ["cp", "temp-img:/tmp/genimage/images/bootstrap.qcow2", @filename])
     end
   end
 end
-# cd data
-# docker build -t jkridner/bootstrap-qcow2 .
-# docker create --name temp-img jkridner/bootstrap-qcow2
-# docker cp temp-img:/tmp/genimage/images/bootstrap.qcow2 .

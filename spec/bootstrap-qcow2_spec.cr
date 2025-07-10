@@ -18,4 +18,9 @@ describe Bootstrap::Qcow2 do
     qimg = Bootstrap::Qcow2.findExe?("qemu-img")
     qimg.should be_a(Bool)
   end
+
+  it "can generate a qcow2 file" do
+    qcow2 = Bootstrap::Qcow2.new("blabl-space-20250612.qcow2")
+    qcow2.genQcow2.should be_true
+  end
 end
