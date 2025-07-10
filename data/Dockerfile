@@ -12,7 +12,7 @@ RUN apk add fossil linux-lts linux-firmware-none
 #RUN apk add linux-lts fossil
 
 FROM alpine:latest AS genimage
-RUN apk add bash grub genimage dosfstools mtools coreutils findutils e2fsprogs qemu-img
+RUN apk add bash genimage dosfstools mtools coreutils findutils e2fsprogs qemu-img efibootmgr
 WORKDIR /tmp/genimage
 COPY genimage.cfg .
 COPY --from=rootfs / root/rootfs-arm
