@@ -1,17 +1,18 @@
 FROM debian:trixie
 RUN apt-get update \
   && apt-get install -y which sed make binutils build-essential diffutils gcc g++ bash patch gzip bzip2 perl \
-    tar cpio unzip rsync file bc findutils original-awk wget \
+    tar cpio unzip rsync file bc findutils original-awk wget sudo \
   && apt-get clean
 RUN apt-get update \
   && apt-get install -y adduser git \
   && apt-get clean
 RUN adduser builduser
+RUN adduser builduser sudo
 USER builduser
 #RUN git clone https://git.buildroot.net/buildroot .
 COPY --chown=builduser:builduser buildroot /home/builduser/buildroot
 WORKDIR /home/builduser/buildroot
 RUN git checkout 2025.05
 RUN make qemu_x86_64_defconfig
-#RUN make
+RUN make
 CMD ["/bin/bash"]

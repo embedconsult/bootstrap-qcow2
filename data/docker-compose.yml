@@ -1,0 +1,10 @@
+version: '3.8'
+services:
+  buildroot:
+    build:
+      context: .
+      dockerfile: Dockerfile.buildroot
+    volumes:
+      - ./buildroot_dl:/home/builduser/buildroot/dl
+      - ./buildroot_output:/home/builduser/buildroot/output
+    command: bash # Keeps the container running for interactive use
