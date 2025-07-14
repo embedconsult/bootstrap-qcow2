@@ -45,8 +45,9 @@ module Bootstrap
     end
 
     def self.test()
-      self.exec(command: "docker", args: ["build", "-t", "bootstrap-qcow2-buildroot", "-f", "Dockerfile.buildroot", "."])
-      self.exec(command: "docker", args: ["volume", "create", "buildroot_downloads"])
+      #self.exec(command: "docker", args: ["build", "-t", "bootstrap-qcow2-buildroot", "-f", "Dockerfile.buildroot", "."])
+      #self.exec(command: "docker", args: ["volume", "create", "buildroot_downloads"])
+      true
     end
   end
 end

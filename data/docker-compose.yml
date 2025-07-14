@@ -1,10 +1,12 @@
 version: '3.8'
 services:
   buildroot:
+    stdin_open: true
+    tty: true
     build:
       context: .
       dockerfile: Dockerfile.buildroot
     volumes:
-      - ./buildroot_dl:/home/builduser/buildroot/dl
-      - ./buildroot_output:/home/builduser/buildroot/output
+      - ./buildroot_dl:/home/builduser/buildroot/dl:rw
+      #- ./buildroot_output:/home/builduser/buildroot/output:rw
     command: bash # Keeps the container running for interactive use

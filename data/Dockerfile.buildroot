@@ -8,11 +8,15 @@ RUN apt-get update \
   && apt-get clean
 RUN adduser builduser
 RUN adduser builduser sudo
+RUN echo "builduser ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 USER builduser
 #RUN git clone https://git.buildroot.net/buildroot .
 COPY --chown=builduser:builduser buildroot /home/builduser/buildroot
 WORKDIR /home/builduser/buildroot
 RUN git checkout 2025.05
-RUN make qemu_x86_64_defconfig
-RUN make
+VOLUME /home/builduser/buildroot/dl
+#VOLUME /home/builduser/buildroot/output
+#RUN sudo chown builduser:builduser dl output
+#RUN make qemu_x86_64_defconfig
+#RUN make
 CMD ["/bin/bash"]
