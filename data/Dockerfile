@@ -1,22 +1,18 @@
 FROM alpine:latest AS llvm
-RUN apk add build-base cmake git python3 fossil crystal
-RUN apk add llvm clang bison flex linux-headers elfutils-dev openssl-dev perl wget tar
+RUN apk add build-base cmake git python3 fossil crystal \
+  llvm clang bison flex linux-headers elfutils-dev openssl-dev perl wget tar rsync lld20 bash
 WORKDIR /opt/linux
-#RUN wget https://github.com/gregkh/linux/archive/refs/tags/v6.12.38.tar.gz -o linux.tar.gz
+#RUN wget https://github.com/gregkh/linux/archive/refs/tags/v6.12.38.tar.gz -O linux.tar.gz
 COPY ./linux.tar.gz /opt/linux
 RUN tar xf linux.tar.gz --strip-components=1
-RUN apk add lld20
-RUN apk add bash
 RUN make LLVM=1 ARCH=x86 x86_64_defconfig
 RUN scripts/config --enable CONFIG_EFI_STUB
-RUN scripts/config --set-val CONFIG_CMDLINE "root=/dev/sda2 console=tty0"
-RUN make LLVM=1 ARCH=x86
 RUN scripts/config --enable CONFIG_EFI
-RUN make LLVM=1 ARCH=x86
-RUN apk add rsync
+RUN scripts/config --set-val CONFIG_CMDLINE "root=/dev/sda2 console=tty0"
+RUN make -j12 LLVM=1 ARCH=x86
 RUN make LLVM=1 ARCH=x86 INSTALL_HDR_PATH=/opt/linux/usr-x86 headers_install
 #WORKDIR /opt/edk2
-#RUN wget https://github.com/tianocore/edk2/archive/refs/tags/edk2-stable202505.tar.gz -o edk2.tar.gz
+#RUN wget https://github.com/tianocore/edk2/archive/refs/tags/edk2-stable202505.tar.gz -O edk2.tar.gz
 #COPY ./edk2.tar.gz /opt/edk2
 
 FROM --platform=amd64 alpine:latest AS rootfs-x86

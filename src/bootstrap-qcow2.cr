@@ -37,6 +37,11 @@ module Bootstrap
       result.success?
     end
 
+    # TODO: Add method to fetch data files
+    def fetchData()
+      # https://github.com/gregkh/linux/archive/refs/tags/v6.12.38.tar.gz --> linux.tar.gz
+    end
+
     def genQcow2()
       self.class.exec(command: "docker", args: ["build", "-t", "jkridner/bootstrap-qcow2", "."])
       self.class.exec(command: "docker", args: ["rm", "temp-img"])
