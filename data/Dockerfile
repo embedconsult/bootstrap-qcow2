@@ -28,7 +28,7 @@ RUN mkdir -p images root/boot/EFI/boot root/rootfs-arm root/rootfs-x86
 COPY --from=rootfs-x86 / root/rootfs-x86
 COPY --from=rootfs-arm / root/rootfs-arm
 COPY --from=linux /opt/linux/usr-x86 root/rootfs-x86/usr
-COPY --from=linux /opt/linux/arch/x86/boot/bzImage root/boot/EFI/boot/bootx86.efi
+COPY --from=linux /opt/linux/arch/x86/boot/bzImage root/boot/EFI/boot/bootx64.efi
 COPY genimage.cfg .
 RUN genimage
 RUN qemu-img convert -f raw -O qcow2 images/bootstrap.img images/bootstrap.qcow2
