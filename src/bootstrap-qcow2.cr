@@ -54,7 +54,7 @@ module Bootstrap
       self.class.exec(command: "docker", args: ["rm", "temp-img"])
       self.class.exec(command: "docker", args: ["create", "--name", "temp-img", "jkridner/bootstrap-qcow2"])
       self.class.exec(command: "docker", args: ["cp", "temp-img:/tmp/genimage/images/bootstrap.qcow2", @filename])
-      self.class.exec(command: "docker", args: ["cp", "temp-img:/tmp/genimage/images/bootstrap.qcow2", "bootstrap.img"])
+      #self.class.exec(command: "docker", args: ["cp", "temp-img:/tmp/genimage/images/bootstrap.img", "bootstrap.img"])
     end
 
     def self.test()
