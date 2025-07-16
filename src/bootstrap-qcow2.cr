@@ -23,6 +23,13 @@ module Bootstrap
       exePath && File::Info.executable?(exePath)
     end
 
+    def self.exec!(command : String, args : Array(String) = [] of String, chdir = "./data")
+      result = self.exec(command, args, chdir)
+      if !result
+        raise RuntimeError.new("#{result}")
+      end
+    end
+
     def self.exec(command : String, args : Array(String) = [] of String, chdir = "./data")
       stdout = IO::Memory.new
       stderr = IO::Memory.new
@@ -47,6 +54,7 @@ module Bootstrap
       self.class.exec(command: "docker", args: ["rm", "temp-img"])
       self.class.exec(command: "docker", args: ["create", "--name", "temp-img", "jkridner/bootstrap-qcow2"])
       self.class.exec(command: "docker", args: ["cp", "temp-img:/tmp/genimage/images/bootstrap.qcow2", @filename])
+      self.class.exec(command: "docker", args: ["cp", "temp-img:/tmp/genimage/images/bootstrap.qcow2", "bootstrap.img"])
     end
 
     def self.test()
