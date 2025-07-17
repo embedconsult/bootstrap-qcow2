@@ -1,6 +1,6 @@
 #!/bin/bash
 cd $(dirname $0)
-if "$(uname -m)" == "x86_64"; then
+if [ "$(uname -m)" == "x86_64" ]; then
 	qemu-system-x86_64 \
 		-cpu host -enable-kvm -smp 2 -m 1G \
 		-nographic \

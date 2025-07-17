@@ -14,6 +14,10 @@ RUN make -j12 LLVM=1 ARCH=x86
 RUN scripts/config --set-val CONFIG_CMDLINE "root=/dev/sda3 console=ttyS0"
 RUN make -j12 LLVM=1 ARCH=x86
 RUN make LLVM=1 ARCH=x86 INSTALL_HDR_PATH=/opt/linux/usr-x86 headers_install
+RUN scripts/config --enable CONFIG_EARLY_PRINTK
+RUN scripts/config --set-val CONFIG_CMDLINE "earlyprintk=serial,ttyS0,115200,keep console=ttyS0 root=PARTUUID=DC5A1A34-9C04-4E18-84D0-F45AE8483D93 debug ignore_loglevel"
+RUN make -j12 LLVM=1 ARCH=x86
+RUN cp /opt/linux/arch/x86/boot/bzImage /opt/linux/bootx64.efi
 
 FROM --platform=amd64 alpine:latest AS rootfs-x86
 RUN apk add bash fossil crystal
@@ -28,7 +32,7 @@ RUN mkdir -p images root/boot/EFI/boot root/rootfs-arm root/rootfs-x86
 COPY --from=rootfs-x86 / root/rootfs-x86
 COPY --from=rootfs-arm / root/rootfs-arm
 COPY --from=linux /opt/linux/usr-x86 root/rootfs-x86/usr
-COPY --from=linux /opt/linux/arch/x86/boot/bzImage root/boot/EFI/boot/bootx64.efi
+COPY --from=linux /opt/linux/bootx64.efi root/boot/EFI/boot/bootx64.efi
 COPY genimage.cfg .
 RUN genimage
 RUN qemu-img convert -f raw -O qcow2 images/bootstrap.img images/bootstrap.qcow2
