@@ -50,7 +50,7 @@ module Bootstrap
     end
 
     def genQcow2()
-      self.class.exec(command: "docker", args: ["build", "-t", "jkridner/bootstrap-qcow2", "."])
+      self.class.exec(command: "docker", args: ["build", "-f", "Dockerfile.uefi_rs", "-t", "jkridner/bootstrap-qcow2", "."])
       self.class.exec(command: "docker", args: ["rm", "temp-img"])
       self.class.exec(command: "docker", args: ["create", "--name", "temp-img", "jkridner/bootstrap-qcow2"])
       self.class.exec(command: "docker", args: ["cp", "temp-img:/tmp/genimage/images/bootstrap.qcow2", @filename])
@@ -60,6 +60,15 @@ module Bootstrap
     def self.test()
       #self.exec(command: "docker", args: ["build", "-t", "bootstrap-qcow2-buildroot", "-f", "Dockerfile.buildroot", "."])
       #self.exec(command: "docker", args: ["volume", "create", "buildroot_downloads"])
+      #self.exec(
+      #  command: "crystal",
+      #  args: [
+      #    "build", "--prelude=empty", "--cross-compile", "--target", "x86_64-unknown-efi",
+      #    "--static", "--no-debug", "-p", "--error-trace", "--mcmodel", "kernel",
+      #    "src/hello-efi.cr"
+      #  ],
+      #  chdir: "."
+      #)
       true
     end
   end
