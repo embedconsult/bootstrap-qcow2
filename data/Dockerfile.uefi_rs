@@ -5,7 +5,7 @@ RUN cargo new hello-efi
 WORKDIR /app/hello-efi
 RUN cargo add log
 RUN cargo add uefi --features logger,panic_handler
-COPY hello-efi.rs src/
+COPY hello-efi.rs src/main.rs
 RUN cargo build --target x86_64-unknown-uefi --release
 
 FROM alpine:latest AS genimage
