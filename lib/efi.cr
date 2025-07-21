@@ -131,6 +131,8 @@ lib LibEfi
   # https://uefi.org/specs/UEFI/2.10/12_Protocols_Console_Support.html#efi-simple-text-output-protocol
   struct Output
     reset: (Output*, Bool) -> Status
+    output_string: (Output*, UInt16*) -> Status
+    test_string: (Output*, UInt16*) -> Status
   end
 
   # https://uefi.org/specs/UEFI/2.10/04_EFI_System_Table.html#id4
@@ -185,7 +187,8 @@ class Efi
   def initialize(@handle : LibEfi::Handle, @system_table : LibEfi::SystemTable)
   end
 
-  def out(message : String)
+  def out(message : String) : LibEfi::Status
+    @system_table.stdout.value.output_string.call(@system_table.stdout, message.to_utf16.to_unsafe)
   end
 end
 

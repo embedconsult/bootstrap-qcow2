@@ -9,5 +9,9 @@ COPY spec/bootstrap-qcow2_spec.cr spec/
 COPY spec/spec_helper.cr spec/
 COPY src/bootstrap-qcow2.cr src/
 COPY src/hello-efi.cr src/
-RUN crystal build --prelude=empty --cross-compile --target aarch64-unknown-windows src/hello-efi.cr
+#COPY lib/c lib/c
+RUN crystal build --cross-compile --single-module --target aarch64-unknown-windows \
+  -Dwithout_iconv -Dskip_crystal_compiler_rt -Dgc_none -Dwithout_openssl -Dwithout_zlib \
+  src/hello-efi.cr
+#  -Dwin32 \
 RUN lld -flavor link -subsystem:efi_application -entry:efi_main hello-efi.obj -out:hello-efi.efi
