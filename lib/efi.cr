@@ -185,6 +185,9 @@ class Efi
   def initialize(@handle : LibEfi::Handle, @system_table : LibEfi::SystemTable)
   end
 
-  def out
+  def out(message : String)
   end
+end
+
+fun __chkstk
 end
