@@ -7,6 +7,8 @@ RUN cargo add log
 RUN cargo add uefi --features logger,panic_handler
 COPY hello-efi.rs src/main.rs
 RUN cargo build --target x86_64-unknown-uefi --release
+RUN rustup target add aarch64-unknown-uefi
+RUN cargo build --target aarch64-unknown-uefi --release
 
 FROM alpine:latest AS genimage
 RUN apk add bash genimage dosfstools mtools coreutils findutils e2fsprogs qemu-img efibootmgr
@@ -17,6 +19,7 @@ RUN touch root/rootfs-x86/.keep root/rootfs-arm/.keep
 #COPY --from=rootfs-arm / root/rootfs-arm
 #COPY --from=linux /opt/linux/usr-x86 root/rootfs-x86/usr
 COPY --from=build-efi /app/hello-efi/target/x86_64-unknown-uefi/release/hello-efi.efi root/boot/EFI/boot/bootx64.efi
+COPY --from=build-efi /app/hello-efi/target/aarch64-unknown-uefi/release/hello-efi.efi root/boot/EFI/boot/bootaa64.efi
 COPY genimage.cfg .
 RUN genimage
 RUN qemu-img convert -f raw -O qcow2 images/bootstrap.img images/bootstrap.qcow2
