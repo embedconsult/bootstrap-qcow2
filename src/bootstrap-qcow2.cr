@@ -9,12 +9,12 @@ module Bootstrap
       Log.info { "Working with qcow2 file: #{@filename}" }
     end
 
-    def checkDeps()
+    def checkDeps
       File.exists?("../fossil-scm.fossil") &&
-      File.exists?("../bootstrap-qcow2.fossil") &&
-      self.class.findExe?("qemu-img") &&
-      self.class.findExe?("docker") &&
-      true
+        File.exists?("../bootstrap-qcow2.fossil") &&
+        self.class.findExe?("qemu-img") &&
+        self.class.findExe?("docker") &&
+        true
     end
 
     def self.findExe?(exeName : String)
@@ -45,22 +45,22 @@ module Bootstrap
     end
 
     # TODO: Add method to fetch data files
-    def fetchData()
+    def fetchData
       # https://github.com/gregkh/linux/archive/refs/tags/v6.12.38.tar.gz --> linux.tar.gz
     end
 
-    def genQcow2()
+    def genQcow2
       self.class.exec(command: "docker", args: ["build", "-f", "Dockerfile.uefi_rs", "-t", "jkridner/bootstrap-qcow2", "."])
       self.class.exec(command: "docker", args: ["rm", "temp-img"])
       self.class.exec(command: "docker", args: ["create", "--name", "temp-img", "jkridner/bootstrap-qcow2"])
       self.class.exec(command: "docker", args: ["cp", "temp-img:/tmp/genimage/images/bootstrap.qcow2", @filename])
-      #self.class.exec(command: "docker", args: ["cp", "temp-img:/tmp/genimage/images/bootstrap.img", "bootstrap.img"])
+      # self.class.exec(command: "docker", args: ["cp", "temp-img:/tmp/genimage/images/bootstrap.img", "bootstrap.img"])
     end
 
-    def self.test()
-      #self.exec(command: "docker", args: ["build", "-t", "bootstrap-qcow2-buildroot", "-f", "Dockerfile.buildroot", "."])
-      #self.exec(command: "docker", args: ["volume", "create", "buildroot_downloads"])
-      #self.exec(
+    def self.test
+      # self.exec(command: "docker", args: ["build", "-t", "bootstrap-qcow2-buildroot", "-f", "Dockerfile.buildroot", "."])
+      # self.exec(command: "docker", args: ["volume", "create", "buildroot_downloads"])
+      # self.exec(
       #  command: "crystal",
       #  args: [
       #    "build", "--prelude=empty", "--cross-compile", "--target", "x86_64-unknown-efi",
@@ -68,7 +68,7 @@ module Bootstrap
       #    "src/hello-efi.cr"
       #  ],
       #  chdir: "."
-      #)
+      # )
       true
     end
   end

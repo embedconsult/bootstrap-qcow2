@@ -1,21 +1,21 @@
 lib LibEfi
   struct Guid
     # Low field of the timestamp
-    a: UInt32
+    a : UInt32
     # Middle field of the timestamp
-    b: UInt16
+    b : UInt16
     # High field of the timestamp
-    c: UInt16
+    c : UInt16
     # Contains:
     #  - The high field of the clock sequence multiplexed with the variant.
     #  - The low field of the clock sequence.
     #  - Spatially unique node identifier.
-    d: UInt8[8]
+    d : UInt8[8]
   end
 
   # https://uefi.org/specs/UEFI/2.10/Apx_D_Status_Codes.html?highlight=efi_status#status-codes
   enum Status : UInt64
-    Success = 0
+    Success            = 0
     WarnUnknownGlyph
     WarnDeleteFailure
     WarnWriteFailure
@@ -24,7 +24,7 @@ lib LibEfi
     WarnFileSystem
     WarnResetRequired
 
-    LoadError = 0x8000_0000_0000_0001
+    LoadError           = 0x8000_0000_0000_0001
     InvalidParameter
     Unsupported
     BadBufferSize
@@ -53,7 +53,7 @@ lib LibEfi
     CrcError
     EndOfMedia
 
-    EndOfFile = 0x8000_0000_0000_001F
+    EndOfFile         = 0x8000_0000_0000_001F
     InvalidLanguage
     CompromisedData
     IpAddressConflict
@@ -62,7 +62,7 @@ lib LibEfi
 
   # https://uefi.org/specs/UEFI/2.10/Apx_B_Console.html#efi-scan-codes-for-efi-simple-text-input-protocol
   enum ScanCode : UInt16
-    Null = 0
+    Null       = 0
     Up
     Down
     Right
@@ -104,10 +104,10 @@ lib LibEfi
 
     Mute = 0x7F
 
-    VolumeUp = 0x80
+    VolumeUp   = 0x80
     VolumeDown
 
-    BrightnessUp = 0x100
+    BrightnessUp   = 0x100
     BrightnessDown
     Suspend
     Hibernate
@@ -118,68 +118,68 @@ lib LibEfi
 
   # https://uefi.org/specs/UEFI/2.10/12_Protocols_Console_Support.html#efi-simple-text-input-protocol-readkeystroke
   struct InputKey
-    scan_code: ScanCode
-    unicode_char: UInt16
+    scan_code : ScanCode
+    unicode_char : UInt16
   end
 
   # https://uefi.org/specs/UEFI/2.10/12_Protocols_Console_Support.html#efi-simple-text-input-protocol
   struct Input
-    reset: (Input*, Bool) -> Status
-    read_key_stroke: (Input*, InputKey*) -> Status
+    reset : (Input*, Bool) -> Status
+    read_key_stroke : (Input*, InputKey*) -> Status
   end
 
   # https://uefi.org/specs/UEFI/2.10/12_Protocols_Console_Support.html#efi-simple-text-output-protocol
   struct Output
-    reset: (Output*, Bool) -> Status
-    output_string: (Output*, UInt16*) -> Status
-    test_string: (Output*, UInt16*) -> Status
+    reset : (Output*, Bool) -> Status
+    output_string : (Output*, UInt16*) -> Status
+    test_string : (Output*, UInt16*) -> Status
   end
 
   # https://uefi.org/specs/UEFI/2.10/04_EFI_System_Table.html#id4
   struct Header
-    signature: UInt64
-    revision: UInt32
-    size: UInt32
-    crc: UInt32
-    _reserved: UInt32
+    signature : UInt64
+    revision : UInt32
+    size : UInt32
+    crc : UInt32
+    _reserved : UInt32
   end
 
   # https://uefi.org/specs/UEFI/2.10/04_EFI_System_Table.html#efi-configuration-table
   struct ConfigTableEntry
-    guid: Guid
-    vendor_table: Void*
+    guid : Guid
+    vendor_table : Void*
   end
 
   alias Handle = Void*
 
   # https://uefi.org/specs/UEFI/2.10/04_EFI_System_Table.html#efi-runtime-services
   struct RuntimeServices
-    header: Header
-    _pad: UInt64[10]
-    reset: (UInt32, Status, UInt64, UInt8*) -> 
+    header : Header
+    _pad : UInt64[10]
+    reset : (UInt32, Status, UInt64, UInt8*) ->
   end
 
   # https://uefi.org/specs/UEFI/2.10/04_EFI_System_Table.html#efi-boot-services
   struct BootServices
-    header: Header
+    header : Header
   end
 
   # https://uefi.org/specs/UEFI/2.10/04_EFI_System_Table.html#id6
   struct SystemTable
-    header: Header
-    fw_vendor: UInt16*
-    fw_revision: UInt32
-    stdin_handle: Handle
-    stdin: Input*
-    stdout_handle: Handle
-    stdout: Output*
-    stderr_handle: Handle
-    stderr: Output*
-    runtime: RuntimeServices*
-    boot: BootServices*
+    header : Header
+    fw_vendor : UInt16*
+    fw_revision : UInt32
+    stdin_handle : Handle
+    stdin : Input*
+    stdout_handle : Handle
+    stdout : Output*
+    stderr_handle : Handle
+    stderr : Output*
+    runtime : RuntimeServices*
+    boot : BootServices*
     # TODO: confirm pointer size is always 64 bits
-    nr_cfg: UInt64
-    cfg_table: StaticArray(ConfigTableEntry, 30)
+    nr_cfg : UInt64
+    cfg_table : StaticArray(ConfigTableEntry, 30)
   end
 end
 
