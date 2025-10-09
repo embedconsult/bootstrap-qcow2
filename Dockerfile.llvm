@@ -6,21 +6,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /usr/src
 RUN git clone --depth=1 -b ${LLVM_VER} https://github.com/llvm/llvm-project
 RUN apt-get update && apt-get install -y --no-install-recommends \
+	make \
 	cmake \
 	clang \
 	clang-20 \
 	clang-tools-20 \
+	llvm \
 	llvm-20 \
-	liblld-20 \
 	llvm-20-dev \
+	lld \
+	lld-20 \
+	liblld-20 \
 	liblld-20-dev \
 	libclang-cpp20 \
 	libclang-cpp20-dev \
 	libllvm20 \
-	&& apt-get clean
-RUN apt-get update && apt-get install -y --no-install-recommends \
-	make \
-	llvm \
 	&& apt-get clean
 WORKDIR /usr/src/llvm-project
 RUN cmake \
@@ -32,9 +32,11 @@ RUN cmake \
 	-DCMAKE_INSTALL_PREFIX=/opi \
 	-DLLVM_ENABLE_PROJECTS=all \
 	-DLLVM_ENABLE_RUNTIMES=all \
+	-DLLVM_USE_LINKER=lld \
+	-DBUILD_SHARED_LIBS=ON \
 	-S llvm \
 	-B build-llvm
-RUN cmake --build build-llvm --target install
+RUN cmake --build build-llvm --target install --parallel 24
 
 FROM ubuntu:25.04 AS stage1
 ENV MAKE_VER=4.4
@@ -51,6 +53,7 @@ RUN git clone --depth=1 -b ${CMAKE_VER} https://gitlab.kitware.com/cmake/cmake.g
 RUN git clone --depth=1 -b ${BUSYBOX_VER} git://git.busybox.net/busybox
 RUN wget https://mirror.us-midwest-1.nexcess.net/gnu/make/make-${MAKE_VER}.tar.gz
 RUN apt-get update && apt-get install -y --no-install-recommends \
-	make \
+	make libxml2 libzstd1 libatomic1 \
 	&& apt-get clean
-RUN tar xf make-${MAKE_VER}.tar.gz && cd make-${MAKE_VER} && ./configure --prefix=/opi && make && make install && cd ..
+ENV LDFLAGS="-fuse-ld=ldd"
+#RUN tar xf make-${MAKE_VER}.tar.gz && cd make-${MAKE_VER} && ./configure --prefix=/opi && make && make install && cd ..
