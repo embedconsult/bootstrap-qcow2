@@ -1,0 +1,56 @@
+FROM ubuntu:25.04 AS stage0
+ENV LLVM_VER=llvmorg-21.1.2
+RUN apt-get update && apt-get install -y --no-install-recommends \
+	ca-certificates git \
+	&& apt-get clean
+WORKDIR /usr/src
+RUN git clone --depth=1 -b ${LLVM_VER} https://github.com/llvm/llvm-project
+RUN apt-get update && apt-get install -y --no-install-recommends \
+	cmake \
+	clang \
+	clang-20 \
+	clang-tools-20 \
+	llvm-20 \
+	liblld-20 \
+	llvm-20-dev \
+	liblld-20-dev \
+	libclang-cpp20 \
+	libclang-cpp20-dev \
+	libllvm20 \
+	&& apt-get clean
+RUN apt-get update && apt-get install -y --no-install-recommends \
+	make \
+	llvm \
+	&& apt-get clean
+WORKDIR /usr/src/llvm-project
+RUN cmake \
+	-DCMAKE_BUILD_TYPE=Release \
+	-DLLVM_TARGETS_TO_BUILD=host \
+	-DCMAKE_MAKE_PROGRAM=make \
+	-DCMAKE_C_COMPILER=clang \
+	-DCMAKE_CXX_COMPILER=clang++ \
+	-DCMAKE_INSTALL_PREFIX=/opi \
+	-DLLVM_ENABLE_PROJECTS=all \
+	-DLLVM_ENABLE_RUNTIMES=all \
+	-S llvm \
+	-B build-llvm
+RUN cmake --build build-llvm --target install
+
+FROM ubuntu:25.04 AS stage1
+ENV MAKE_VER=4.4
+ENV CMAKE_VER=v4.1.1
+ENV BUSYBOX_VER=1_36_1
+ENV CC=/opi/bin/clang
+ENV CXX=/opi/bin/clang++
+WORKDIR /usr/src
+COPY --from=stage0 /opi /opi
+RUN apt-get update && apt-get install -y --no-install-recommends \
+	ca-certificates git wget tar \
+	&& apt-get clean
+RUN git clone --depth=1 -b ${CMAKE_VER} https://gitlab.kitware.com/cmake/cmake.git
+RUN git clone --depth=1 -b ${BUSYBOX_VER} git://git.busybox.net/busybox
+RUN wget https://mirror.us-midwest-1.nexcess.net/gnu/make/make-${MAKE_VER}.tar.gz
+RUN apt-get update && apt-get install -y --no-install-recommends \
+	make \
+	&& apt-get clean
+RUN tar xf make-${MAKE_VER}.tar.gz && cd make-${MAKE_VER} && ./configure --prefix=/opi && make && make install && cd ..

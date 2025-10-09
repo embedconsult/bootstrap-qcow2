@@ -1,4 +1,7 @@
 require "spec"
+require "log"
 require "../src/bootstrap-qcow2"
-require "../src/hello-efi"
-require "../src/inproc-llvm"
+# require "../src/hello-efi"
+require "../src/inproc_llvm"
+
+Log.setup_from_env
