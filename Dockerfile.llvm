@@ -31,7 +31,7 @@ RUN cmake \
 	-DCMAKE_C_COMPILER=clang \
 	-DCMAKE_CXX_COMPILER=clang++ \
 	-DCMAKE_INSTALL_PREFIX=/opi \
-	-DLLVM_ENABLE_PROJECTS="clang;llvm;libc;lld" \
+	-DLLVM_ENABLE_PROJECTS="clang;llvm;lld;libc" \
 	-DLLVM_ENABLE_RUNTIMES=all \
 	-DLLVM_LIBC_FULL_BUILD=ON \
 	-DLLVM_USE_LINKER=lld \
@@ -61,4 +61,5 @@ RUN wget https://mirror.us-midwest-1.nexcess.net/gnu/make/make-${MAKE_VER}.tar.g
 RUN apt-get update && apt-get install -y --no-install-recommends \
 	make libxml2 libzstd1 libatomic1 \
 	&& apt-get clean
+COPY --from=stage0 /usr/src /usr/src
 #RUN tar xf make-${MAKE_VER}.tar.gz && cd make-${MAKE_VER} && ./configure --prefix=/opi && make && make install && cd ..
