@@ -31,8 +31,9 @@ RUN cmake \
 	-DCMAKE_C_COMPILER=clang \
 	-DCMAKE_CXX_COMPILER=clang++ \
 	-DCMAKE_INSTALL_PREFIX=/opi \
-	-DLLVM_ENABLE_PROJECTS=all \
+	-DLLVM_ENABLE_PROJECTS="clang;llvm;libc;lld" \
 	-DLLVM_ENABLE_RUNTIMES=all \
+	-DLLVM_LIBC_FULL_BUILD=ON \
 	-DLLVM_USE_LINKER=lld \
 	-DBUILD_SHARED_LIBS=ON \
 	-DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld -rtlib=compiler-rt" \
@@ -47,9 +48,10 @@ ENV CMAKE_VER=v4.1.1
 ENV BUSYBOX_VER=1_36_1
 ENV CC=/opi/bin/clang
 ENV CXX=/opi/bin/clang++
-ENV LDFLAGS="-fuse-ld=ldd -rtlib=compiler-rt"
-WORKDIR /usr/src
+ENV LDFLAGS="-fuse-ld=lld -rtlib=compiler-rt"
 COPY --from=stage0 /opi /opi
+COPY --from=stage0 /usr/src /usr/src
+WORKDIR /usr/src
 RUN apt-get update && apt-get install -y --no-install-recommends \
 	ca-certificates git wget tar \
 	&& apt-get clean
