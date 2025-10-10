@@ -23,21 +23,35 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 	libclang-rt-20-dev \
 	libllvm20 \
 	&& apt-get clean
+RUN apt-get update && apt-get install -y --no-install-recommends \
+	rsync \
+	&& apt-get clean
+ENV LINUX_VER=v6.17.1
+RUN git clone --depth=1 -b ${LINUX_VER} https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+WORKDIR /usr/src/linux
+ENV SYSROOT=/opi
+RUN make LLVM=1 INSTALL_HDR_PATH=${SYSROOT} headers_install
 WORKDIR /usr/src/llvm-project
 RUN cmake \
 	-DCMAKE_BUILD_TYPE=Release \
-	-DLLVM_TARGETS_TO_BUILD=host \
+	-DCMAKE_INSTALL_PREFIX=${SYSROOT} \
 	-DCMAKE_MAKE_PROGRAM=make \
 	-DCMAKE_C_COMPILER=clang \
 	-DCMAKE_CXX_COMPILER=clang++ \
-	-DCMAKE_INSTALL_PREFIX=/opi \
-	-DLLVM_ENABLE_PROJECTS="clang;llvm;lld;libc" \
-	-DLLVM_ENABLE_RUNTIMES=all \
+	-DLLVM_TARGETS_TO_BUILD=host \
+	-DLLVM_ENABLE_PROJECTS="clang;llvm;lld" \
+	-DLLVM_ENABLE_RUNTIMES="libc;compiler-rt" \
 	-DLLVM_LIBC_FULL_BUILD=ON \
+	-DLLVM_LIBC_INCLUDE_SCUDO=ON \
 	-DLLVM_USE_LINKER=lld \
 	-DBUILD_SHARED_LIBS=ON \
 	-DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld -rtlib=compiler-rt" \
 	-DCOMPILER_RT_BUILD_BUILTINS=ON \
+	-DCOMPILER_RT_BUILD_SCUDO_STANDALONE_WITH_LLVM_LIBC=ON \
+	-DCOMPILER_RT_BUILD_GWP_ASAN=OFF \
+	-DCOMPILER_RT_SCUDO_STANDALONE_BUILD_SHARED=OFF \
+	-DCLANG_DEFAULT_LINKER=lld \
+	-DCLANG_DEFAULT_RTLIB=compiler-rt \
 	-S llvm \
 	-B build-llvm
 RUN cmake --build build-llvm --target install --parallel 24
