@@ -1,0 +1,50 @@
+diff -ruN a/configure.ac b/configure.ac
+--- a/configure.ac	2025-10-19 18:14:18.503300882 +0000
++++ b/configure.ac	2025-10-19 18:13:50.781246171 +0000
+@@ -136,6 +136,9 @@
+                 lstat readlink atexit isatty ttyname pselect posix_spawn \
+                 posix_spawnattr_setsigmask])
+ 
++# C23 does not like redeclarations and we should try to avoid them
++AC_CHECK_DECLS([getcwd], [], [], [[#include <unistd.h>]])
++
+ # We need to check declarations, not just existence, because on Tru64 this
+ # function is not declared without special flags, which themselves cause
+ # other problems.  We'll just use our own.
+diff -ruN a/src/makeint.h b/src/makeint.h
+--- a/src/makeint.h	2025-10-19 18:24:55.957250357 +0000
++++ b/src/makeint.h	2025-10-19 18:28:58.075975567 +0000
+@@ -678,7 +678,7 @@
+ # endif
+ 
+ # ifdef  HAVE_GETCWD
+-#  if !defined(VMS) && !defined(__DECC)
++#  if !defined(VMS) && !defined(__DECC) && !defined(HAVE_DECL_GETCWD)
+ char *getcwd (void);
+ #  endif
+ # else
+diff -ruN a/configure b/configure
+--- a/configure	2025-10-19 18:18:41.336678849 +0000
++++ b/configure	2025-10-19 18:23:48.950002615 +0000
+@@ -12783,6 +13254,19 @@
+ fi
+ 
+ 
++# C23 does not like redeclarations and we should try to avoid them
++ac_fn_check_decl "$LINENO" "getcwd" "ac_cv_have_decl_getcwd" "#include <unistd.h>
++" "$ac_c_undeclared_builtin_options" "CFLAGS"
++if test "x$ac_cv_have_decl_getcwd" = xyes
++then :
++  ac_have_decl=1
++else case e in #(
++  e) ac_have_decl=0 ;;
++esac
++fi
++printf "%s\n" "#define HAVE_DECL_GETCWD $ac_have_decl" >>confdefs.h
++
++
+ # We need to check declarations, not just existence, because on Tru64 this
+ # function is not declared without special flags, which themselves cause
+ # other problems.  We'll just use our own.
+
+
