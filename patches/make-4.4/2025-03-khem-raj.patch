@@ -1,0 +1,76 @@
+From: Khem Raj <raj.khem@gmail.com>
+To: bug-make@gnu.org
+Cc: Khem Raj <raj.khem@gmail.com>
+Subject: [PATCH] Fix signatures for getenv/getopt
+Date: Sat, 22 Mar 2025 14:24:57 -0700
+Message-ID: <20250322212457.352156-1-raj.khem@gmail.com>
+X-Mailer: git-send-email 2.49.0
+MIME-Version: 1.0
+Content-Transfer-Encoding: 8bit
+Received-SPF: pass client-ip=2607:f8b0:4864:20::634;
+ envelope-from=raj.khem@gmail.com; helo=mail-pl1-x634.google.com
+X-Spam_score_int: -20
+X-Spam_score: -2.1
+X-Spam_bar: --
+X-Spam_report: (-2.1 / 5.0 requ) BAYES_00=-1.9, DKIM_SIGNED=0.1,
+ DKIM_VALID=-0.1, DKIM_VALID_AU=-0.1, DKIM_VALID_EF=-0.1, FREEMAIL_FROM=0.001,
+ RCVD_IN_DNSWL_NONE=-0.0001, SPF_HELO_NONE=0.001,
+ SPF_PASS=-0.001 autolearn=ham autolearn_force=no
+X-Spam_action: no action
+X-Mailman-Approved-At: Sat, 22 Mar 2025 20:57:05 -0400
+X-BeenThere: bug-make@gnu.org
+X-Mailman-Version: 2.1.29
+Precedence: list
+List-Id: Bug reports and discussion for GNU  make <bug-make.gnu.org>
+List-Unsubscribe: <https://lists.gnu.org/mailman/options/bug-make>,
+ <mailto:bug-make-request@gnu.org?subject=unsubscribe>
+List-Archive: <https://lists.gnu.org/archive/html/bug-make>
+List-Post: <mailto:bug-make@gnu.org>
+List-Help: <mailto:bug-make-request@gnu.org?subject=help>
+List-Subscribe: <https://lists.gnu.org/mailman/listinfo/bug-make>,
+ <mailto:bug-make-request@gnu.org?subject=subscribe>
+X-List-Received-Date: Sat, 22 Mar 2025 21:25:11 -0000
+
+GCC-15 complains about missing parameters, this gets found
+out when using non-glibc ( e.g. musl ) C library
+
+Fixes
+lib/fnmatch.c:124:14: error: conflicting types for 'getenv'; have 'char *(void)'
+|   124 | extern char *getenv ();
+|       |              ^~~~~~
+
+src/getopt.c: Define parameters of getenv() and getopt().
+src/getopt.h: Ditto.
+---
+ src/getopt.c | 2 +-
+ src/getopt.h | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/getopt.c b/src/getopt.c
+index 0c774894..085d3b9b 100644
+--- a/src/getopt.c
++++ b/src/getopt.c
+@@ -202,7 +202,7 @@ static char *posixly_correct;
+    whose names are inconsistent.  */
+ 
+ #ifndef getenv
+-extern char *getenv ();
++extern char *getenv (const char *);
+ #endif
+ 
+ static char *
+diff --git a/src/getopt.h b/src/getopt.h
+index cc8ee8dc..a31c91bb 100644
+--- a/src/getopt.h
++++ b/src/getopt.h
+@@ -102,7 +102,7 @@ struct option
+    errors, only prototype getopt for the GNU C library.  */
+ extern int getopt (int argc, char *const *argv, const char *shortopts);
+ #else /* not __GNU_LIBRARY__ */
+-extern int getopt ();
++extern int getopt (int,  char * const*, const char *);
+ #endif /* __GNU_LIBRARY__ */
+ extern int getopt_long (int argc, char *const *argv, const char *shortopts,
+ 		        const struct option *longopts, int *longind);
+
+

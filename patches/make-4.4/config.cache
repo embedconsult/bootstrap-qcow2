@@ -1,0 +1,12 @@
+ac_cv_type_off_t=yes
+ac_cv_type_pid_t=yes
+ac_cv_type_ssize_t=yes
+ac_cv_type_uid_t=yes
+ac_cv_type_gid_t=yes
+ac_cv_header_stdc=yes
+ac_cv_header_stdlib_h=yes
+ac_cv_have_decl_getenv=yes
+ac_cv_header_pwd_h=no
+ac_cv_func_getpwnam=no
+ac_cv_func_getpwuid=no
+

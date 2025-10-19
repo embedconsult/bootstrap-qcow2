@@ -54,6 +54,10 @@ RUN cmake \
 	-DCLANG_DEFAULT_RTLIB=compiler-rt \
 	-S llvm \
 	-B build-llvm
+WORKDIR /usr/src/linux
+RUN make LLVM=1 INSTALL_HDR_PATH=/usr headers_install
+RUN ln -s /usr/include/asm-generic /usr/include/asm
+WORKDIR /usr/src/llvm-project
 RUN cmake --build build-llvm --target install --parallel 24
 
 FROM ubuntu:25.04 AS stage1
@@ -73,6 +77,16 @@ RUN git clone --depth=1 -b ${CMAKE_VER} https://gitlab.kitware.com/cmake/cmake.g
 RUN git clone --depth=1 -b ${BUSYBOX_VER} git://git.busybox.net/busybox
 RUN wget https://mirror.us-midwest-1.nexcess.net/gnu/make/make-${MAKE_VER}.tar.gz
 RUN apt-get update && apt-get install -y --no-install-recommends \
-	make libxml2 libzstd1 libatomic1 \
+	make libxml2 libzstd1 libatomic1 patch \
 	&& apt-get clean
-#RUN tar xf make-${MAKE_VER}.tar.gz && cd make-${MAKE_VER} && ./configure --prefix=/opi && make && make install && cd ..
+RUN ln -s /opi/lib/aarch64-unknown-linux-gnu/crt1.o /opi/lib/aarch64-unknown-linux-gnu/Scrt1.o
+ENV CFLAGS="-I/opi/include"
+ENV CPPFLAGS="-I/opi/include"
+ENV LD=/opi/bin/ld.lld
+ENV AR=/opi/bin/llvm-ar
+RUN tar xf make-${MAKE_VER}.tar.gz
+COPY patches/make-4.4 /usr/src/make-4.4
+WORKDIR /usr/src/make-4.4
+RUN patch -p1 < *.patch
+RUN cp *.h /opi/include/
+RUN ./configure --prefix=/opi && make && make install && cd ..
