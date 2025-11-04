@@ -95,7 +95,35 @@ WORKDIR /usr/src/make-4.4
 RUN bash -c 'for p in *.patch; do patch -p1 < $p; done'
 RUN bash -c 'cp *.h /opi/include/'
 #ENV _LIBC=1
-RUN ./configure -C --host=aarch64-unknown-linux-gnu --prefix=/opi
-RUN make || true
+#RUN ./configure -C --host=aarch64-unknown-linux-gnu --prefix=/opi
+#RUN make || true
 ENTRYPOINT ["/bin/bash"]
 #RUN make install && cd ..
+
+COPY c /usr/src/inproc_llvm
+WORKDIR /usr/src/inproc_llvm
+RUN ${CXX} -fPIC -shared src/inproc_llvm.cc -o libinproc_llvm.so \
+	-I/usr/src/inproc_llvm/include \
+	-I/usr/lib/llvm-20/include \
+	-L/usr/lib/llvm-20/lib \
+	-lclang-cpp -ldl -lpthread -lm \
+	&& mkdir -p /opt/inproc && cp libinproc_llvm.so /opt/inproc/
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+	libssl-dev \
+	libcrypto++-dev \
+	&& apt-get clean
+WORKDIR /usr/src/crystal
+ENV LLVM_CONFIG=llvm-config-20
+ENV CRYSTAL_HAS_WRAPPER=true
+ENV CRYSTAL_EXEC=/usr/bin/crystal
+ENV CRYSTAL_ROOT=/usr/src/crystal
+ENV CRYSTAL_PATH=/usr/src/crystal/src:/usr/src/crystal/lib
+ENV CRYSTAL_CONFIG_LIBRARY_PATH=/usr/src/crystal/src
+ENV LLVM_CONFIG=llvm-config-20
+RUN mkdir -p .build && crystal build src/compiler/crystal.cr -o .build/crystal
+ENV CRYSTAL_EXEC=/usr/src/crystal/.build/crystal
+RUN .build/crystal build src/compiler/crystal.cr -o .build/crystal
+WORKDIR /usr/src/bootstrap-qcow2
+COPY . /usr/src/bootstrap-qcow2
+#RUN ${CRYSTAL_EXEC} spec -v
