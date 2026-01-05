@@ -90,9 +90,9 @@ RUN curl -L "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${PCR
   && make -j$(nproc) \
   && make install
 
-# m4 (needed by gmp)
-RUN curl -L "https://ftp.gnu.org/gnu/m4/m4-${M4_VERSION}.tar.gz" -o m4.tar.gz \
-  && tar xf m4.tar.gz \
+# m4 (needed by gmp) - use ftpmirror and xz archive to avoid short error payloads
+RUN curl -fL "https://ftpmirror.gnu.org/m4/m4-${M4_VERSION}.tar.xz" -o m4.tar.xz \
+  && tar xf m4.tar.xz \
   && cd m4-${M4_VERSION} \
   && CC="$CC" CFLAGS="$CFLAGS" ./configure --prefix=$SYSROOT --disable-shared --enable-static \
   && make -j$(nproc) \
