@@ -20,6 +20,7 @@ RUN apk add --no-cache \
   cmake \
   ninja \
   python3 \
+  perl \
   curl \
   tar \
   xz \
