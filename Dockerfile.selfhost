@@ -51,15 +51,15 @@ ARG ZLIB_VERSION OPENSSL_VERSION LIBFFI_VERSION LIBEVENT_VERSION LIBYAML_VERSION
 ENV CC="/usr/bin/gcc" \
     CXX="/usr/bin/g++" \
     SYSROOT=/opt/sysroot \
-    CFLAGS="--sysroot=/opt/sysroot -O2" \
-    LDFLAGS="--sysroot=/opt/sysroot"
+    CFLAGS="-I/opt/sysroot/include -O2" \
+    LDFLAGS="-L/opt/sysroot/lib"
 WORKDIR /opt/src
 
 # zlib
 RUN curl -L "https://zlib.net/zlib-${ZLIB_VERSION}.tar.gz" -o zlib.tar.gz \
   && tar xf zlib.tar.gz \
   && cd zlib-${ZLIB_VERSION} \
-  && CC="$CC" CFLAGS="$CFLAGS" ./configure --prefix=$SYSROOT \
+  && CC="$CC" CFLAGS="$CFLAGS" ./configure --prefix=$SYSROOT --static \
   && make -j$(nproc) \
   && make install
 
