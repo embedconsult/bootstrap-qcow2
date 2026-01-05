@@ -21,7 +21,7 @@ describe Bootstrap::DockerSysrootBuilder do
 
   it "serializes a data-driven manifest for the container coordinator" do
     manifest = Bootstrap::DockerSysrootBuilder.new.manifest_json
-    manifest.includes?("llvm-project").should be_true
+    manifest.includes?("compiler-rt-builtins").should be_true
     manifest.includes?("checksum").should be_true
     manifest.includes?("recipe").should be_true
   end
