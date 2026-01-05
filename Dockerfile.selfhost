@@ -6,6 +6,7 @@ ARG MAKE_VERSION=4.4
 ARG ZLIB_VERSION=1.3.1
 ARG OPENSSL_VERSION=3.3.1
 ARG LIBRESSL_VERSION=3.9.2
+ARG LIBATOMIC_OPS_VERSION=7.8.0
 ARG LIBFFI_VERSION=3.4.6
 ARG LIBEVENT_VERSION=2.1.12-stable
 ARG LIBYAML_VERSION=0.2.5
@@ -19,17 +20,9 @@ RUN apk add --no-cache \
   build-base \
   git \
   cmake \
-  ninja \
-  python3 \
   curl \
   tar \
   xz \
-  bison \
-  flex \
-  libxml2-dev \
-  zlib-dev \
-  libedit-dev \
-  ncurses-dev \
   linux-headers \
   ca-certificates
 
@@ -48,7 +41,7 @@ RUN curl -L "https://musl.libc.org/releases/musl-${MUSL_VERSION}.tar.gz" -o musl
 
 # Stage 2: build foundational libs into the sysroot
 FROM musl AS libs
-ARG ZLIB_VERSION OPENSSL_VERSION LIBRESSL_VERSION LIBFFI_VERSION LIBEVENT_VERSION LIBYAML_VERSION PCRE2_VERSION BDWGC_VERSION GMP_VERSION
+ARG ZLIB_VERSION OPENSSL_VERSION LIBRESSL_VERSION LIBATOMIC_OPS_VERSION LIBFFI_VERSION LIBEVENT_VERSION LIBYAML_VERSION PCRE2_VERSION BDWGC_VERSION GMP_VERSION
 ENV CC="/usr/bin/gcc" \
     CXX="/usr/bin/g++" \
     SYSROOT=/opt/sysroot \
@@ -106,7 +99,7 @@ RUN curl -L "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${PCR
 
 # bdwgc
 RUN curl -L "https://github.com/ivmai/bdwgc/releases/download/v${BDWGC_VERSION}/gc-${BDWGC_VERSION}.tar.gz" -o bdwgc.tar.gz \
-  && curl -L "https://github.com/ivmai/libatomic_ops/releases/download/v${BDWGC_VERSION}/libatomic_ops-${BDWGC_VERSION}.tar.gz" -o libatomic.tar.gz \
+  && curl -L "https://github.com/ivmai/libatomic_ops/releases/download/v${LIBATOMIC_OPS_VERSION}/libatomic_ops-${LIBATOMIC_OPS_VERSION}.tar.gz" -o libatomic.tar.gz \
   && tar xf bdwgc.tar.gz && tar xf libatomic.tar.gz \
   && cd gc-${BDWGC_VERSION} \
   && mkdir -p libatomic_ops && tar xf ../libatomic.tar.gz -C libatomic_ops --strip-components=1 \
@@ -130,7 +123,7 @@ WORKDIR /opt/src
 RUN curl -L "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/llvm-project-${LLVM_VERSION}.src.tar.xz" -o llvm.tar.xz \
   && tar xf llvm.tar.xz \
   && cmake -S llvm-project-${LLVM_VERSION}.src/llvm -B build-llvm \
-    -G Ninja \
+    -G "Unix Makefiles" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/opt/llvm \
     -DLLVM_ENABLE_PROJECTS="clang;lld" \
