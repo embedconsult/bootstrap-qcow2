@@ -5,8 +5,8 @@ describe Bootstrap::DockerSysrootBuilder do
     builder = Bootstrap::DockerSysrootBuilder.new
     names = builder.packages.map(&.name)
     %w(
-      m4 musl cmake busybox make zlib libressl libatomic compiler-rt-builtins
-      clang lld bdwgc pcre2 gmp libiconv libxml2 libyaml libffi
+      m4 musl cmake busybox make zlib libressl libatomic llvm-project
+      bdwgc pcre2 gmp libiconv libxml2 libyaml libffi
     ).each do |pkg|
       names.includes?(pkg).should be_true
     end
@@ -21,7 +21,7 @@ describe Bootstrap::DockerSysrootBuilder do
 
   it "serializes a data-driven manifest for the container coordinator" do
     manifest = Bootstrap::DockerSysrootBuilder.new.manifest_json
-    manifest.includes?("compiler-rt-builtins").should be_true
+    manifest.includes?("llvm-project").should be_true
     manifest.includes?("checksum").should be_true
     manifest.includes?("recipe").should be_true
   end
