@@ -7,7 +7,6 @@ ARG ZLIB_VERSION=1.3.1
 ARG LIBRESSL_VERSION=3.9.2
 ARG LIBATOMIC_OPS_VERSION=7.8.0
 ARG LIBFFI_VERSION=3.4.6
-ARG LIBEVENT_VERSION=2.1.12-stable
 ARG LIBYAML_VERSION=0.2.5
 ARG PCRE2_VERSION=10.44
 ARG BDWGC_VERSION=8.2.6
@@ -42,7 +41,7 @@ RUN curl -L "https://musl.libc.org/releases/musl-${MUSL_VERSION}.tar.gz" -o musl
 
 # Stage 2: build foundational libs into the sysroot
 FROM musl AS libs
-ARG ZLIB_VERSION LIBRESSL_VERSION LIBATOMIC_OPS_VERSION LIBFFI_VERSION LIBEVENT_VERSION LIBYAML_VERSION PCRE2_VERSION BDWGC_VERSION GMP_VERSION
+ARG ZLIB_VERSION LIBRESSL_VERSION LIBATOMIC_OPS_VERSION LIBFFI_VERSION LIBYAML_VERSION PCRE2_VERSION BDWGC_VERSION GMP_VERSION
 ENV CC="/usr/bin/clang" \
     CXX="/usr/bin/clang++" \
     SYSROOT=/opt/sysroot \
@@ -71,14 +70,6 @@ RUN curl -L "https://github.com/libffi/libffi/releases/download/v${LIBFFI_VERSIO
   && tar xf libffi.tar.gz \
   && cd libffi-${LIBFFI_VERSION} \
   && ./configure --prefix=$SYSROOT --disable-shared --enable-static --with-pic \
-  && make -j$(nproc) \
-  && make install
-
-# libevent
-RUN curl -L "https://github.com/libevent/libevent/releases/download/release-${LIBEVENT_VERSION}/libevent-${LIBEVENT_VERSION}.tar.gz" -o libevent.tar.gz \
-  && tar xf libevent.tar.gz \
-  && cd libevent-${LIBEVENT_VERSION} \
-  && ./configure --prefix=$SYSROOT --disable-shared --enable-static \
   && make -j$(nproc) \
   && make install
 
