@@ -19,7 +19,7 @@ module Bootstrap
       @command : String,
       @args : Array(String) = [] of String,
       @chdir : String? = nil,
-      @env : Hash(String, String)? = nil
+      @env : Hash(String, String)? = nil,
     )
     end
   end
@@ -42,7 +42,7 @@ module Bootstrap
       @recipe : String,
       @destination : String = "/opt/sysroot",
       @checksum : String? = nil,
-      @steps : Array(BuildStep)? = nil
+      @steps : Array(BuildStep)? = nil,
     )
     end
 
@@ -73,7 +73,7 @@ module Bootstrap
       cache_dir : String = File.join("data", "cache", "sources"),
       context_dir : String = File.join("data", "sysroot-image"),
       image_tag : String = DEFAULT_DOCKER_TAG,
-      packages : Array(SourcePackage) = DockerSysrootBuilder.default_packages
+      packages : Array(SourcePackage) = DockerSysrootBuilder.default_packages,
     )
       @cache_dir = cache_dir
       @context_dir = context_dir
@@ -84,7 +84,7 @@ module Bootstrap
 
     def self.default_packages : Array(SourcePackage)
       prefix = DEFAULT_PREFIX
-      autotools = ->{ default_autotools_steps(prefix) }
+      autotools = -> { default_autotools_steps(prefix) }
 
       [
         SourcePackage.new(
@@ -109,7 +109,7 @@ module Bootstrap
           steps: [
             BuildStep.new(command: "./bootstrap", args: ["--parallel={jobs}", "--prefix=#{prefix}"]),
             BuildStep.new(command: "make", args: ["-j{jobs}"]),
-            BuildStep.new(command: "make", args: ["install"])
+            BuildStep.new(command: "make", args: ["install"]),
           ]
         ),
         SourcePackage.new(
@@ -120,7 +120,7 @@ module Bootstrap
           steps: [
             BuildStep.new(command: "make", args: ["defconfig"]),
             BuildStep.new(command: "make", args: ["CONFIG_PREFIX=#{prefix}", "-j{jobs}"]),
-            BuildStep.new(command: "make", args: ["CONFIG_PREFIX=#{prefix}", "install"])
+            BuildStep.new(command: "make", args: ["CONFIG_PREFIX=#{prefix}", "install"]),
           ]
         ),
         SourcePackage.new(
@@ -220,7 +220,7 @@ module Bootstrap
           source_uri: "https://github.com/libffi/libffi/releases/download/v3.4.6/libffi-3.4.6.tar.gz",
           recipe: "autotools",
           steps: autotools.call
-        )
+        ),
       ]
     end
 
@@ -600,14 +600,14 @@ module Bootstrap
       [
         BuildStep.new(command: "./configure", args: ["--prefix=#{prefix}"]),
         BuildStep.new(command: "make", args: ["-j{jobs}"]),
-        BuildStep.new(command: "make", args: ["install"])
+        BuildStep.new(command: "make", args: ["install"]),
       ]
     end
 
     private def self.default_cmake_steps(prefix = DEFAULT_PREFIX) : Array(BuildStep)
       [
         BuildStep.new(command: "cmake", args: ["-S", ".", "-B", "build", "-DCMAKE_INSTALL_PREFIX=#{prefix}", "-DCMAKE_BUILD_TYPE=Release"]),
-        BuildStep.new(command: "cmake", args: ["--build", "build", "--target", "install", "--", "-j{jobs}"])
+        BuildStep.new(command: "cmake", args: ["--build", "build", "--target", "install", "--", "-j{jobs}"]),
       ]
     end
 
@@ -637,7 +637,7 @@ module Bootstrap
         BuildStep.new(
           command: "cmake",
           args: ["--build", "build", "--target", "install", "--", "-j{jobs}"]
-        )
+        ),
       ]
     end
   end
