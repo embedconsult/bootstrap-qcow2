@@ -46,6 +46,7 @@ ARG ZLIB_VERSION LIBRESSL_VERSION LIBATOMIC_OPS_VERSION LIBFFI_VERSION LIBYAML_V
 ENV CC="/usr/bin/clang" \
     CXX="/usr/bin/clang++" \
     SYSROOT=/opt/sysroot \
+    PATH="/opt/sysroot/bin:/usr/bin:/bin" \
     CFLAGS="-I/opt/sysroot/include -O2" \
     LDFLAGS="-L/opt/sysroot/lib"
 WORKDIR /opt/src
