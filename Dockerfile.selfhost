@@ -3,6 +3,7 @@ ARG MUSL_VERSION=1.2.5
 ARG LLVM_VERSION=18.1.8
 ARG BUSYBOX_VERSION=1.36.1
 ARG MAKE_VERSION=4.4
+ARG M4_VERSION=1.4.19
 ARG ZLIB_VERSION=1.3.1
 ARG LIBRESSL_VERSION=3.9.2
 ARG LIBATOMIC_OPS_VERSION=7.8.0
@@ -45,7 +46,7 @@ ARG ZLIB_VERSION LIBRESSL_VERSION LIBATOMIC_OPS_VERSION LIBFFI_VERSION LIBYAML_V
 ENV CC="/usr/bin/clang" \
     CXX="/usr/bin/clang++" \
     SYSROOT=/opt/sysroot \
-    CFLAGS="-I/opt/sysroot/include -O2 -D__AARCH64EB__=0" \
+    CFLAGS="-I/opt/sysroot/include -O2" \
     LDFLAGS="-L/opt/sysroot/lib"
 WORKDIR /opt/src
 
@@ -86,6 +87,14 @@ RUN curl -L "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${PCR
   && tar xf pcre2.tar.gz \
   && cd pcre2-${PCRE2_VERSION} \
   && ./configure --prefix=$SYSROOT --disable-shared --enable-static --enable-jit=no \
+  && make -j$(nproc) \
+  && make install
+
+# m4 (needed by gmp)
+RUN curl -L "https://ftp.gnu.org/gnu/m4/m4-${M4_VERSION}.tar.gz" -o m4.tar.gz \
+  && tar xf m4.tar.gz \
+  && cd m4-${M4_VERSION} \
+  && CC="$CC" CFLAGS="$CFLAGS" ./configure --prefix=$SYSROOT --disable-shared --enable-static \
   && make -j$(nproc) \
   && make install
 
