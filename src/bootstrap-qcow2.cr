@@ -1,5 +1,6 @@
 # TODO: Write documentation for `Bootstrap::Qcow2`
 require "log"
+require "./sysroot_builder"
 
 module Bootstrap
   VERSION = "0.1.0"
