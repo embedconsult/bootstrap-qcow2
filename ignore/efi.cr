@@ -24,7 +24,7 @@ lib LibEfi
     WarnFileSystem
     WarnResetRequired
 
-    LoadError           = 0x8000_0000_0000_0001
+    LoadError           = 0x8000_0000_0000_0001_u64
     InvalidParameter
     Unsupported
     BadBufferSize
@@ -53,7 +53,7 @@ lib LibEfi
     CrcError
     EndOfMedia
 
-    EndOfFile         = 0x8000_0000_0000_001F
+    EndOfFile         = 0x8000_0000_0000_001F_u64
     InvalidLanguage
     CompromisedData
     IpAddressConflict
