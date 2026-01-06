@@ -433,6 +433,7 @@ module Bootstrap
       TarWriter.write_gz(source, output)
     rescue ex
       Log.warn { "Falling back to system tar due to: #{ex.message}" }
+      File.delete?(output)
       status = Process.run("tar", ["-czf", output.to_s, "-C", source.to_s, "."])
       raise "Failed to create tarball with system tar" unless status.success?
     end
@@ -559,7 +560,10 @@ module Bootstrap
     private struct TarWriter
       HEADER_SIZE = 512
 
+      class LongPathError < Exception; end
+
       def self.write_gz(source : Path, output : Path)
+        assert_paths_fit(source)
         File.open(output, "w") do |file|
           Compress::Gzip::Writer.open(file) do |gzip|
             writer = new(gzip, source)
@@ -572,14 +576,8 @@ module Bootstrap
       end
 
       def write_all
-        had_long_path = false
         walk(@source) do |entry, stat|
           relative = Path.new(entry).relative_to(@source).to_s
-          if relative.bytesize > 99
-            had_long_path = true
-            next
-          end
-
           if stat.directory?
             write_header(relative, 0_i64, stat, '5')
           elsif stat.symlink?
@@ -594,7 +592,6 @@ module Bootstrap
           end
         end
         @io.write(Bytes.new(HEADER_SIZE * 2, 0))
-        raise "Tarball omitted long paths; rerun with system tar" if had_long_path
       end
 
       private def walk(path : Path, &block : Path, File::Info ->)
@@ -607,6 +604,7 @@ module Bootstrap
       end
 
       private def write_header(name : String, size : Int64, stat : File::Info, typeflag : Char, linkname : String = "")
+        raise LongPathError.new("Path too long for tar header: #{name}") if name.bytesize > 99
         header = Bytes.new(HEADER_SIZE, 0)
         write_string(header, 0, 100, name)
         write_octal(header, 100, 8, stat.permissions.value)
@@ -648,6 +646,13 @@ module Bootstrap
         remainder = size % HEADER_SIZE
         pad = remainder.zero? ? 0 : HEADER_SIZE - remainder
         @io.write(Bytes.new(pad, 0)) if pad > 0
+      end
+
+      private def self.assert_paths_fit(source : Path)
+        Dir.glob(["#{source}/**/*"], match: File::MatchOptions::DotFiles).each do |entry|
+          rel = Path.new(entry).relative_to(source).to_s
+          raise LongPathError.new("Path too long for tar header: #{rel}") if rel.bytesize > 99
+        end
       end
     end
   end
