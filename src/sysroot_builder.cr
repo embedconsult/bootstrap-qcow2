@@ -316,7 +316,7 @@ module Bootstrap
     #   /var/lib holds the build plan)
     # * stages the coordinator entrypoints
     # Returns the rootfs path on success.
-    def prepare_rootfs(base_rootfs : PackageSpec = base_rootfs_spec) : Path
+    def prepare_rootfs(base_rootfs : PackageSpec = base_rootfs_spec, include_sources : Bool = true) : Path
       FileUtils.rm_rf(rootfs_dir)
       FileUtils.mkdir_p(rootfs_dir)
 
@@ -324,7 +324,7 @@ module Bootstrap
       extract_tarball(tarball, rootfs_dir)
       FileUtils.mkdir_p(rootfs_dir / "workspace")
       FileUtils.mkdir_p(rootfs_dir / "var/lib")
-      stage_sources
+      stage_sources if include_sources
       install_coordinator_source
       rootfs_dir
     end
@@ -387,8 +387,8 @@ module Bootstrap
 
     # Produce a gzipped tarball of the prepared rootfs so it can be consumed by
     # tooling that expects a chroot-able environment.
-    def generate_chroot_tarball(output : Path) : Path
-      prepare_rootfs
+    def generate_chroot_tarball(output : Path, include_sources : Bool = true) : Path
+      prepare_rootfs(include_sources: include_sources)
       write_plan
       FileUtils.mkdir_p(output.parent) if output.parent
       write_tar_gz(rootfs_dir, output)

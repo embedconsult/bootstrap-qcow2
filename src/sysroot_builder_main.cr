@@ -10,6 +10,7 @@ module Bootstrap
       architecture = SysrootBuilder::DEFAULT_ARCH
       branch = SysrootBuilder::DEFAULT_BRANCH
       base_version = SysrootBuilder::DEFAULT_BASE_VERSION
+      include_sources = true
 
       OptionParser.parse do |parser|
         parser.banner = "Usage: crystal run src/sysroot_builder_main.cr -- [options]"
@@ -18,11 +19,12 @@ module Bootstrap
         parser.on("-a ARCH", "--arch=ARCH", "Target architecture (default: #{architecture})") { |val| architecture = val }
         parser.on("-b BRANCH", "--branch=BRANCH", "Source branch/release tag (default: #{branch})") { |val| branch = val }
         parser.on("-v VERSION", "--base-version=VERSION", "Base rootfs version/tag (default: #{base_version})") { |val| base_version = val }
+        parser.on("--skip-sources", "Skip staging source archives into the rootfs") { include_sources = false }
         parser.on("-h", "--help", "Show this help") { puts parser; exit }
       end
 
       builder = SysrootBuilder.new(workspace, architecture, branch, base_version)
-      builder.generate_chroot_tarball(output)
+      builder.generate_chroot_tarball(output, include_sources: include_sources)
       puts "Generated sysroot tarball at #{output}"
     end
   end

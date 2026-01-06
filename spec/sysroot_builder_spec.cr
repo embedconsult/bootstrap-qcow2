@@ -18,6 +18,8 @@ end
 class StubBuilder < Bootstrap::SysrootBuilder
   property fake_tarball : Path?
   property override_packages : Array(Bootstrap::SysrootBuilder::PackageSpec) = [] of Bootstrap::SysrootBuilder::PackageSpec
+  property skip_stage_sources : Bool = false
+  property stage_sources_calls : Int32 = 0
 
   def packages : Array(Bootstrap::SysrootBuilder::PackageSpec)
     override_packages.empty? ? super : override_packages
@@ -25,6 +27,12 @@ class StubBuilder < Bootstrap::SysrootBuilder
 
   def download_and_verify(pkg : Bootstrap::SysrootBuilder::PackageSpec) : Path
     return fake_tarball.not_nil! if fake_tarball
+    super
+  end
+
+  def stage_sources : Nil
+    @stage_sources_calls += 1
+    return if skip_stage_sources
     super
   end
 end
@@ -150,6 +158,40 @@ describe Bootstrap::SysrootBuilder do
       rootfs = builder.prepare_rootfs
       File.exists?(rootfs / "workspace").should be_true
       File.exists?(rootfs / "usr/local/bin/sysroot_runner_main.cr").should be_true
+    end
+  end
+
+  it "can skip staging sources on request" do
+    with_tempdir do |dir|
+      tar_dir = dir / "tarroot"
+      FileUtils.mkdir_p(tar_dir)
+      File.write(tar_dir / "etc.txt", "config")
+      tarball = dir / "miniroot.tar"
+      Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
+
+      builder = StubBuilder.new(dir)
+      builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
+      builder.fake_tarball = tarball
+      builder.prepare_rootfs(include_sources: false)
+      builder.stage_sources_calls.should eq 0
+    end
+  end
+
+  it "stages sources into the workspace when enabled" do
+    with_tempdir do |dir|
+      tar_dir = dir / "tarroot"
+      FileUtils.mkdir_p(tar_dir)
+      File.write(tar_dir / "etc.txt", "config")
+      tarball = dir / "miniroot.tar"
+      Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
+
+      pkg = Bootstrap::SysrootBuilder::PackageSpec.new("pkg", "1.0", URI.parse("https://example.com/pkg.tar"))
+      builder = StubBuilder.new(dir)
+      builder.override_packages = [pkg]
+      builder.fake_tarball = tarball
+      builder.prepare_rootfs(include_sources: true)
+      builder.stage_sources_calls.should eq 1
+      Dir.children(builder.rootfs_dir / "workspace").should_not be_empty
     end
   end
 

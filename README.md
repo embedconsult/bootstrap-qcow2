@@ -16,6 +16,7 @@ Generate a chrootable sysroot tarball (default workspace: `data/sysroot`) with t
 ```bash
 crystal run src/sysroot_builder_main.cr -- --output sysroot.tar.gz
 ```
+Pass `--skip-sources` to omit cached source archives when you only need the base rootfs and coordinator.
 
 The tarball includes:
 - Alpine minirootfs 3.23.2 (aarch64 by default)
