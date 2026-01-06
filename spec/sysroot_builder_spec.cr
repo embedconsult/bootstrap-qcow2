@@ -68,7 +68,7 @@ describe Bootstrap::SysrootBuilder do
   it "lists default packages" do
     names = Bootstrap::SysrootBuilder.new.packages.map(&.name)
     names.should contain("musl")
-    names.should contain("llvm")
+    names.should contain("llvm-project")
   end
 
   it "computes hashes" do

@@ -185,7 +185,7 @@ module Bootstrap
           File.delete(target) if File.exists?(target)
           raise error if idx == attempts - 1
           Log.warn { "Retrying #{pkg.name} after error: #{error.message}" }
-          sleep 2
+          sleep 2.seconds
         end
       end
       target
@@ -431,6 +431,10 @@ module Bootstrap
 
     private def write_tar_gz(source : Path, output : Path) : Nil
       TarWriter.write_gz(source, output)
+    rescue ex
+      Log.warn { "Falling back to system tar due to: #{ex.message}" }
+      status = Process.run("tar", ["-czf", output.to_s, "-C", source.to_s, "."])
+      raise "Failed to create tarball with system tar" unless status.success?
     end
 
     private def build_commands_for(pkg : PackageSpec, sysroot_prefix : String, cpus : Int32) : Array(Array(String))
@@ -568,9 +572,13 @@ module Bootstrap
       end
 
       def write_all
+        had_long_path = false
         walk(@source) do |entry, stat|
           relative = Path.new(entry).relative_to(@source).to_s
-          raise "Path too long for tar header: #{relative}" if relative.bytesize > 99
+          if relative.bytesize > 99
+            had_long_path = true
+            next
+          end
 
           if stat.directory?
             write_header(relative, 0_i64, stat, '5')
@@ -586,6 +594,7 @@ module Bootstrap
           end
         end
         @io.write(Bytes.new(HEADER_SIZE * 2, 0))
+        raise "Tarball omitted long paths; rerun with system tar" if had_long_path
       end
 
       private def walk(path : Path, &block : Path, File::Info ->)
