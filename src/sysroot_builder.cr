@@ -238,39 +238,12 @@ module Bootstrap
     def install_coordinator_source : Path
       coordinator_path = rootfs_dir / "usr/local/bin/sysroot-runner.cr"
       FileUtils.mkdir_p(coordinator_path.parent)
-      File.write(coordinator_path, coordinator_source)
+      FileUtils.cp(coordinator_source_path, coordinator_path)
       coordinator_path
     end
 
-    def coordinator_source : String
-      String.build do |io|
-        io.puts %(require "json")
-        io.puts %(require "log")
-        io.puts %(require "file_utils")
-        io.puts %(require "process")
-        io.puts
-        io.puts %(Log.setup("*", Log::Severity::Info))
-        io.puts
-        io.puts "struct BuildStep"
-        io.puts "  include JSON::Serializable"
-        io.puts "  property name : String"
-        io.puts "  property commands : Array(Array(String))"
-        io.puts "  property workdir : String"
-        io.puts "end"
-        io.puts
-        io.puts %(steps_file = "/var/lib/sysroot-build-plan.json")
-        io.puts %(raise "Missing build plan \#{steps_file}" unless File.exists?(steps_file))
-        io.puts
-        io.puts "steps = Array(BuildStep).from_json(File.read(steps_file))"
-        io.puts "steps.each do |step|"
-        io.puts %(  Log.info { "Building \#{step.name} in \#{step.workdir}" })
-        io.puts "  step.commands.each do |argv|"
-        io.puts %(    status = Process.run(argv[0], argv[1..], chdir: step.workdir))
-        io.puts %(    raise "Command failed (\#{status.exit_status}): \#{argv.join(" ")}" unless status.success?)
-        io.puts "  end"
-        io.puts "end"
-        io.puts %(Log.info { "All sysroot components rebuilt" })
-      end
+    def coordinator_source_path : Path
+      Path.new(__DIR__).join("sysroot_runner.cr")
     end
 
     def build_plan : Array(BuildStep)
