@@ -195,17 +195,23 @@ module Bootstrap
     def sha256(path : Path) : String
       digest = Digest::SHA256.new
       File.open(path) do |file|
-        IO.copy(file, digest)
+        buffer = Bytes.new(4096)
+        while (read = file.read(buffer)) > 0
+          digest.update(buffer[0, read])
+        end
       end
-      digest.hexdigest
+      digest.final.hexstring
     end
 
     def crc32(path : Path) : String
       digest = Digest::CRC32.new
       File.open(path) do |file|
-        IO.copy(file, digest)
+        buffer = Bytes.new(4096)
+        while (read = file.read(buffer)) > 0
+          digest.update(buffer[0, read])
+        end
       end
-      digest.hexdigest
+      digest.final.hexstring
     end
 
     def write_checksum(pkg : PackageSpec, sha : String, crc : String) : Nil
@@ -236,14 +242,23 @@ module Bootstrap
     end
 
     def install_coordinator_source : Path
-      coordinator_path = rootfs_dir / "usr/local/bin/sysroot-runner.cr"
-      FileUtils.mkdir_p(coordinator_path.parent)
-      FileUtils.cp(coordinator_source_path, coordinator_path)
-      coordinator_path
+      coordinator_dir = rootfs_dir / "usr/local/bin"
+      FileUtils.mkdir_p(coordinator_dir)
+      coordinator_support_files.each do |source|
+        FileUtils.cp(source, coordinator_dir / File.basename(source))
+      end
+      coordinator_dir / "sysroot_runner_main.cr"
     end
 
     def coordinator_source_path : Path
-      Path.new(__DIR__).join("sysroot_runner.cr")
+      Path.new(__DIR__).join("sysroot_runner_main.cr")
+    end
+
+    def coordinator_support_files : Array(Path)
+      [
+        Path.new(__DIR__).join("sysroot_runner_main.cr"),
+        Path.new(__DIR__).join("sysroot_runner_lib.cr"),
+      ]
     end
 
     def build_plan : Array(BuildStep)
@@ -284,23 +299,21 @@ module Bootstrap
       write_plan
       FileUtils.mkdir_p(output.parent) if output.parent
       status = Process.run("tar", ["-czf", output.to_s, "-C", rootfs_dir.to_s, "."])
-      raise "Failed to create chroot tarball: #{status.exit_status}" unless status.success?
+      raise "Failed to create chroot tarball: #{status.exit_code}" unless status.success?
       output
     end
 
-    def rebuild_in_chroot
-      coordinator = "/usr/local/bin/sysroot-runner"
-      if File.exists?(rootfs_dir / coordinator)
-        args = ["chroot", rootfs_dir.to_s, coordinator]
-      else
-        source = rootfs_dir / "usr/local/bin/sysroot-runner.cr"
-        status = Process.run("chroot", [rootfs_dir.to_s, "crystal", "run", source.to_s])
-        raise "Failed to run coordinator inside chroot" unless status.success?
-        return
+    def rebuild_in_chroot(dry_run : Bool = false)
+      coordinator = "/usr/local/bin/sysroot_runner_main.cr"
+      unless File.exists?(rootfs_dir / coordinator)
+        raise "Coordinator not installed at #{coordinator}"
       end
 
+      args = ["chroot", rootfs_dir.to_s, "crystal", "run", coordinator]
+      return args if dry_run
+
       status = Process.run(args[0], args[1..])
-      raise "Failed to rebuild packages in chroot" unless status.success?
+      raise "Failed to rebuild packages in chroot (#{status.exit_code})" unless status.success?
     end
 
     private def strip_archive_extension(filename : String) : String
