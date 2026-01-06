@@ -137,14 +137,10 @@ module Bootstrap
         PackageSpec.new("zlib", DEFAULT_ZLIB, URI.parse("https://zlib.net/zlib-#{DEFAULT_ZLIB}.tar.gz")),
         PackageSpec.new("libressl", DEFAULT_LIBRESSL, URI.parse("https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-#{DEFAULT_LIBRESSL}.tar.gz")),
         PackageSpec.new("libatomic_ops", "7.8.2", URI.parse("https://github.com/ivmai/libatomic_ops/releases/download/v7.8.2/libatomic_ops-7.8.2.tar.gz")),
-        PackageSpec.new("llvm", DEFAULT_LLVM_VER, URI.parse("#{llvm_url}/llvm-#{DEFAULT_LLVM_VER}.src.tar.xz"), strategy: "llvm", extra_urls: [
-          URI.parse("#{llvm_url}/clang-#{DEFAULT_LLVM_VER}.src.tar.xz"),
-          URI.parse("#{llvm_url}/lld-#{DEFAULT_LLVM_VER}.src.tar.xz"),
-          URI.parse("#{llvm_url}/compiler-rt-#{DEFAULT_LLVM_VER}.src.tar.xz"),
-        ]),
+        PackageSpec.new("llvm-project", DEFAULT_LLVM_VER, URI.parse("https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-#{DEFAULT_LLVM_VER}.tar.gz"), strategy: "llvm"),
         PackageSpec.new("bdwgc", DEFAULT_BDWGC, URI.parse("https://github.com/ivmai/bdwgc/releases/download/v#{DEFAULT_BDWGC}/gc-#{DEFAULT_BDWGC}.tar.gz")),
         PackageSpec.new("pcre2", DEFAULT_PCRE2, URI.parse("https://github.com/PhilipHazel/pcre2/releases/download/pcre2-#{DEFAULT_PCRE2}/pcre2-#{DEFAULT_PCRE2}.tar.gz")),
-        PackageSpec.new("gmp", DEFAULT_GMP, URI.parse("https://gmplib.org/download/gmp/gmp-#{DEFAULT_GMP}.tar.xz")),
+        PackageSpec.new("gmp", DEFAULT_GMP, URI.parse("https://ftp.gnu.org/gnu/gmp/gmp-#{DEFAULT_GMP}.tar.xz")),
         PackageSpec.new("libiconv", DEFAULT_LIBICONV, URI.parse("https://ftp.gnu.org/pub/gnu/libiconv/libiconv-#{DEFAULT_LIBICONV}.tar.gz")),
         PackageSpec.new("libxml2", DEFAULT_LIBXML2, URI.parse("https://download.gnome.org/sources/libxml2/#{DEFAULT_LIBXML2.split('.')[0...-1].join(".")}/libxml2-#{DEFAULT_LIBXML2}.tar.xz")),
         PackageSpec.new("libyaml", DEFAULT_LIBYAML, URI.parse("https://pyyaml.org/download/libyaml/yaml-#{DEFAULT_LIBYAML}.tar.gz")),
@@ -169,7 +165,7 @@ module Bootstrap
     # its checksum before returning the cached path.
     def download_and_verify(pkg : PackageSpec) : Path
       target = sources_dir / pkg.filename
-      attempts = 2
+      attempts = 3
       attempts.times do |idx|
         begin
           if File.exists?(target)
@@ -189,6 +185,7 @@ module Bootstrap
           File.delete(target) if File.exists?(target)
           raise error if idx == attempts - 1
           Log.warn { "Retrying #{pkg.name} after error: #{error.message}" }
+          sleep 2
         end
       end
       target
@@ -545,7 +542,7 @@ module Bootstrap
       end
 
       private def octal_to_i(bytes : Bytes) : Int64
-        cleaned = String.new(bytes).tr("\0", "").strip
+        cleaned = String.new(bytes).tr("\0", "").strip.gsub(/[^0-7]/, "")
         cleaned.empty? ? 0_i64 : cleaned.to_i64(8)
       end
 
