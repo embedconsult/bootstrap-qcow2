@@ -243,34 +243,34 @@ module Bootstrap
     end
 
     def coordinator_source : String
-      <<-CR
-        require "json"
-        require "log"
-        require "file_utils"
-        require "process"
-
-        Log.setup("*", Log::Severity::Info)
-
-        struct BuildStep
-          include JSON::Serializable
-          property name : String
-          property commands : Array(Array(String))
-          property workdir : String
-        end
-
-        steps_file = "/var/lib/sysroot-build-plan.json"
-        raise "Missing build plan \#{steps_file}" unless File.exists?(steps_file)
-
-        steps = Array(BuildStep).from_json(File.read(steps_file))
-        steps.each do |step|
-          Log.info { "Building \#{step.name} in \#{step.workdir}" }
-          step.commands.each do |argv|
-            status = Process.run(argv[0], argv[1..], chdir: step.workdir)
-            raise "Command failed (\#{status.exit_status}): \#{argv.join(" ")}" unless status.success?
-          end
-        end
-        Log.info { "All sysroot components rebuilt" }
-      CR
+      String.build do |io|
+        io.puts %(require "json")
+        io.puts %(require "log")
+        io.puts %(require "file_utils")
+        io.puts %(require "process")
+        io.puts
+        io.puts %(Log.setup("*", Log::Severity::Info))
+        io.puts
+        io.puts "struct BuildStep"
+        io.puts "  include JSON::Serializable"
+        io.puts "  property name : String"
+        io.puts "  property commands : Array(Array(String))"
+        io.puts "  property workdir : String"
+        io.puts "end"
+        io.puts
+        io.puts %(steps_file = "/var/lib/sysroot-build-plan.json")
+        io.puts %(raise "Missing build plan \#{steps_file}" unless File.exists?(steps_file))
+        io.puts
+        io.puts "steps = Array(BuildStep).from_json(File.read(steps_file))"
+        io.puts "steps.each do |step|"
+        io.puts %(  Log.info { "Building \#{step.name} in \#{step.workdir}" })
+        io.puts "  step.commands.each do |argv|"
+        io.puts %(    status = Process.run(argv[0], argv[1..], chdir: step.workdir))
+        io.puts %(    raise "Command failed (\#{status.exit_status}): \#{argv.join(" ")}" unless status.success?)
+        io.puts "  end"
+        io.puts "end"
+        io.puts %(Log.info { "All sysroot components rebuilt" })
+      end
     end
 
     def build_plan : Array(BuildStep)
