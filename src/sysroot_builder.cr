@@ -168,11 +168,24 @@ module Bootstrap
     # its checksum before returning the cached path.
     def download_and_verify(pkg : PackageSpec) : Path
       target = sources_dir / pkg.filename
-      return target if File.exists?(target) && verify(pkg, target)
+      attempts = 2
+      attempts.times do |idx|
+        begin
+          if File.exists?(target)
+            return target if verify(pkg, target)
+            File.delete(target)
+          end
 
-      Log.info { "Downloading #{pkg.name} #{pkg.version} from #{pkg.url}" }
-      download_with_redirects(pkg.url, target)
-      verify(pkg, target)
+          Log.info { "Downloading #{pkg.name} #{pkg.version} from #{pkg.url}" }
+          download_with_redirects(pkg.url, target)
+          verify(pkg, target)
+          return target
+        rescue error
+          File.delete(target) if File.exists?(target)
+          raise error if idx == attempts - 1
+          Log.warn { "Retrying #{pkg.name} after error: #{error.message}" }
+        end
+      end
       target
     end
 
@@ -240,27 +253,37 @@ module Bootstrap
     private def download_string_with_redirects(uri : URI, limit : Int32 = 5) : String?
       buffer = IO::Memory.new
       success = false
-      follow_redirects(uri, limit) do |final_uri|
-        HTTP::Client.get(final_uri) do |response|
-          next unless response.success?
-          IO.copy(response.body_io, buffer)
-          success = true
-        end
+      fetch_with_redirects(uri, limit) do |response|
+        next unless response.success?
+        IO.copy(response.body_io, buffer)
+        success = true
       end
       return nil unless success
       normalize_checksum(buffer.to_s)
     end
 
-    private def follow_redirects(uri : URI, limit : Int32, &block : URI ->)
-      raise "Too many redirects for #{uri}" if limit <= 0
-      HTTP::Client.get(uri) do |response|
-        if response.status_code.in?(300..399) && (location = response.headers["Location"]?)
-          next_uri = URI.parse(location).absolute? ? URI.parse(location) : uri.resolve(location)
-          return follow_redirects(next_uri, limit - 1, &block)
-        elsif response.success?
-          yield uri
-        else
-          raise "Failed to fetch #{uri} (#{response.status_code})"
+    private def download_with_redirects(uri : URI, target : Path, limit : Int32 = 5) : Nil
+      File.open(target, "w") do |file|
+        fetch_with_redirects(uri, limit) do |response|
+          raise "Failed to download #{uri} (#{response.status_code})" unless response.success?
+          IO.copy(response.body_io, file)
+        end
+      end
+    end
+
+    private def fetch_with_redirects(uri : URI, limit : Int32 = 5, &block : HTTP::Client::Response ->)
+      current = uri
+      attempts = 0
+      loop do
+        raise "Too many redirects for #{uri}" if attempts > limit
+        attempts += 1
+        HTTP::Client.get(current) do |response|
+          if response.status_code.in?(300..399) && (location = response.headers["Location"]?)
+            next_uri = URI.parse(location).absolute? ? URI.parse(location) : current.resolve(location)
+            current = next_uri
+            next
+          end
+          return yield response
         end
       end
     end
@@ -524,7 +547,8 @@ module Bootstrap
       end
 
       private def octal_to_i(bytes : Bytes) : Int64
-        String.new(bytes).strip.to_i64(8)
+        cleaned = String.new(bytes).tr("\0", "").strip
+        cleaned.empty? ? 0_i64 : cleaned.to_i64(8)
       end
 
       private def header_mode(header : Bytes) : Int32
