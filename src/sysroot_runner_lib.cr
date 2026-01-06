@@ -16,25 +16,61 @@ module Bootstrap
     struct BuildStep
       include JSON::Serializable
       property name : String
-      property commands : Array(Array(String))
+      property strategy : String
       property workdir : String
+      property configure_flags : Array(String)
+      property patches : Array(String)
+      property sysroot_prefix : String
+      property cpus : Int32
 
-      def initialize(@name : String, @commands : Array(Array(String)), @workdir : String)
+      def initialize(@name : String, @strategy : String, @workdir : String, @configure_flags : Array(String), @patches : Array(String), @sysroot_prefix : String, @cpus : Int32)
       end
     end
 
-    # Abstraction for running commands; enables fast unit tests by supplying a
-    # fake runner instead of invoking processes.
+    # Abstraction for running build strategies; enables fast unit tests by
+    # supplying a fake runner instead of invoking processes.
     module CommandRunner
-      abstract def run(argv : Array(String), chdir : String? = nil)
+      abstract def run(step : BuildStep)
     end
 
-    # Default runner that shells out via Process.run.
+    # Default runner that shells out via Process.run using strategy metadata.
     struct SystemRunner
       include CommandRunner
 
-      def run(argv : Array(String), chdir : String? = nil)
-        Process.run(argv[0], argv[1..], chdir: chdir)
+      def run(step : BuildStep)
+        Dir.cd(step.workdir) do
+          apply_patches(step.patches)
+          case step.strategy
+          when "cmake"
+            run_cmd(["./bootstrap", "--prefix=#{step.sysroot_prefix}"])
+            run_cmd(["make", "-j#{step.cpus}"])
+            run_cmd(["make", "install"])
+          when "busybox"
+            run_cmd(["make", "defconfig"])
+            run_cmd(["make", "-j#{step.cpus}"])
+            run_cmd(["make", "CONFIG_PREFIX=#{step.sysroot_prefix}", "install"])
+          when "llvm"
+            run_cmd(["cmake", "-S", ".", "-B", "build", "-DCMAKE_INSTALL_PREFIX=#{step.sysroot_prefix}"] + step.configure_flags)
+            run_cmd(["cmake", "--build", "build", "-j#{step.cpus}"])
+            run_cmd(["cmake", "--install", "build"])
+          else # autotools/default
+            run_cmd(["./configure", "--prefix=#{step.sysroot_prefix}"] + step.configure_flags)
+            run_cmd(["make", "-j#{step.cpus}"])
+            run_cmd(["make", "install"])
+          end
+        end
+      end
+
+      private def apply_patches(patches : Array(String))
+        patches.each do |patch|
+          status = Process.run("patch", ["-p1", "-i", patch])
+          raise "Patch failed (#{status.exit_code}): #{patch}" unless status.success?
+        end
+      end
+
+      private def run_cmd(argv : Array(String))
+        status = Process.run(argv[0], argv[1..])
+        raise "Command failed (#{status.exit_code}): #{argv.join(" ")}" unless status.success?
       end
     end
 
@@ -49,10 +85,7 @@ module Bootstrap
     def self.run_steps(steps : Array(BuildStep), runner : CommandRunner = SystemRunner.new)
       steps.each do |step|
         Log.info { "Building #{step.name} in #{step.workdir}" }
-        step.commands.each do |argv|
-          status = runner.run(argv, step.workdir)
-          raise "Command failed (#{status.exit_code}): #{argv.join(" ")}" unless status.success?
-        end
+        runner.run(step)
       end
       Log.info { "All sysroot components rebuilt" }
     end

@@ -68,7 +68,7 @@ describe Bootstrap::SysrootBuilder do
   it "lists default packages" do
     names = Bootstrap::SysrootBuilder.new.packages.map(&.name)
     names.should contain("musl")
-    names.should contain("clang")
+    names.should contain("llvm")
   end
 
   it "computes hashes" do
@@ -129,7 +129,10 @@ describe Bootstrap::SysrootBuilder do
       builder.override_packages = [pkg]
       plan = builder.build_plan
       plan.size.should eq 1
-      plan.first.commands.first.should eq ["./configure", "--prefix=/opt/sysroot", "--foo"]
+      step = plan.first
+      step.name.should eq "pkg"
+      step.configure_flags.should eq ["--foo"]
+      step.sysroot_prefix.should eq "/opt/sysroot"
     end
   end
 

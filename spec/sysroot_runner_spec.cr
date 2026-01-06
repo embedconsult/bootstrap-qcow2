@@ -1,19 +1,19 @@
 require "./spec_helper"
-require "../src/sysroot_runner_lib"
 require "json"
 
 class RecordingRunner
   include Bootstrap::SysrootRunner::CommandRunner
 
-  getter calls = [] of NamedTuple(argv: Array(String), chdir: String?)
+  getter calls = [] of NamedTuple(name: String, workdir: String, strategy: String)
   property status : Bool = true
   property exit_code : Int32 = 0
 
   def initialize(@status : Bool = true, @exit_code : Int32 = 0)
   end
 
-  def run(argv : Array(String), chdir : String? = nil)
-    @calls << {argv: argv, chdir: chdir}
+  def run(step : Bootstrap::SysrootRunner::BuildStep)
+    @calls << {name: step.name, workdir: step.workdir, strategy: step.strategy}
+    raise "Command failed (#{@exit_code})" unless @status
     FakeStatus.new(@status, @exit_code)
   end
 
@@ -34,20 +34,20 @@ end
 describe Bootstrap::SysrootRunner do
   it "runs steps with a custom runner" do
     steps = [
-      Bootstrap::SysrootRunner::BuildStep.new(name: "a", commands: [["echo", "hi"]], workdir: "/tmp"),
-      Bootstrap::SysrootRunner::BuildStep.new(name: "b", commands: [["true"]], workdir: "/var"),
+      Bootstrap::SysrootRunner::BuildStep.new(name: "a", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String, sysroot_prefix: "/opt/sysroot", cpus: 1),
+      Bootstrap::SysrootRunner::BuildStep.new(name: "b", strategy: "cmake", workdir: "/var", configure_flags: [] of String, patches: [] of String, sysroot_prefix: "/opt/sysroot", cpus: 1),
     ]
 
     runner = RecordingRunner.new
     Bootstrap::SysrootRunner.run_steps(steps, runner)
 
     runner.calls.size.should eq 2
-    runner.calls.first[:argv].should eq ["echo", "hi"]
-    runner.calls.first[:chdir].should eq "/tmp"
+    runner.calls.first[:workdir].should eq "/tmp"
+    runner.calls.last[:strategy].should eq "cmake"
   end
 
   it "raises when a command fails" do
-    steps = [Bootstrap::SysrootRunner::BuildStep.new(name: "fail", commands: [["false"]], workdir: "/tmp")]
+    steps = [Bootstrap::SysrootRunner::BuildStep.new(name: "fail", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String, sysroot_prefix: "/opt/sysroot", cpus: 1)]
     runner = RecordingRunner.new(false, 2)
 
     expect_raises(Exception) do
@@ -56,7 +56,7 @@ describe Bootstrap::SysrootRunner do
   end
 
   it "loads a plan file and executes steps" do
-    steps = [Bootstrap::SysrootRunner::BuildStep.new(name: "file", commands: [["echo", "file"]], workdir: "/opt")]
+    steps = [Bootstrap::SysrootRunner::BuildStep.new(name: "file", strategy: "autotools", workdir: "/opt", configure_flags: [] of String, patches: [] of String, sysroot_prefix: "/opt/sysroot", cpus: 1)]
     runner = RecordingRunner.new
 
     plan_file = File.tempfile("plan")
@@ -67,7 +67,6 @@ describe Bootstrap::SysrootRunner do
 
     Bootstrap::SysrootRunner.run_plan(plan_path, runner)
     runner.calls.size.should eq 1
-    runner.calls.first[:argv].should eq ["echo", "file"]
-    runner.calls.first[:chdir].should eq "/opt"
+    runner.calls.first[:workdir].should eq "/opt"
   end
 end

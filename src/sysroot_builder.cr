@@ -50,9 +50,14 @@ module Bootstrap
       configure_flags : Array(String) = [] of String,
       build_directory : String? = nil,
       strategy : String = "autotools",
-      patches : Array(String) = [] of String do
+      patches : Array(String) = [] of String,
+      extra_urls : Array(URI) = [] of URI do
       def filename : String
         File.basename(url.path)
+      end
+
+      def all_urls : Array(URI)
+        [url] + extra_urls
       end
     end
 
@@ -60,13 +65,14 @@ module Bootstrap
       include JSON::Serializable
 
       getter name : String
-      getter commands : Array(Array(String))
+      getter strategy : String
       getter workdir : String
+      getter configure_flags : Array(String)
+      getter patches : Array(String)
+      getter sysroot_prefix : String
+      getter cpus : Int32
 
-      def initialize(pkg : PackageSpec, commands : Array(Array(String)), workdir : String)
-        @name = pkg.name
-        @commands = commands
-        @workdir = workdir
+      def initialize(@name : String, @strategy : String, @workdir : String, @configure_flags : Array(String), @patches : Array(String), @sysroot_prefix : String, @cpus : Int32)
       end
     end
 
@@ -130,9 +136,11 @@ module Bootstrap
         PackageSpec.new("zlib", DEFAULT_ZLIB, URI.parse("https://zlib.net/zlib-#{DEFAULT_ZLIB}.tar.gz")),
         PackageSpec.new("libressl", DEFAULT_LIBRESSL, URI.parse("https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-#{DEFAULT_LIBRESSL}.tar.gz")),
         PackageSpec.new("libatomic_ops", "7.8.2", URI.parse("https://github.com/ivmai/libatomic_ops/releases/download/v7.8.2/libatomic_ops-7.8.2.tar.gz")),
-        PackageSpec.new("compiler-rt", DEFAULT_LLVM_VER, URI.parse("#{llvm_url}/compiler-rt-#{DEFAULT_LLVM_VER}.src.tar.xz")),
-        PackageSpec.new("clang", DEFAULT_LLVM_VER, URI.parse("#{llvm_url}/clang-#{DEFAULT_LLVM_VER}.src.tar.xz")),
-        PackageSpec.new("lld", DEFAULT_LLVM_VER, URI.parse("#{llvm_url}/lld-#{DEFAULT_LLVM_VER}.src.tar.xz")),
+        PackageSpec.new("llvm", DEFAULT_LLVM_VER, URI.parse("#{llvm_url}/llvm-#{DEFAULT_LLVM_VER}.src.tar.xz"), strategy: "llvm", extra_urls: [
+          URI.parse("#{llvm_url}/clang-#{DEFAULT_LLVM_VER}.src.tar.xz"),
+          URI.parse("#{llvm_url}/lld-#{DEFAULT_LLVM_VER}.src.tar.xz"),
+          URI.parse("#{llvm_url}/compiler-rt-#{DEFAULT_LLVM_VER}.src.tar.xz"),
+        ]),
         PackageSpec.new("bdwgc", DEFAULT_BDWGC, URI.parse("https://github.com/ivmai/bdwgc/releases/download/v#{DEFAULT_BDWGC}/gc-#{DEFAULT_BDWGC}.tar.gz")),
         PackageSpec.new("pcre2", DEFAULT_PCRE2, URI.parse("https://github.com/PhilipHazel/pcre2/releases/download/pcre2-#{DEFAULT_PCRE2}/pcre2-#{DEFAULT_PCRE2}.tar.gz")),
         PackageSpec.new("gmp", DEFAULT_GMP, URI.parse("https://gmplib.org/download/gmp/gmp-#{DEFAULT_GMP}.tar.xz")),
@@ -144,28 +152,32 @@ module Bootstrap
     end
 
     def download_sources : Array(Path)
-      packages.map { |pkg| download_and_verify(pkg) }
+      packages.flat_map { |pkg| download_all(pkg) }
+    end
+
+    # Download all archives for a package (main + extras), verify, and return paths.
+    def download_all(pkg : PackageSpec) : Array(Path)
+      pkg.all_urls.map_with_index do |uri, idx|
+        checksum_uri = idx.zero? ? pkg.checksum_url : URI.parse("#{uri}.sha256") rescue nil
+        logical = idx.zero? ? pkg : pkg_with_url(pkg, uri, checksum_uri)
+        download_and_verify(logical)
+      end
     end
 
     # Download a package tarball (if missing) into the source cache and verify
     # its checksum before returning the cached path.
     def download_and_verify(pkg : PackageSpec) : Path
       target = sources_dir / pkg.filename
-      if File.exists?(target) && verify(pkg, target)
-        Log.debug { "Using cached #{pkg.name} at #{target}" }
-        return target
-      end
+      return target if File.exists?(target) && verify(pkg, target)
 
       Log.info { "Downloading #{pkg.name} #{pkg.version} from #{pkg.url}" }
-      File.open(target, "w") do |file|
-        HTTP::Client.get(pkg.url) do |response|
-          raise "Failed to download #{pkg.url} (#{response.status_code})" unless response.success?
-          IO.copy(response.body_io, file)
-        end
-      end
-
+      download_with_redirects(pkg.url, target)
       verify(pkg, target)
       target
+    end
+
+    private def pkg_with_url(pkg : PackageSpec, url : URI, checksum_url : URI?) : PackageSpec
+      PackageSpec.new(pkg.name, pkg.version, url, pkg.sha256, checksum_url, pkg.configure_flags, pkg.build_directory, pkg.strategy, pkg.patches, [] of URI)
     end
 
     # Validate the downloaded archive against SHA256 and CRC32. If an expected
@@ -206,14 +218,51 @@ module Bootstrap
     # the first whitespace-delimited token.
     def fetch_remote_checksum(pkg : PackageSpec) : String?
       return nil unless uri = pkg.checksum_url
-      HTTP::Client.get(uri) do |response|
-        return normalize_checksum(response.body_io.gets_to_end) if response.success?
-      end
-      nil
+      download_string_with_redirects(uri)
     end
 
     private def normalize_checksum(body : String) : String
       body.strip.split(/\s+/).first
+    end
+
+    private def download_with_redirects(uri : URI, target : Path, limit : Int32 = 5) : Nil
+      current = uri
+      File.open(target, "w") do |file|
+        follow_redirects(current, limit) do |final_uri|
+          HTTP::Client.get(final_uri) do |response|
+            raise "Failed to download #{final_uri} (#{response.status_code})" unless response.success?
+            IO.copy(response.body_io, file)
+          end
+        end
+      end
+    end
+
+    private def download_string_with_redirects(uri : URI, limit : Int32 = 5) : String?
+      buffer = IO::Memory.new
+      success = false
+      follow_redirects(uri, limit) do |final_uri|
+        HTTP::Client.get(final_uri) do |response|
+          next unless response.success?
+          IO.copy(response.body_io, buffer)
+          success = true
+        end
+      end
+      return nil unless success
+      normalize_checksum(buffer.to_s)
+    end
+
+    private def follow_redirects(uri : URI, limit : Int32, &block : URI ->)
+      raise "Too many redirects for #{uri}" if limit <= 0
+      HTTP::Client.get(uri) do |response|
+        if response.status_code.in?(300..399) && (location = response.headers["Location"]?)
+          next_uri = URI.parse(location).absolute? ? URI.parse(location) : uri.resolve(location)
+          return follow_redirects(next_uri, limit - 1, &block)
+        elsif response.success?
+          yield uri
+        else
+          raise "Failed to fetch #{uri} (#{response.status_code})"
+        end
+      end
     end
 
     def sha256(path : Path) : String
@@ -306,8 +355,7 @@ module Bootstrap
       packages.map do |pkg|
         build_directory = pkg.build_directory || strip_archive_extension(pkg.filename)
         build_root = File.join(workdir, build_directory)
-        commands = build_commands_for(pkg, sysroot_prefix, cpus)
-        BuildStep.new(pkg, commands, build_root)
+        BuildStep.new(pkg.name, pkg.strategy, build_root, pkg.configure_flags, pkg.patches, sysroot_prefix, cpus)
       end
     end
 
@@ -368,27 +416,9 @@ module Bootstrap
     end
 
     private def build_commands_for(pkg : PackageSpec, sysroot_prefix : String, cpus : Int32) : Array(Array(String))
-      commands = [] of Array(String)
-      pkg.patches.each do |patch|
-        commands << ["patch", "-p1", "-i", patch]
-      end
-
-      case pkg.strategy
-      when "cmake"
-        commands << ["./bootstrap", "--prefix=#{sysroot_prefix}"]
-        commands << ["make", "-j#{cpus}"]
-        commands << ["make", "install"]
-      when "busybox"
-        commands << ["make", "defconfig"]
-        commands << ["make", "-j#{cpus}"]
-        commands << ["make", "CONFIG_PREFIX=#{sysroot_prefix}", "install"]
-      else # autotools/default
-        commands << ["./configure", "--prefix=#{sysroot_prefix}"] + pkg.configure_flags
-        commands << ["make", "-j#{cpus}"]
-        commands << ["make", "install"]
-      end
-
-      commands
+      # The builder remains data-only: embed strategy metadata and let the runner
+      # translate into concrete commands.
+      Array(Array(String)).new
     end
 
     # Minimal tar extractor/writer implemented in Crystal to avoid shelling out.
@@ -441,7 +471,7 @@ module Bootstrap
           typeflag = header[156].chr
           linkname = cstring(header[157, 100])
 
-          if name.empty? || name == "./"
+          if name.empty? || name == "./" || name.ends_with?("/") || name.starts_with?("././@PaxHeader")
             skip_bytes(size)
             skip_padding(size)
             next
@@ -451,12 +481,13 @@ module Bootstrap
           case typeflag
           when "5" # directory
             FileUtils.mkdir_p(target)
+            File.chmod(target, header_mode(header))
           when "2" # symlink
             FileUtils.mkdir_p(target.parent)
             File.symlink(linkname, target)
           else # regular file
             FileUtils.mkdir_p(target.parent)
-            write_file(target, size)
+            write_file(target, size, header_mode(header))
           end
 
           skip_padding(size)
@@ -473,7 +504,7 @@ module Bootstrap
         @io.skip(skip) if skip > 0
       end
 
-      private def write_file(path : Path, size : Int64)
+      private def write_file(path : Path, size : Int64, mode : Int32)
         File.open(path, "w") do |target_io|
           bytes_left = size
           buffer = Bytes.new(8192)
@@ -485,6 +516,7 @@ module Bootstrap
             bytes_left -= read
           end
         end
+        File.chmod(path, mode)
       end
 
       private def cstring(bytes : Bytes) : String
@@ -493,6 +525,10 @@ module Bootstrap
 
       private def octal_to_i(bytes : Bytes) : Int64
         String.new(bytes).strip.to_i64(8)
+      end
+
+      private def header_mode(header : Bytes) : Int32
+        octal_to_i(header[100, 8]).to_i
       end
     end
 
@@ -514,6 +550,7 @@ module Bootstrap
       def write_all
         walk(@source) do |entry, stat|
           relative = Path.new(entry).relative_to(@source).to_s
+          raise "Path too long for tar header: #{relative}" if relative.bytesize > 99
 
           if stat.directory?
             write_header(relative, 0_i64, stat, '5')
