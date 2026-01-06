@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/jkridner/bootstrap-qcow2/actions/workflows/ci.yml/badge.svg)](https://github.com/jkridner/bootstrap-qcow2/actions/workflows/ci.yml)
 
-Build reproducible QCOW2 and chroot images with Crystal-first tooling. The sysroot builder targets aarch64 by default, caches upstream source tarballs, and stages a chroot that can rebuild the sysroot inside itself using a Crystal coordinator. Alpine’s minirootfs is the current bootstrap seed, but the builder is designed so the starting rootfs, architecture, and package set remain swappable once a self-hosted rootfs is available.
+Build reproducible QCOW2 and chroot images with Crystal-first tooling. The sysroot builder targets aarch64 by default, caches upstream source tarballs, and stages a chroot that can rebuild the sysroot inside itself using a Crystal coordinator. Alpine’s 3.23.2 minirootfs is the current bootstrap seed, but the builder is designed so the starting rootfs, architecture, and package set remain swappable once a self-hosted rootfs is available.
 
 ## Installation
 
@@ -18,7 +18,7 @@ crystal run src/sysroot_builder_main.cr -- --output sysroot.tar.gz
 ```
 
 The tarball includes:
-- Alpine minirootfs (aarch64 by default)
+- Alpine minirootfs 3.23.2 (aarch64 by default)
 - Cached source archives for core packages (musl, busybox, clang/LLVM, etc.)
 - A serialized build plan consumed by the coordinator
 - Coordinator entrypoints at `/usr/local/bin/sysroot_runner_main.cr`

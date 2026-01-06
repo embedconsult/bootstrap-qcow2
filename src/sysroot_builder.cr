@@ -23,8 +23,8 @@ module Bootstrap
   #   so it participates in formatting and specs.
   class SysrootBuilder
     DEFAULT_ARCH         = "aarch64"
-    DEFAULT_BRANCH       = "edge"
-    DEFAULT_BASE_VERSION = "edge"
+    DEFAULT_BRANCH       = "v3.23"
+    DEFAULT_BASE_VERSION = "3.23.2"
     DEFAULT_LLVM_VER     = "18.1.7"
     DEFAULT_LIBRESSL     = "3.8.2"
     DEFAULT_BUSYBOX      = "1.36.1"
@@ -245,35 +245,7 @@ module Bootstrap
     end
 
     private def resolved_base_version : String
-      return @resolved_base_version if @resolved_base_version
-      return @resolved_base_version = @base_version unless @base_version == "edge"
-
-      begin
-        @resolved_base_version = fetch_latest_rootfs_version || @base_version
-      rescue
-        @resolved_base_version = @base_version
-      end
-    end
-
-    private def fetch_latest_rootfs_version : String?
-      index_uri = URI.parse("https://dl-cdn.alpinelinux.org/alpine/#{@branch}/releases/#{@architecture}/")
-      body = fetch_string_with_redirects(index_uri)
-      return nil unless body
-
-      versions = body.scan(/alpine-minirootfs-([0-9.]+)-#{@architecture}\.tar\.gz/).map(&.[1])
-      versions.max_by { |v| v.split('.').map(&.to_i64) }
-    end
-
-    private def download_with_redirects(uri : URI, target : Path, limit : Int32 = 5) : Nil
-      current = uri
-      File.open(target, "w") do |file|
-        follow_redirects(current, limit) do |final_uri|
-          HTTP::Client.get(final_uri) do |response|
-            raise "Failed to download #{final_uri} (#{response.status_code})" unless response.success?
-            IO.copy(response.body_io, file)
-          end
-        end
-      end
+      @resolved_base_version ||= @base_version
     end
 
     private def fetch_string_with_redirects(uri : URI, limit : Int32 = 5) : String?
@@ -526,12 +498,12 @@ module Bootstrap
             next
           end
 
-      target = @destination / name
-      case typeflag
-      when "5" # directory
-        FileUtils.mkdir_p(target)
-        File.chmod(target, header_mode(header))
-      when "2" # symlink
+          target = @destination / name
+          case typeflag
+          when "5" # directory
+            FileUtils.mkdir_p(target)
+            File.chmod(target, header_mode(header))
+          when "2" # symlink
             FileUtils.mkdir_p(target.parent)
             File.symlink(linkname, target)
           else # regular file
