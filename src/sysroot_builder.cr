@@ -80,6 +80,7 @@ module Bootstrap
     getter branch : String
     getter workspace : Path
     getter base_version : String
+    @resolved_base_version : String?
 
     def initialize(@workspace : Path = Path["data/sysroot"],
                    @architecture : String = DEFAULT_ARCH,
@@ -115,7 +116,7 @@ module Bootstrap
     # architecture/branch/version. The checksum URL is derived from the upstream
     # naming convention when available.
     def base_rootfs_spec : PackageSpec
-      version_tag = @base_version
+      version_tag = resolved_base_version
       file = "alpine-minirootfs-#{version_tag}-#{@architecture}.tar.gz"
       url = URI.parse("https://dl-cdn.alpinelinux.org/alpine/#{@branch}/releases/#{@architecture}/#{file}")
       checksum_url = URI.parse("#{url}.sha256") rescue nil
@@ -172,12 +173,16 @@ module Bootstrap
       attempts.times do |idx|
         begin
           if File.exists?(target)
-            return target if verify(pkg, target)
-            File.delete(target)
+            if File.size(target) > 0 && verify(pkg, target)
+              return target
+            else
+              File.delete(target)
+            end
           end
 
           Log.info { "Downloading #{pkg.name} #{pkg.version} from #{pkg.url}" }
           download_with_redirects(pkg.url, target)
+          raise "Empty download for #{pkg.name}" if File.size(target) == 0
           verify(pkg, target)
           return target
         rescue error
@@ -231,11 +236,32 @@ module Bootstrap
     # the first whitespace-delimited token.
     def fetch_remote_checksum(pkg : PackageSpec) : String?
       return nil unless uri = pkg.checksum_url
-      download_string_with_redirects(uri)
+      body = fetch_string_with_redirects(uri)
+      body ? normalize_checksum(body) : nil
     end
 
     private def normalize_checksum(body : String) : String
       body.strip.split(/\s+/).first
+    end
+
+    private def resolved_base_version : String
+      return @resolved_base_version if @resolved_base_version
+      return @resolved_base_version = @base_version unless @base_version == "edge"
+
+      begin
+        @resolved_base_version = fetch_latest_rootfs_version || @base_version
+      rescue
+        @resolved_base_version = @base_version
+      end
+    end
+
+    private def fetch_latest_rootfs_version : String?
+      index_uri = URI.parse("https://dl-cdn.alpinelinux.org/alpine/#{@branch}/releases/#{@architecture}/")
+      body = fetch_string_with_redirects(index_uri)
+      return nil unless body
+
+      versions = body.scan(/alpine-minirootfs-([0-9.]+)-#{@architecture}\.tar\.gz/).map(&.[1])
+      versions.max_by { |v| v.split('.').map(&.to_i64) }
     end
 
     private def download_with_redirects(uri : URI, target : Path, limit : Int32 = 5) : Nil
@@ -250,7 +276,7 @@ module Bootstrap
       end
     end
 
-    private def download_string_with_redirects(uri : URI, limit : Int32 = 5) : String?
+    private def fetch_string_with_redirects(uri : URI, limit : Int32 = 5) : String?
       buffer = IO::Memory.new
       success = false
       fetch_with_redirects(uri, limit) do |response|
@@ -259,7 +285,7 @@ module Bootstrap
         success = true
       end
       return nil unless success
-      normalize_checksum(buffer.to_s)
+      buffer.to_s
     end
 
     private def download_with_redirects(uri : URI, target : Path, limit : Int32 = 5) : Nil
@@ -494,18 +520,18 @@ module Bootstrap
           typeflag = header[156].chr
           linkname = cstring(header[157, 100])
 
-          if name.empty? || name == "./" || name.ends_with?("/") || name.starts_with?("././@PaxHeader")
+          if name.empty? || name == "./" || name.ends_with?("/") || name.starts_with?("././@PaxHeader") || typeflag.in?({"g", "x"})
             skip_bytes(size)
             skip_padding(size)
             next
           end
 
-          target = @destination / name
-          case typeflag
-          when "5" # directory
-            FileUtils.mkdir_p(target)
-            File.chmod(target, header_mode(header))
-          when "2" # symlink
+      target = @destination / name
+      case typeflag
+      when "5" # directory
+        FileUtils.mkdir_p(target)
+        File.chmod(target, header_mode(header))
+      when "2" # symlink
             FileUtils.mkdir_p(target.parent)
             File.symlink(linkname, target)
           else # regular file
@@ -552,7 +578,8 @@ module Bootstrap
       end
 
       private def header_mode(header : Bytes) : Int32
-        octal_to_i(header[100, 8]).to_i
+        mode = octal_to_i(header[100, 8]).to_i
+        mode.zero? ? 0o755 : mode
       end
     end
 
