@@ -24,3 +24,41 @@ jobs:
 
       - name: Run specs
         run: crystal spec
+
+      - name: Smoke test sysroot builder (local-only)
+        run: |
+          crystal eval '
+            require "./src/sysroot_builder"
+            require "file_utils"
+            require "process"
+            require "path"
+
+            workspace = Path["/tmp/sysroot-ci"]
+            FileUtils.rm_rf(workspace)
+            FileUtils.mkdir_p(workspace / "tarroot")
+            File.write(workspace / "tarroot/etc.txt", "config")
+            miniroot_tar = workspace / "miniroot.tar"
+            status = Process.run("tar", ["-cf", miniroot_tar.to_s, "-C", (workspace / "tarroot").to_s, "."])
+            raise "tar failed: #{status.exit_code}" unless status.success?
+
+            class StubBuilder < Bootstrap::SysrootBuilder
+              def initialize(@stub_tar : Path, workspace : Path)
+                super(workspace)
+              end
+
+              def packages : Array(Bootstrap::SysrootBuilder::PackageSpec)
+                [] of Bootstrap::SysrootBuilder::PackageSpec
+              end
+
+              def download_and_verify(pkg : Bootstrap::SysrootBuilder::PackageSpec) : Path
+                @stub_tar
+              end
+            end
+
+            builder = StubBuilder.new(miniroot_tar, workspace)
+            builder.prepare_rootfs(builder.minirootfs_spec)
+            output = workspace / "chroot.tar.gz"
+            builder.generate_chroot_tarball(output)
+            raise "missing chroot tarball" unless File.exists?(output)
+            puts "Generated chroot tarball at #{output}"
+          '
