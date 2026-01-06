@@ -1,4 +1,3 @@
-require "compress/gzip"
 require "digest/crc32"
 require "digest/sha256"
 require "file_utils"
@@ -6,7 +5,6 @@ require "http/client"
 require "json"
 require "log"
 require "path"
-require "tar"
 require "uri"
 
 module Bootstrap
@@ -18,24 +16,24 @@ module Bootstrap
   # package set mirrors the minimal Alpine inputs required to rebuild the
   # Crystal toolchain and a Clang/LLVM userland on aarch64.
   class SysrootBuilder
-    DEFAULT_ARCH      = "aarch64"
-    DEFAULT_BRANCH    = "edge"
-    DEFAULT_MINIROOT  = "edge"
-    DEFAULT_LLVM_VER  = "18.1.7"
-    DEFAULT_LIBRESSL  = "3.8.2"
-    DEFAULT_BUSYBOX   = "1.36.1"
-    DEFAULT_MUSL      = "1.2.5"
-    DEFAULT_CMAKE     = "3.29.6"
-    DEFAULT_M4        = "1.4.19"
-    DEFAULT_GNU_MAKE  = "4.4.1"
-    DEFAULT_ZLIB      = "1.3.1"
-    DEFAULT_PCRE2     = "10.44"
-    DEFAULT_GMP       = "6.3.0"
-    DEFAULT_LIBICONV  = "1.17"
-    DEFAULT_LIBXML2   = "2.12.7"
-    DEFAULT_LIBYAML   = "0.2.5"
-    DEFAULT_LIBFFI    = "3.4.6"
-    DEFAULT_BDWGC     = "8.2.6"
+    DEFAULT_ARCH     = "aarch64"
+    DEFAULT_BRANCH   = "edge"
+    DEFAULT_MINIROOT = "edge"
+    DEFAULT_LLVM_VER = "18.1.7"
+    DEFAULT_LIBRESSL = "3.8.2"
+    DEFAULT_BUSYBOX  = "1.36.1"
+    DEFAULT_MUSL     = "1.2.5"
+    DEFAULT_CMAKE    = "3.29.6"
+    DEFAULT_M4       = "1.4.19"
+    DEFAULT_GNU_MAKE = "4.4.1"
+    DEFAULT_ZLIB     = "1.3.1"
+    DEFAULT_PCRE2    = "10.44"
+    DEFAULT_GMP      = "6.3.0"
+    DEFAULT_LIBICONV = "1.17"
+    DEFAULT_LIBXML2  = "2.12.7"
+    DEFAULT_LIBYAML  = "0.2.5"
+    DEFAULT_LIBFFI   = "3.4.6"
+    DEFAULT_BDWGC    = "8.2.6"
 
     record PackageSpec,
       name : String,
@@ -312,35 +310,8 @@ module Bootstrap
       prepare_rootfs
       write_plan
       FileUtils.mkdir_p(output.parent) if output.parent
-      File.open(output, "w") do |file|
-        Compress::Gzip::Writer.open(file) do |gzip|
-          Tar::Writer.open(gzip) do |tar|
-            Dir.glob("#{rootfs_dir}/**/*", File::FNM_DOTMATCH).each do |entry|
-              base = File.basename(entry)
-              next if {".", ".."}.includes?(base)
-              relative = Path.new(entry).relative_to(rootfs_dir).to_s
-              stat = File.lstat(entry)
-
-              if stat.directory?
-                tar.mkdir(relative, stat.permissions)
-                next
-              end
-
-              if stat.symlink?
-                target = File.readlink(entry)
-                tar.symlink(relative, target)
-                next
-              end
-
-              File.open(entry) do |io|
-                tar.add(relative, stat.size, stat.permissions, stat.mtime) do |writer_io|
-                  IO.copy(io, writer_io)
-                end
-              end
-            end
-          end
-        end
-      end
+      status = Process.run("tar", ["-czf", output.to_s, "-C", rootfs_dir.to_s, "."])
+      raise "Failed to create chroot tarball: #{status.exit_status}" unless status.success?
       output
     end
 
@@ -371,29 +342,9 @@ module Bootstrap
     end
 
     private def extract_tarball(path : Path, destination : Path) : Nil
-      File.open(path) do |file|
-        gzip = Compress::Gzip::Reader.new(file)
-        Tar::Reader.new(gzip) do |tar|
-          tar.each_entry do |entry|
-            target = destination / entry.full_name
-            if entry.directory?
-              FileUtils.mkdir_p(target)
-              next
-            end
-
-            FileUtils.mkdir_p(target.parent)
-            if entry.symlink?
-              File.symlink(entry.linkname.not_nil!, target)
-              next
-            end
-
-            File.open(target, "w") do |out|
-              IO.copy(entry.io, out)
-            end
-            File.chmod(target, entry.header.mode.to_i)
-          end
-        end
-      end
+      FileUtils.mkdir_p(destination)
+      status = Process.run("tar", ["-xf", path.to_s, "-C", destination.to_s])
+      raise "Failed to extract #{path}" unless status.success?
     end
   end
 end
