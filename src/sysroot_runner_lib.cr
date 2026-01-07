@@ -8,9 +8,7 @@ module Bootstrap
   # It is kept in a regular source file so it benefits from formatting, linting,
   # and specs. The small main entrypoint simply requires this library and calls
   # `run_plan`.
-  module SysrootRunner
-    Log.setup("*", Log::Severity::Info)
-
+  class SysrootRunner
     # Serializable representation of a single package build step, mirroring
     # the plan written by SysrootBuilder.
     struct BuildStep
