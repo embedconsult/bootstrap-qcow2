@@ -528,9 +528,10 @@ module Bootstrap
       PREFIX_OFFSET   = 345
       PREFIX_LENGTH   = 155
 
-      TYPE_DIRECTORY = "5"
-      TYPE_SYMLINK   = "2"
-      TYPE_HARDLINK  = "1"
+      TYPE_DIRECTORY = '5'
+      TYPE_SYMLINK   = '2'
+      TYPE_HARDLINK  = '1'
+      TYPE_FILE      = '\u0000'
 
       def initialize(@io : IO, @destination : Path)
       end
@@ -548,11 +549,12 @@ module Bootstrap
           size = octal_to_i(header[SIZE_OFFSET, SIZE_LENGTH])
           typeflag = header[TYPEFLAG_OFFSET].chr
           linkname = cstring(header[LINKNAME_OFFSET, LINKNAME_LENGTH])
-          normalized_typeflag = typeflag
-          normalized_typeflag = TYPE_SYMLINK if normalized_typeflag == "\u0000" && !linkname.empty?
-          Log.debug { "Tar entry name=#{name} typeflag=#{typeflag.inspect} linkname=#{linkname}" }
+          normalized_typeflag = typeflag == TYPE_FILE ? TYPE_FILE : typeflag
+          normalized_typeflag = TYPE_SYMLINK if normalized_typeflag == TYPE_FILE && !linkname.empty?
+          Log.debug { "Tar entry name=#{name} typeflag=#{typeflag.inspect} normalized=#{normalized_typeflag.inspect} linkname=#{linkname}" }
 
-          if name.empty? || name == "./" || name.ends_with?("/") || name.starts_with?("././@PaxHeader") || typeflag.in?({"g", "x"})
+          # Skip metadata/pax headers or empty directory entries.
+          if name.empty? || name == "./" || name.ends_with?("/") || name.starts_with?("././@PaxHeader") || normalized_typeflag.in?({'g', 'x'})
             skip_bytes(size)
             skip_padding(size)
             next
