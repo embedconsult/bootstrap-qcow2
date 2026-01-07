@@ -13,6 +13,9 @@ module Bootstrap
       include_sources = true
       use_system_tar_for_sources = false
       use_system_tar_for_rootfs = false
+      preserve_ownership = false
+      owner_uid = nil
+      owner_gid = nil
       write_tarball = true
 
       OptionParser.parse do |parser|
@@ -25,12 +28,31 @@ module Bootstrap
         parser.on("--skip-sources", "Skip staging source archives into the rootfs") { include_sources = false }
         parser.on("--system-tar-sources", "Use system tar to extract all staged source archives") { use_system_tar_for_sources = true }
         parser.on("--system-tar-rootfs", "Use system tar to extract the base rootfs") { use_system_tar_for_rootfs = true }
+        parser.on("--preserve-ownership", "Preserve archive ownership metadata when extracting tarballs") { preserve_ownership = true }
+        parser.on("--owner-uid=UID", "Override extracted file owner uid (implies --preserve-ownership)") do |val|
+          preserve_ownership = true
+          owner_uid = val.to_i
+        end
+        parser.on("--owner-gid=GID", "Override extracted file owner gid (implies --preserve-ownership)") do |val|
+          preserve_ownership = true
+          owner_gid = val.to_i
+        end
         parser.on("--no-tarball", "Prepare the chroot tree without writing a tarball") { write_tarball = false }
         parser.on("-h", "--help", "Show this help") { puts parser; exit }
       end
 
       Log.info { "Sysroot builder log level=#{Log.for("").level} (env-configured)" }
-      builder = SysrootBuilder.new(workspace, architecture, branch, base_version, use_system_tar_for_sources, use_system_tar_for_rootfs)
+      builder = SysrootBuilder.new(
+        workspace: workspace,
+        architecture: architecture,
+        branch: branch,
+        base_version: base_version,
+        use_system_tar_for_sources: use_system_tar_for_sources,
+        use_system_tar_for_rootfs: use_system_tar_for_rootfs,
+        preserve_ownership: preserve_ownership,
+        owner_uid: owner_uid,
+        owner_gid: owner_gid
+      )
       if write_tarball
         builder.generate_chroot_tarball(output, include_sources: include_sources)
         puts "Generated sysroot tarball at #{output}"
