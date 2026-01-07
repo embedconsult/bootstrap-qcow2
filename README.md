@@ -24,7 +24,7 @@ The tarball includes:
 - A serialized build plan consumed by the coordinator
 - Coordinator entrypoints at `/usr/local/bin/sysroot_runner_main.cr`
 
-Inside the chroot you can rebuild packages with the coordinator (uses `Process.chroot` instead of the `chroot` binary):
+Inside the chroot you can rebuild packages with the coordinator:
 
 ```bash
 crystal run /usr/local/bin/sysroot_runner_main.cr
