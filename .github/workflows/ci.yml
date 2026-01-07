@@ -30,5 +30,5 @@ jobs:
           crystal run src/sysroot_builder_main.cr -- --workspace /tmp/sysroot-ci --output /tmp/sysroot.tar.gz --arch x86_64 --branch v3.23 --base-version 3.23.2
           mkdir -p /tmp/sysroot
           tar -xzf /tmp/sysroot.tar.gz -C /tmp/sysroot
-          sudo crystal eval 'Process.chroot("/tmp/sysroot"); Dir.cd("/"); File.write("/workspace/hello.txt", "ok")'
+          crystal eval 'Process.chroot("/tmp/sysroot"); Dir.cd("/"); File.write("/workspace/hello.txt", "ok")'
           test -f /tmp/sysroot/workspace/hello.txt
