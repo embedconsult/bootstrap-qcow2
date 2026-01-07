@@ -504,7 +504,24 @@ module Bootstrap
     end
 
     private struct TarReader
-      HEADER_SIZE = 512
+      # POSIX ustar header layout: offsets/lengths per POSIX.1-1988.
+      HEADER_SIZE     = 512
+      NAME_OFFSET     =   0
+      NAME_LENGTH     = 100
+      MODE_OFFSET     = 100
+      MODE_LENGTH     =   8
+      SIZE_OFFSET     = 124
+      SIZE_LENGTH     =  12
+      MTIME_OFFSET    = 136
+      TYPEFLAG_OFFSET = 156
+      LINKNAME_OFFSET = 157
+      LINKNAME_LENGTH = 100
+      PREFIX_OFFSET   = 345
+      PREFIX_LENGTH   = 155
+
+      TYPE_DIRECTORY = "5"
+      TYPE_SYMLINK   = "2"
+      TYPE_HARDLINK  = "1"
 
       def initialize(@io : IO, @destination : Path)
       end
@@ -516,12 +533,15 @@ module Bootstrap
           break unless bytes == HEADER_SIZE
           break if header.all? { |b| b == 0u8 }
 
-          name = cstring(header[0, 100])
-          prefix = cstring(header[345, 155])
+          name = cstring(header[NAME_OFFSET, NAME_LENGTH])
+          prefix = cstring(header[PREFIX_OFFSET, PREFIX_LENGTH])
           name = "#{prefix}/#{name}" unless prefix.empty?
-          size = octal_to_i(header[124, 12])
-          typeflag = header[156].chr
-          linkname = cstring(header[157, 100])
+          size = octal_to_i(header[SIZE_OFFSET, SIZE_LENGTH])
+          typeflag = header[TYPEFLAG_OFFSET].chr
+          linkname = cstring(header[LINKNAME_OFFSET, LINKNAME_LENGTH])
+          normalized_typeflag = typeflag
+          normalized_typeflag = TYPE_SYMLINK if normalized_typeflag == "\u0000" && !linkname.empty?
+          Log.debug { "Tar entry name=#{name} typeflag=#{typeflag.inspect} linkname=#{linkname}" }
 
           if name.empty? || name == "./" || name.ends_with?("/") || name.starts_with?("././@PaxHeader") || typeflag.in?({"g", "x"})
             skip_bytes(size)
@@ -530,14 +550,18 @@ module Bootstrap
           end
 
           target = @destination / name
-          case typeflag
-          when "5" # directory
+          case normalized_typeflag
+          when TYPE_DIRECTORY # directory
             FileUtils.mkdir_p(target)
             File.chmod(target, header_mode(header))
-          when "2" # symlink
+          when TYPE_SYMLINK # symlink
             FileUtils.mkdir_p(target.parent)
             Log.debug { "Creating symlink #{target} -> #{linkname}" }
             FileUtils.ln_sf(linkname, target)
+          when TYPE_HARDLINK # hardlink
+            FileUtils.mkdir_p(target.parent)
+            Log.debug { "Creating hardlink #{target} -> #{linkname}" }
+            File.link(linkname, target)
           else # regular file
             FileUtils.mkdir_p(target.parent)
             write_file(target, size, header_mode(header))
@@ -582,13 +606,37 @@ module Bootstrap
       end
 
       private def header_mode(header : Bytes) : Int32
-        mode = octal_to_i(header[100, 8]).to_i
+        mode = octal_to_i(header[MODE_OFFSET, MODE_LENGTH]).to_i
         mode.zero? ? 0o755 : mode
       end
     end
 
     private struct TarWriter
-      HEADER_SIZE = 512
+      # POSIX ustar header layout: offsets/lengths per POSIX.1-1988.
+      HEADER_SIZE     = 512
+      NAME_OFFSET     =   0
+      NAME_LENGTH     = 100
+      MODE_OFFSET     = 100
+      MODE_LENGTH     =   8
+      UID_OFFSET      = 108
+      UID_LENGTH      =   8
+      GID_OFFSET      = 116
+      GID_LENGTH      =   8
+      SIZE_OFFSET     = 124
+      SIZE_LENGTH     =  12
+      MTIME_OFFSET    = 136
+      MTIME_LENGTH    =  12
+      CHECKSUM_OFFSET = 148
+      CHECKSUM_LENGTH =   8
+      TYPEFLAG_OFFSET = 156
+      LINKNAME_OFFSET = 157
+      LINKNAME_LENGTH = 100
+      MAGIC_OFFSET    = 257
+      VERSION_OFFSET  = 263
+
+      TYPE_DIRECTORY = '5'
+      TYPE_SYMLINK   = '2'
+      TYPE_FILE      = '0'
 
       class LongPathError < Exception; end
 
@@ -609,12 +657,12 @@ module Bootstrap
         walk(@source) do |entry, stat|
           relative = Path.new(entry).relative_to(@source).to_s
           if stat.directory?
-            write_header(relative, 0_i64, stat, '5')
+            write_header(relative, 0_i64, stat, TYPE_DIRECTORY)
           elsif stat.symlink?
             target = File.readlink(entry)
-            write_header(relative, 0_i64, stat, '2', target)
+            write_header(relative, 0_i64, stat, TYPE_SYMLINK, target)
           else
-            write_header(relative, stat.size, stat, '0')
+            write_header(relative, stat.size, stat, TYPE_FILE)
             File.open(entry) do |file|
               IO.copy(file, @io)
             end
@@ -636,17 +684,17 @@ module Bootstrap
       private def write_header(name : String, size : Int64, stat : File::Info, typeflag : Char, linkname : String = "")
         raise LongPathError.new("Path too long for tar header: #{name}") if name.bytesize > 99
         header = Bytes.new(HEADER_SIZE, 0)
-        write_string(header, 0, 100, name)
-        write_octal(header, 100, 8, stat.permissions.value)
-        write_octal(header, 108, 8, 0) # uid
-        write_octal(header, 116, 8, 0) # gid
-        write_octal(header, 124, 12, size)
-        write_octal(header, 136, 12, stat.modification_time.to_unix)
-        header[156] = typeflag.ord.to_u8
-        write_string(header, 157, 100, linkname)
-        header[257, 6].copy_from("ustar\0".to_slice)
-        header[263, 2].copy_from("00".to_slice)
-        write_octal(header, 148, 8, checksum(header))
+        write_string(header, NAME_OFFSET, NAME_LENGTH, name)
+        write_octal(header, MODE_OFFSET, MODE_LENGTH, stat.permissions.value)
+        write_octal(header, UID_OFFSET, UID_LENGTH, 0) # uid
+        write_octal(header, GID_OFFSET, GID_LENGTH, 0) # gid
+        write_octal(header, SIZE_OFFSET, SIZE_LENGTH, size)
+        write_octal(header, MTIME_OFFSET, MTIME_LENGTH, stat.modification_time.to_unix)
+        header[TYPEFLAG_OFFSET] = typeflag.ord.to_u8
+        write_string(header, LINKNAME_OFFSET, LINKNAME_LENGTH, linkname)
+        header[MAGIC_OFFSET, 6].copy_from("ustar\0".to_slice)
+        header[VERSION_OFFSET, 2].copy_from("00".to_slice)
+        write_octal(header, CHECKSUM_OFFSET, CHECKSUM_LENGTH, checksum(header))
         @io.write(header)
       end
 
@@ -668,7 +716,7 @@ module Bootstrap
 
       private def checksum(header : Bytes) : Int64
         temp = header.dup
-        (148..155).each { |i| temp[i] = 32u8 }
+        (CHECKSUM_OFFSET...(CHECKSUM_OFFSET + CHECKSUM_LENGTH)).each { |i| temp[i] = 32u8 }
         temp.sum(&.to_i64)
       end
 

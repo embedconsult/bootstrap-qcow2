@@ -23,6 +23,7 @@ module Bootstrap
         parser.on("-h", "--help", "Show this help") { puts parser; exit }
       end
 
+      Log.info { "Sysroot builder log level=#{Log.level} (env-configured)" }
       builder = SysrootBuilder.new(workspace, architecture, branch, base_version)
       builder.generate_chroot_tarball(output, include_sources: include_sources)
       puts "Generated sysroot tarball at #{output}"
@@ -31,5 +32,4 @@ module Bootstrap
 end
 
 Log.setup_from_env
-Log.info { "Sysroot builder log level=#{Log.level} (env-configured)" }
 Bootstrap::SysrootBuilderMain.run
