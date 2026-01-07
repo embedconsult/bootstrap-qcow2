@@ -682,6 +682,7 @@ module Bootstrap
       TYPE_DIRECTORY = '5'
       TYPE_SYMLINK   = '2'
       TYPE_FILE      = '0'
+      TYPE_PAX       = 'x'
 
       class LongPathError < Exception; end
 
@@ -702,12 +703,12 @@ module Bootstrap
         walk(@source) do |entry, stat|
           relative = Path.new(entry).relative_to(@source).to_s
           if stat.directory?
-            write_header(relative, 0_i64, stat, TYPE_DIRECTORY)
+            write_entry(relative, 0_i64, stat, TYPE_DIRECTORY)
           elsif stat.symlink?
             target = File.readlink(entry)
-            write_header(relative, 0_i64, stat, TYPE_SYMLINK, target)
+            write_entry(relative, 0_i64, stat, TYPE_SYMLINK, target)
           else
-            write_header(relative, stat.size, stat, TYPE_FILE)
+            write_entry(relative, stat.size, stat, TYPE_FILE)
             File.open(entry) do |file|
               IO.copy(file, @io)
             end
@@ -726,8 +727,51 @@ module Bootstrap
         end
       end
 
+      private def write_entry(name : String, size : Int64, stat : File::Info, typeflag : Char, linkname : String = "")
+        if name.bytesize > 99 || linkname.bytesize > 99
+          write_pax_header(name, linkname, stat)
+        end
+        header_name = header_name_for(name)
+        header_linkname = header_name_for(linkname)
+        write_header(header_name, size, stat, typeflag, header_linkname)
+      end
+
+      private def write_pax_header(name : String, linkname : String, stat : File::Info)
+        entries = [] of String
+        entries << pax_record("path", name) if name.bytesize > 99
+        entries << pax_record("linkpath", linkname) if linkname.bytesize > 99
+        payload = entries.join
+        pax_name = pax_header_name(name)
+        write_header(pax_name, payload.bytesize.to_i64, stat, TYPE_PAX)
+        @io.write(payload.to_slice)
+        pad_file(payload.bytesize.to_i64)
+      end
+
+      private def pax_record(key : String, value : String) : String
+        record = "#{key}=#{value}\n"
+        length = record.bytesize + 2
+        loop do
+          candidate = "#{length} #{record}"
+          candidate_length = candidate.bytesize
+          return candidate if candidate_length == length
+          length = candidate_length
+        end
+      end
+
+      private def pax_header_name(name : String) : String
+        digest = Digest::CRC32.new
+        digest.update(name)
+        "PaxHeaders.0/#{digest.final.hexstring}"
+      end
+
+      private def header_name_for(name : String) : String
+        return name if name.bytesize <= 99
+        base = File.basename(name)
+        return base if base.bytesize <= 99
+        base.byte_slice(0, 99)
+      end
+
       private def write_header(name : String, size : Int64, stat : File::Info, typeflag : Char, linkname : String = "")
-        raise LongPathError.new("Path too long for tar header: #{name}") if name.bytesize > 99
         header = Bytes.new(HEADER_SIZE, 0)
         write_string(header, NAME_OFFSET, NAME_LENGTH, name)
         write_octal(header, MODE_OFFSET, MODE_LENGTH, stat.permissions.value)
@@ -774,7 +818,10 @@ module Bootstrap
       private def self.assert_paths_fit(source : Path)
         Dir.glob(["#{source}/**/*"], match: File::MatchOptions::DotFiles).each do |entry|
           rel = Path.new(entry).relative_to(source).to_s
-          raise LongPathError.new("Path too long for tar header: #{rel}") if rel.bytesize > 99
+          next if rel.bytesize <= 99
+          header_name = File.basename(rel)
+          next if header_name.bytesize <= 99
+          raise LongPathError.new("Path too long for tar header even with PAX: #{rel}")
         end
       end
     end
