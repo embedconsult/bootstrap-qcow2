@@ -9,8 +9,6 @@ require "path"
 require "uri"
 
 module Bootstrap
-  Log.setup_from_env
-
   # SysrootBuilder prepares a chroot-able environment that can rebuild
   # a complete sysroot using source tarballs cached on the host. The default
   # seed uses Alpine’s minirootfs, but the seed rootfs, architecture, and
@@ -539,7 +537,6 @@ module Bootstrap
           when "2" # symlink
             FileUtils.mkdir_p(target.parent)
             Log.debug { "Creating symlink #{target} -> #{linkname}" }
-            Log.debug { "Symlink name=#{name} target=#{target} linkname=#{linkname}" }
             FileUtils.ln_sf(linkname, target)
           else # regular file
             FileUtils.mkdir_p(target.parent)
