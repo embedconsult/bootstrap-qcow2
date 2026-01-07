@@ -212,6 +212,23 @@ describe Bootstrap::SysrootBuilder do
     end
   end
 
+  it "uses a default tarball location when output is omitted" do
+    with_tempdir do |dir|
+      tar_dir = dir / "tarroot"
+      FileUtils.mkdir_p(tar_dir)
+      File.write(tar_dir / "etc.txt", "config")
+      tarball = dir / "miniroot.tar"
+      Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
+
+      builder = StubBuilder.new(dir)
+      builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
+      builder.fake_tarball = tarball
+      output = builder.generate_chroot_tarball
+      output.should eq dir / "sysroot.tar.gz"
+      File.exists?(output).should be_true
+    end
+  end
+
   it "returns chroot command when running in dry-run mode" do
     with_tempdir do |dir|
       tar_dir = dir / "tarroot"

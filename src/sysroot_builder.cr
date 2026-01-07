@@ -9,6 +9,8 @@ require "path"
 require "uri"
 
 module Bootstrap
+  Log.setup_from_env
+
   # SysrootBuilder prepares a chroot-able environment that can rebuild
   # a complete sysroot using source tarballs cached on the host. The default
   # seed uses Alpine’s minirootfs, but the seed rootfs, architecture, and
@@ -316,6 +318,7 @@ module Bootstrap
     #   /var/lib holds the build plan)
     # * stages the coordinator entrypoints
     # Returns the rootfs path on success.
+    # Invoked by `generate_chroot_tarball` and can also be used directly in callers.
     def prepare_rootfs(base_rootfs : PackageSpec = base_rootfs_spec, include_sources : Bool = true) : Path
       Log.info { "Preparing rootfs at #{rootfs_dir} (include_sources=#{include_sources})" }
       FileUtils.rm_rf(rootfs_dir)
@@ -390,9 +393,10 @@ module Bootstrap
 
     # Produce a gzipped tarball of the prepared rootfs so it can be consumed by
     # tooling that expects a chroot-able environment.
-    def generate_chroot_tarball(output : Path, include_sources : Bool = true) : Path
+    def generate_chroot_tarball(output : Path? = nil, include_sources : Bool = true) : Path
       prepare_rootfs(include_sources: include_sources)
       write_plan
+      output ||= rootfs_dir.parent / "sysroot.tar.gz"
       FileUtils.mkdir_p(output.parent) if output.parent
       write_tar_gz(rootfs_dir, output)
       output
@@ -401,6 +405,7 @@ module Bootstrap
     # Execute (or return) the chroot rebuild command. Dry-run returns argv for
     # testing; normal mode invokes `crystal run` on the coordinator inside the
     # chroot using Process.chroot.
+    # Called by higher-level orchestration when rebuilding inside the prepared chroot.
     def rebuild_in_chroot(dry_run : Bool = false)
       Log.info { "Rebuild in chroot requested (dry_run=#{dry_run})" }
       coordinator = "/usr/local/bin/sysroot_runner_main.cr"
@@ -534,6 +539,7 @@ module Bootstrap
           when "2" # symlink
             FileUtils.mkdir_p(target.parent)
             Log.debug { "Creating symlink #{target} -> #{linkname}" }
+            Log.debug { "Symlink name=#{name} target=#{target} linkname=#{linkname}" }
             FileUtils.ln_sf(linkname, target)
           else # regular file
             FileUtils.mkdir_p(target.parent)
