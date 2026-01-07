@@ -408,8 +408,10 @@ module Bootstrap
         ["apk", "add", "--no-cache", "crystal"],
         ["crystal", "run", coordinator],
       ]
+      Log.info { "Chroot rebuild prepared with commands: #{commands.map(&.join(" ")).join(" && ")}" }
       return commands if dry_run
 
+      Log.info { "Entering chroot at #{rootfs_dir}" }
       Process.chroot(rootfs_dir.to_s)
       Dir.cd("/")
       install_crystal(commands[0])
@@ -445,12 +447,14 @@ module Bootstrap
       Log.info { "Installing Crystal compiler inside chroot with: #{command.join(" ")}" }
       status = Process.run(command[0], command[1..])
       raise "Failed to install Crystal in chroot (#{status.exit_code})" unless status.success?
+      Log.info { "Crystal installation finished (exit #{status.exit_code})" }
     end
 
     private def run_coordinator(command : Array(String))
       Log.info { "Running sysroot coordinator: #{command.join(" ")}" }
       status = Process.run(command[0], command[1..])
       raise "Failed to rebuild packages in chroot (#{status.exit_code})" unless status.success?
+      Log.info { "Coordinator completed successfully (exit #{status.exit_code})" }
     end
 
     private def build_commands_for(pkg : PackageSpec, sysroot_prefix : String, cpus : Int32) : Array(Array(String))
