@@ -13,7 +13,7 @@ module Bootstrap
       include_sources = true
       use_system_tar_for_sources = false
       use_system_tar_for_rootfs = false
-      preserve_ownership = false
+      preserve_ownership = true
       owner_uid = nil
       owner_gid = nil
       write_tarball = true
@@ -28,12 +28,12 @@ module Bootstrap
         parser.on("--skip-sources", "Skip staging source archives into the rootfs") { include_sources = false }
         parser.on("--system-tar-sources", "Use system tar to extract all staged source archives") { use_system_tar_for_sources = true }
         parser.on("--system-tar-rootfs", "Use system tar to extract the base rootfs") { use_system_tar_for_rootfs = true }
-        parser.on("--preserve-ownership", "Preserve archive ownership metadata when extracting tarballs") { preserve_ownership = true }
-        parser.on("--owner-uid=UID", "Override extracted file owner uid (implies --preserve-ownership)") do |val|
+        parser.on("--no-preserve-ownership", "Skip applying ownership metadata when extracting tarballs") { preserve_ownership = false }
+        parser.on("--owner-uid=UID", "Override extracted file owner uid (implies ownership preservation)") do |val|
           preserve_ownership = true
           owner_uid = val.to_i
         end
-        parser.on("--owner-gid=GID", "Override extracted file owner gid (implies --preserve-ownership)") do |val|
+        parser.on("--owner-gid=GID", "Override extracted file owner gid (implies ownership preservation)") do |val|
           preserve_ownership = true
           owner_gid = val.to_i
         end
