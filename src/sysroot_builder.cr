@@ -22,24 +22,25 @@ module Bootstrap
   # * Coordinator source is stored in the repository and copied into the chroot
   #   so it participates in formatting and specs.
   class SysrootBuilder
-    DEFAULT_ARCH         = "aarch64"
-    DEFAULT_BRANCH       = "v3.23"
-    DEFAULT_BASE_VERSION = "3.23.2"
-    DEFAULT_LLVM_VER     = "18.1.7"
-    DEFAULT_LIBRESSL     = "3.8.2"
-    DEFAULT_BUSYBOX      = "1.36.1"
-    DEFAULT_MUSL         = "1.2.5"
-    DEFAULT_CMAKE        = "3.29.6"
-    DEFAULT_M4           = "1.4.19"
-    DEFAULT_GNU_MAKE     = "4.4.1"
-    DEFAULT_ZLIB         = "1.3.1"
-    DEFAULT_PCRE2        = "10.44"
-    DEFAULT_GMP          = "6.3.0"
-    DEFAULT_LIBICONV     = "1.17"
-    DEFAULT_LIBXML2      = "2.12.7"
-    DEFAULT_LIBYAML      = "0.2.5"
-    DEFAULT_LIBFFI       = "3.4.6"
-    DEFAULT_BDWGC        = "8.2.6"
+    DEFAULT_ARCH          = "aarch64"
+    DEFAULT_BRANCH        = "v3.23"
+    DEFAULT_BASE_VERSION  = "3.23.2"
+    DEFAULT_LLVM_VER      = "18.1.7"
+    DEFAULT_LIBRESSL      = "3.8.2"
+    DEFAULT_BUSYBOX       = "1.36.1"
+    DEFAULT_MUSL          = "1.2.5"
+    DEFAULT_CMAKE         = "3.29.6"
+    DEFAULT_M4            = "1.4.19"
+    DEFAULT_GNU_MAKE      = "4.4.1"
+    DEFAULT_ZLIB          = "1.3.1"
+    DEFAULT_PCRE2         = "10.44"
+    DEFAULT_LIBATOMIC_OPS = "7.8.2"
+    DEFAULT_GMP           = "6.3.0"
+    DEFAULT_LIBICONV      = "1.17"
+    DEFAULT_LIBXML2       = "2.12.7"
+    DEFAULT_LIBYAML       = "0.2.5"
+    DEFAULT_LIBFFI        = "3.4.6"
+    DEFAULT_BDWGC         = "8.2.6"
 
     record PackageSpec,
       name : String,
@@ -85,7 +86,8 @@ module Bootstrap
     def initialize(@workspace : Path = Path["data/sysroot"],
                    @architecture : String = DEFAULT_ARCH,
                    @branch : String = DEFAULT_BRANCH,
-                   @base_version : String = DEFAULT_BASE_VERSION)
+                   @base_version : String = DEFAULT_BASE_VERSION,
+                   @use_system_tar_for_sources : Bool = false)
       FileUtils.mkdir_p(@workspace)
       FileUtils.mkdir_p(cache_dir)
       FileUtils.mkdir_p(checksum_dir)
@@ -127,7 +129,6 @@ module Bootstrap
     # Each PackageSpec can carry optional configure flags or a custom build
     # directory name when upstream archives use non-standard layouts.
     def packages : Array(PackageSpec)
-      llvm_url = URI.parse("https://github.com/llvm/llvm-project/releases/download/llvmorg-#{DEFAULT_LLVM_VER}")
       [
         PackageSpec.new("m4", DEFAULT_M4, URI.parse("https://ftp.gnu.org/gnu/m4/m4-#{DEFAULT_M4}.tar.xz")),
         PackageSpec.new("musl", DEFAULT_MUSL, URI.parse("https://musl.libc.org/releases/musl-#{DEFAULT_MUSL}.tar.gz")),
@@ -136,7 +137,7 @@ module Bootstrap
         PackageSpec.new("make", DEFAULT_GNU_MAKE, URI.parse("https://ftp.gnu.org/gnu/make/make-#{DEFAULT_GNU_MAKE}.tar.gz")),
         PackageSpec.new("zlib", DEFAULT_ZLIB, URI.parse("https://zlib.net/zlib-#{DEFAULT_ZLIB}.tar.gz")),
         PackageSpec.new("libressl", DEFAULT_LIBRESSL, URI.parse("https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-#{DEFAULT_LIBRESSL}.tar.gz")),
-        PackageSpec.new("libatomic_ops", "7.8.2", URI.parse("https://github.com/ivmai/libatomic_ops/releases/download/v7.8.2/libatomic_ops-7.8.2.tar.gz")),
+        PackageSpec.new("libatomic_ops", DEFAULT_LIBATOMIC_OPS, URI.parse("https://github.com/ivmai/libatomic_ops/releases/download/v#{DEFAULT_LIBATOMIC_OPS}/libatomic_ops-#{DEFAULT_LIBATOMIC_OPS}.tar.gz")),
         PackageSpec.new("llvm-project", DEFAULT_LLVM_VER, URI.parse("https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-#{DEFAULT_LLVM_VER}.tar.gz"), strategy: "llvm"),
         PackageSpec.new("bdwgc", DEFAULT_BDWGC, URI.parse("https://github.com/ivmai/bdwgc/releases/download/v#{DEFAULT_BDWGC}/gc-#{DEFAULT_BDWGC}.tar.gz")),
         PackageSpec.new("pcre2", DEFAULT_PCRE2, URI.parse("https://github.com/PhilipHazel/pcre2/releases/download/pcre2-#{DEFAULT_PCRE2}/pcre2-#{DEFAULT_PCRE2}.tar.gz")),
@@ -337,7 +338,7 @@ module Bootstrap
       workspace_path = rootfs_dir / "workspace"
       download_sources.each do |archive|
         Log.info { "Extracting source archive #{archive} into #{workspace_path}" }
-        extract_tarball(archive, workspace_path)
+        extract_tarball(archive, workspace_path, force_system_tar: @use_system_tar_for_sources)
       end
     end
 
@@ -435,9 +436,16 @@ module Bootstrap
       simple.empty? ? filename : simple
     end
 
-    private def extract_tarball(path : Path, destination : Path) : Nil
+    private def extract_tarball(path : Path, destination : Path, force_system_tar : Bool = false) : Nil
       FileUtils.mkdir_p(destination)
+      return run_system_tar_extract(path, destination) if force_system_tar
       Extractor.new(path, destination).run
+    end
+
+    private def run_system_tar_extract(path : Path, destination : Path) : Nil
+      Log.info { "Running: tar -xf #{path} -C #{destination}" }
+      status = Process.run("tar", ["-xf", path.to_s, "-C", destination.to_s])
+      raise "Failed to extract #{path}" unless status.success?
     end
 
     private def write_tar_gz(source : Path, output : Path) : Nil
@@ -505,6 +513,7 @@ module Bootstrap
 
     private struct TarReader
       # POSIX ustar header layout: offsets/lengths per POSIX.1-1988.
+      # Reference: https://pubs.opengroup.org/onlinepubs/009695399/basedefs/tar.h.html
       HEADER_SIZE     = 512
       NAME_OFFSET     =   0
       NAME_LENGTH     = 100
@@ -613,6 +622,7 @@ module Bootstrap
 
     private struct TarWriter
       # POSIX ustar header layout: offsets/lengths per POSIX.1-1988.
+      # Reference: https://pubs.opengroup.org/onlinepubs/009695399/basedefs/tar.h.html
       HEADER_SIZE     = 512
       NAME_OFFSET     =   0
       NAME_LENGTH     = 100
