@@ -13,7 +13,8 @@ module Bootstrap
       include_sources = true
       use_system_tar_for_sources = false
       use_system_tar_for_rootfs = false
-      preserve_ownership = true
+      preserve_ownership_for_sources = false
+      preserve_ownership_for_rootfs = true
       owner_uid = nil
       owner_gid = nil
       write_tarball = true
@@ -28,20 +29,24 @@ module Bootstrap
         parser.on("--skip-sources", "Skip staging source archives into the rootfs") { include_sources = false }
         parser.on("--system-tar-sources", "Use system tar to extract all staged source archives") { use_system_tar_for_sources = true }
         parser.on("--system-tar-rootfs", "Use system tar to extract the base rootfs") { use_system_tar_for_rootfs = true }
-        parser.on("--no-preserve-ownership", "Skip applying ownership metadata when extracting tarballs") { preserve_ownership = false }
+        parser.on("--preserve-ownership-sources", "Apply ownership metadata when extracting source archives") { preserve_ownership_for_sources = true }
+        parser.on("--no-preserve-ownership-sources", "Skip applying ownership metadata for source archives") { preserve_ownership_for_sources = false }
+        parser.on("--no-preserve-ownership-rootfs", "Skip applying ownership metadata for the base rootfs") { preserve_ownership_for_rootfs = false }
         parser.on("--owner-uid=UID", "Override extracted file owner uid (implies ownership preservation)") do |val|
-          preserve_ownership = true
+          preserve_ownership_for_sources = true
+          preserve_ownership_for_rootfs = true
           owner_uid = val.to_i
         end
         parser.on("--owner-gid=GID", "Override extracted file owner gid (implies ownership preservation)") do |val|
-          preserve_ownership = true
+          preserve_ownership_for_sources = true
+          preserve_ownership_for_rootfs = true
           owner_gid = val.to_i
         end
         parser.on("--no-tarball", "Prepare the chroot tree without writing a tarball") { write_tarball = false }
         parser.on("-h", "--help", "Show this help") { puts parser; exit }
       end
 
-      Log.info { "Sysroot builder log level=#{Log.for("").level} (env-configured)" }
+      puts "Sysroot builder log level=#{Log.for("").level} (env-configured)"
       builder = SysrootBuilder.new(
         workspace: workspace,
         architecture: architecture,
@@ -49,7 +54,8 @@ module Bootstrap
         base_version: base_version,
         use_system_tar_for_sources: use_system_tar_for_sources,
         use_system_tar_for_rootfs: use_system_tar_for_rootfs,
-        preserve_ownership: preserve_ownership,
+        preserve_ownership_for_sources: preserve_ownership_for_sources,
+        preserve_ownership_for_rootfs: preserve_ownership_for_rootfs,
         owner_uid: owner_uid,
         owner_gid: owner_gid
       )

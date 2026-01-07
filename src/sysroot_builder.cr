@@ -54,7 +54,8 @@ module Bootstrap
       patches : Array(String) = [] of String,
       extra_urls : Array(URI) = [] of URI do
       def filename : String
-        File.basename(url.path)
+        basename = File.basename(url.path)
+        basename.includes?(name) ? basename : "#{name}-#{basename}"
       end
 
       def all_urls : Array(URI)
@@ -88,7 +89,8 @@ module Bootstrap
                    @base_version : String = DEFAULT_BASE_VERSION,
                    @use_system_tar_for_sources : Bool = false,
                    @use_system_tar_for_rootfs : Bool = false,
-                   @preserve_ownership : Bool = false,
+                   @preserve_ownership_for_sources : Bool = false,
+                   @preserve_ownership_for_rootfs : Bool = true,
                    @owner_uid : Int32? = nil,
                    @owner_gid : Int32? = nil)
       FileUtils.mkdir_p(@workspace)
@@ -328,7 +330,7 @@ module Bootstrap
 
       tarball = download_and_verify(base_rootfs)
       Log.info { "Extracting base rootfs from #{tarball}" }
-      extract_tarball(tarball, rootfs_dir, force_system_tar: @use_system_tar_for_rootfs)
+      extract_tarball(tarball, rootfs_dir, @preserve_ownership_for_rootfs, force_system_tar: @use_system_tar_for_rootfs)
       FileUtils.mkdir_p(rootfs_dir / "workspace")
       FileUtils.mkdir_p(rootfs_dir / "var/lib")
       stage_sources if include_sources
@@ -341,7 +343,7 @@ module Bootstrap
       workspace_path = rootfs_dir / "workspace"
       download_sources.each do |archive|
         Log.info { "Extracting source archive #{archive} into #{workspace_path}" }
-        extract_tarball(archive, workspace_path, force_system_tar: @use_system_tar_for_sources)
+        extract_tarball(archive, workspace_path, @preserve_ownership_for_sources, force_system_tar: @use_system_tar_for_sources)
       end
     end
 
@@ -420,15 +422,15 @@ module Bootstrap
       simple.empty? ? filename : simple
     end
 
-    private def extract_tarball(path : Path, destination : Path, force_system_tar : Bool = false) : Nil
+    private def extract_tarball(path : Path, destination : Path, preserve_ownership : Bool, force_system_tar : Bool = false) : Nil
       FileUtils.mkdir_p(destination)
-      return run_system_tar_extract(path, destination) if force_system_tar
-      Extractor.new(path, destination, @preserve_ownership, @owner_uid, @owner_gid).run
+      return run_system_tar_extract(path, destination, preserve_ownership) if force_system_tar
+      Extractor.new(path, destination, preserve_ownership, @owner_uid, @owner_gid).run
     end
 
-    private def run_system_tar_extract(path : Path, destination : Path) : Nil
+    private def run_system_tar_extract(path : Path, destination : Path, preserve_ownership : Bool) : Nil
       args = ["-xf", path.to_s, "-C", destination.to_s]
-      if @preserve_ownership
+      if preserve_ownership
         args << "--same-owner"
         if @owner_uid
           args << "--owner=#{@owner_uid}"
@@ -481,7 +483,7 @@ module Bootstrap
 
       private def fallback_for_unhandled_compression? : Bool
         if @archive.to_s.ends_with?(".tar.xz") || @archive.to_s.ends_with?(".tar.bz2")
-          Log.info { "Running: tar -xf #{@archive} -C #{@destination}" }
+          Log.warn { "Running: tar -xf #{@archive} -C #{@destination}" }
           status = Process.run("tar", ["-xf", @archive.to_s, "-C", @destination.to_s])
           raise "Failed to extract #{@archive}" unless status.success?
           true
@@ -556,7 +558,8 @@ module Bootstrap
 
           if name.ends_with?("/")
             FileUtils.mkdir_p(target)
-            apply_ownership(target, header_uid, header_gid)
+            uid, gid = resolved_owner(header_uid, header_gid)
+            apply_ownership(target, uid, gid)
             skip_padding(size)
             next
           end
@@ -622,6 +625,7 @@ module Bootstrap
       end
 
       private def apply_ownership(path : Path, uid : Int32?, gid : Int32?)
+        return unless @preserve_ownership
         return unless uid || gid
         File.chown(path, uid || -1, gid || -1)
       rescue ex
