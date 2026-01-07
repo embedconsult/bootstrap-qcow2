@@ -71,9 +71,8 @@ module Bootstrap
       getter configure_flags : Array(String)
       getter patches : Array(String)
       getter sysroot_prefix : String
-      getter cpus : Int32
 
-      def initialize(@name : String, @strategy : String, @workdir : String, @configure_flags : Array(String), @patches : Array(String), @sysroot_prefix : String, @cpus : Int32)
+      def initialize(@name : String, @strategy : String, @workdir : String, @configure_flags : Array(String), @patches : Array(String), @sysroot_prefix : String)
       end
     end
 
@@ -87,7 +86,8 @@ module Bootstrap
                    @architecture : String = DEFAULT_ARCH,
                    @branch : String = DEFAULT_BRANCH,
                    @base_version : String = DEFAULT_BASE_VERSION,
-                   @use_system_tar_for_sources : Bool = false)
+                   @use_system_tar_for_sources : Bool = false,
+                   @use_system_tar_for_rootfs : Bool = false)
       FileUtils.mkdir_p(@workspace)
       FileUtils.mkdir_p(cache_dir)
       FileUtils.mkdir_p(checksum_dir)
@@ -325,7 +325,7 @@ module Bootstrap
 
       tarball = download_and_verify(base_rootfs)
       Log.info { "Extracting base rootfs from #{tarball}" }
-      extract_tarball(tarball, rootfs_dir)
+      extract_tarball(tarball, rootfs_dir, force_system_tar: @use_system_tar_for_rootfs)
       FileUtils.mkdir_p(rootfs_dir / "workspace")
       FileUtils.mkdir_p(rootfs_dir / "var/lib")
       stage_sources if include_sources
@@ -374,11 +374,10 @@ module Bootstrap
     def build_plan : Array(BuildStep)
       sysroot_prefix = "/opt/sysroot"
       workdir = "/workspace"
-      cpus = (System.cpu_count || 1).to_i32
       packages.map do |pkg|
         build_directory = pkg.build_directory || strip_archive_extension(pkg.filename)
         build_root = File.join(workdir, build_directory)
-        BuildStep.new(pkg.name, pkg.strategy, build_root, pkg.configure_flags, pkg.patches, sysroot_prefix, cpus)
+        BuildStep.new(pkg.name, pkg.strategy, build_root, pkg.configure_flags, pkg.patches, sysroot_prefix)
       end
     end
 
@@ -460,14 +459,12 @@ module Bootstrap
 
     private def install_crystal(command : Array(String))
       Log.info { "Installing Crystal compiler inside chroot with: #{command.join(" ")}" }
-      Log.info { "Running: #{command.join(" ")}" }
       status = Process.run(command[0], command[1..])
       raise "Failed to install Crystal in chroot (#{status.exit_code})" unless status.success?
     end
 
     private def run_coordinator(command : Array(String))
       Log.info { "Running sysroot coordinator: #{command.join(" ")}" }
-      Log.info { "Running: #{command.join(" ")}" }
       status = Process.run(command[0], command[1..])
       raise "Failed to rebuild packages in chroot (#{status.exit_code})" unless status.success?
     end

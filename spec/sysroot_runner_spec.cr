@@ -34,8 +34,8 @@ end
 describe Bootstrap::SysrootRunner do
   it "runs steps with a custom runner" do
     steps = [
-      Bootstrap::SysrootRunner::BuildStep.new(name: "a", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String, sysroot_prefix: "/opt/sysroot", cpus: 1),
-      Bootstrap::SysrootRunner::BuildStep.new(name: "b", strategy: "cmake", workdir: "/var", configure_flags: [] of String, patches: [] of String, sysroot_prefix: "/opt/sysroot", cpus: 1),
+      Bootstrap::SysrootRunner::BuildStep.new(name: "a", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String, sysroot_prefix: "/opt/sysroot"),
+      Bootstrap::SysrootRunner::BuildStep.new(name: "b", strategy: "cmake", workdir: "/var", configure_flags: [] of String, patches: [] of String, sysroot_prefix: "/opt/sysroot"),
     ]
 
     runner = RecordingRunner.new
@@ -47,7 +47,7 @@ describe Bootstrap::SysrootRunner do
   end
 
   it "raises when a command fails" do
-    steps = [Bootstrap::SysrootRunner::BuildStep.new(name: "fail", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String, sysroot_prefix: "/opt/sysroot", cpus: 1)]
+    steps = [Bootstrap::SysrootRunner::BuildStep.new(name: "fail", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String, sysroot_prefix: "/opt/sysroot")]
     runner = RecordingRunner.new(false, 2)
 
     expect_raises(Exception) do
@@ -56,7 +56,7 @@ describe Bootstrap::SysrootRunner do
   end
 
   it "loads a plan file and executes steps" do
-    steps = [Bootstrap::SysrootRunner::BuildStep.new(name: "file", strategy: "autotools", workdir: "/opt", configure_flags: [] of String, patches: [] of String, sysroot_prefix: "/opt/sysroot", cpus: 1)]
+    steps = [Bootstrap::SysrootRunner::BuildStep.new(name: "file", strategy: "autotools", workdir: "/opt", configure_flags: [] of String, patches: [] of String, sysroot_prefix: "/opt/sysroot")]
     runner = RecordingRunner.new
 
     plan_file = File.tempfile("plan")

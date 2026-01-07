@@ -21,9 +21,8 @@ module Bootstrap
       property configure_flags : Array(String)
       property patches : Array(String)
       property sysroot_prefix : String
-      property cpus : Int32
 
-      def initialize(@name : String, @strategy : String, @workdir : String, @configure_flags : Array(String), @patches : Array(String), @sysroot_prefix : String, @cpus : Int32)
+      def initialize(@name : String, @strategy : String, @workdir : String, @configure_flags : Array(String), @patches : Array(String), @sysroot_prefix : String)
       end
     end
 
@@ -39,24 +38,25 @@ module Bootstrap
 
       def run(step : BuildStep)
         Dir.cd(step.workdir) do
-          Log.info { "Starting #{step.strategy} build for #{step.name} in #{step.workdir} (cpus=#{step.cpus})" }
+          cpus = (System.cpu_count || 1).to_i32
+          Log.info { "Starting #{step.strategy} build for #{step.name} in #{step.workdir} (cpus=#{cpus})" }
           apply_patches(step.patches)
           case step.strategy
           when "cmake"
             run_cmd(["./bootstrap", "--prefix=#{step.sysroot_prefix}"])
-            run_cmd(["make", "-j#{step.cpus}"])
+            run_cmd(["make", "-j#{cpus}"])
             run_cmd(["make", "install"])
           when "busybox"
             run_cmd(["make", "defconfig"])
-            run_cmd(["make", "-j#{step.cpus}"])
+            run_cmd(["make", "-j#{cpus}"])
             run_cmd(["make", "CONFIG_PREFIX=#{step.sysroot_prefix}", "install"])
           when "llvm"
             run_cmd(["cmake", "-S", ".", "-B", "build", "-DCMAKE_INSTALL_PREFIX=#{step.sysroot_prefix}"] + step.configure_flags)
-            run_cmd(["cmake", "--build", "build", "-j#{step.cpus}"])
+            run_cmd(["cmake", "--build", "build", "-j#{cpus}"])
             run_cmd(["cmake", "--install", "build"])
           else # autotools/default
             run_cmd(["./configure", "--prefix=#{step.sysroot_prefix}"] + step.configure_flags)
-            run_cmd(["make", "-j#{step.cpus}"])
+            run_cmd(["make", "-j#{cpus}"])
             run_cmd(["make", "install"])
           end
           Log.info { "Finished #{step.name}" }
