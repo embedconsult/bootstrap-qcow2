@@ -2,8 +2,6 @@ require "option_parser"
 require "./sysroot_builder"
 
 module Bootstrap
-  Log.setup_from_env
-
   # Entry point to generate a chrootable sysroot tarball without using crystal eval.
   class SysrootBuilderMain
     def self.run
@@ -32,4 +30,6 @@ module Bootstrap
   end
 end
 
+Log.setup_from_env
+Log.info { "Sysroot builder log level=#{Log.level} (env-configured)" }
 Bootstrap::SysrootBuilderMain.run
