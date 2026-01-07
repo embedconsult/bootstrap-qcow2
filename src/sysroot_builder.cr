@@ -87,7 +87,10 @@ module Bootstrap
                    @branch : String = DEFAULT_BRANCH,
                    @base_version : String = DEFAULT_BASE_VERSION,
                    @use_system_tar_for_sources : Bool = false,
-                   @use_system_tar_for_rootfs : Bool = false)
+                   @use_system_tar_for_rootfs : Bool = false,
+                   @preserve_ownership : Bool = false,
+                   @owner_uid : Int32? = nil,
+                   @owner_gid : Int32? = nil)
       FileUtils.mkdir_p(@workspace)
       FileUtils.mkdir_p(cache_dir)
       FileUtils.mkdir_p(checksum_dir)
@@ -402,6 +405,7 @@ module Bootstrap
       output ||= rootfs_dir.parent / "sysroot.tar.gz"
       FileUtils.mkdir_p(output.parent) if output.parent
       write_tar_gz(rootfs_dir, output)
+      chown_tarball_to_sudo_user(output)
       output
     end
 
@@ -419,12 +423,22 @@ module Bootstrap
     private def extract_tarball(path : Path, destination : Path, force_system_tar : Bool = false) : Nil
       FileUtils.mkdir_p(destination)
       return run_system_tar_extract(path, destination) if force_system_tar
-      Extractor.new(path, destination).run
+      Extractor.new(path, destination, @preserve_ownership, @owner_uid, @owner_gid).run
     end
 
     private def run_system_tar_extract(path : Path, destination : Path) : Nil
-      Log.info { "Running: tar -xf #{path} -C #{destination}" }
-      status = Process.run("tar", ["-xf", path.to_s, "-C", destination.to_s])
+      args = ["-xf", path.to_s, "-C", destination.to_s]
+      if @preserve_ownership
+        args << "--same-owner"
+        if @owner_uid
+          args << "--owner=#{@owner_uid}"
+        end
+        if @owner_gid
+          args << "--group=#{@owner_gid}"
+        end
+      end
+      Log.info { "Running: tar #{args.join(" ")}" }
+      status = Process.run("tar", args)
       raise "Failed to extract #{path}" unless status.success?
     end
 
@@ -446,14 +460,14 @@ module Bootstrap
 
     # Minimal tar extractor/writer implemented in Crystal to avoid shelling out.
     private struct Extractor
-      def initialize(@archive : Path, @destination : Path)
+      def initialize(@archive : Path, @destination : Path, @preserve_ownership : Bool, @owner_uid : Int32?, @owner_gid : Int32?)
       end
 
       def run
         return if fallback_for_unhandled_compression?
         File.open(@archive) do |file|
           io = maybe_gzip(file)
-          TarReader.new(io, @destination).extract_all
+          TarReader.new(io, @destination, @preserve_ownership, @owner_uid, @owner_gid).extract_all
         end
       end
 
@@ -485,6 +499,10 @@ module Bootstrap
       NAME_LENGTH     = 100
       MODE_OFFSET     = 100
       MODE_LENGTH     =   8
+      UID_OFFSET      = 108
+      UID_LENGTH      =   8
+      GID_OFFSET      = 116
+      GID_LENGTH      =   8
       SIZE_OFFSET     = 124
       SIZE_LENGTH     =  12
       MTIME_OFFSET    = 136
@@ -499,7 +517,7 @@ module Bootstrap
       TYPE_HARDLINK  = '1'
       TYPE_FILE      = '\u0000'
 
-      def initialize(@io : IO, @destination : Path)
+      def initialize(@io : IO, @destination : Path, @preserve_ownership : Bool, @owner_uid : Int32?, @owner_gid : Int32?)
       end
 
       def extract_all
@@ -512,6 +530,8 @@ module Bootstrap
           name = cstring(header[NAME_OFFSET, NAME_LENGTH])
           prefix = cstring(header[PREFIX_OFFSET, PREFIX_LENGTH])
           name = "#{prefix}/#{name}" unless prefix.empty?
+          header_uid = octal_to_i(header[UID_OFFSET, UID_LENGTH]).to_i
+          header_gid = octal_to_i(header[GID_OFFSET, GID_LENGTH]).to_i
           size = octal_to_i(header[SIZE_OFFSET, SIZE_LENGTH])
           typeflag = header[TYPEFLAG_OFFSET].chr
           linkname = cstring(header[LINKNAME_OFFSET, LINKNAME_LENGTH])
@@ -519,29 +539,52 @@ module Bootstrap
           normalized_typeflag = TYPE_SYMLINK if normalized_typeflag == TYPE_FILE && !linkname.empty?
           Log.debug { "Tar entry name=#{name} typeflag=#{typeflag.inspect} normalized=#{normalized_typeflag.inspect} linkname=#{linkname}" }
 
-          # Skip metadata/pax headers or empty directory entries.
-          if name.empty? || name == "./" || name.ends_with?("/") || name.starts_with?("././@PaxHeader") || normalized_typeflag.in?({'g', 'x'})
+          # Skip metadata/pax headers or empty entries.
+          if name.empty? || name == "./" || name.starts_with?("././@PaxHeader") || normalized_typeflag.in?({'g', 'x'})
             skip_bytes(size)
             skip_padding(size)
             next
           end
 
-          target = @destination / name
+          target = safe_target_path(name)
+          unless target
+            Log.warn { "Skipping unsafe tar entry #{name}" }
+            skip_bytes(size)
+            skip_padding(size)
+            next
+          end
+
+          if name.ends_with?("/")
+            FileUtils.mkdir_p(target)
+            apply_ownership(target, header_uid, header_gid)
+            skip_padding(size)
+            next
+          end
+
+          uid, gid = resolved_owner(header_uid, header_gid)
           case normalized_typeflag
           when TYPE_DIRECTORY # directory
             FileUtils.mkdir_p(target)
             File.chmod(target, header_mode(header))
+            apply_ownership(target, uid, gid)
           when TYPE_SYMLINK # symlink
             FileUtils.mkdir_p(target.parent)
             Log.debug { "Creating symlink #{target} -> #{linkname}" }
             FileUtils.ln_sf(linkname, target)
           when TYPE_HARDLINK # hardlink
             FileUtils.mkdir_p(target.parent)
-            Log.debug { "Creating hardlink #{target} -> #{linkname}" }
-            File.link(linkname, target)
+            link_target = safe_target_path(linkname)
+            unless link_target
+              Log.warn { "Skipping unsafe hardlink target #{linkname}" }
+              skip_padding(size)
+              next
+            end
+            Log.debug { "Creating hardlink #{target} -> #{link_target}" }
+            File.link(link_target, target)
           else # regular file
             FileUtils.mkdir_p(target.parent)
             write_file(target, size, header_mode(header))
+            apply_ownership(target, uid, gid)
           end
 
           skip_padding(size)
@@ -571,6 +614,30 @@ module Bootstrap
           end
         end
         File.chmod(path, mode)
+      end
+
+      private def resolved_owner(header_uid : Int32, header_gid : Int32) : {Int32?, Int32?}
+        return {nil, nil} unless @preserve_ownership
+        {(@owner_uid || header_uid), (@owner_gid || header_gid)}
+      end
+
+      private def apply_ownership(path : Path, uid : Int32?, gid : Int32?)
+        return unless uid || gid
+        File.chown(path, uid || -1, gid || -1)
+      rescue ex
+        Log.warn { "Failed to apply ownership to #{path}: #{ex.message}" }
+      end
+
+      private def safe_target_path(name : String) : Path?
+        return nil if name.starts_with?("/")
+        clean = name
+        while clean.starts_with?("./")
+          clean = clean[2..] || ""
+        end
+        return nil if clean.empty?
+        parts = clean.split('/')
+        return nil if parts.any? { |part| part == ".." }
+        @destination / clean
       end
 
       private def cstring(bytes : Bytes) : String
@@ -710,6 +777,39 @@ module Bootstrap
           raise LongPathError.new("Path too long for tar header: #{rel}") if rel.bytesize > 99
         end
       end
+    end
+
+    private def chown_tarball_to_sudo_user(path : Path)
+      return unless sudo_user = ENV["SUDO_USER"]?
+      begin
+        if ids = sudo_user_ids(sudo_user)
+          File.chown(path, ids[0], ids[1])
+        else
+          Log.warn { "Unable to resolve #{sudo_user} in /etc/passwd; skipping ownership change." }
+        end
+      rescue ex
+        Log.warn { "Failed to chown #{path} to #{sudo_user}: #{ex.message}" }
+      end
+    end
+
+    private def sudo_user_ids(user : String) : Tuple(Int32, Int32)?
+      passwd_path = Path["/etc/passwd"]
+      return nil unless File.exists?(passwd_path)
+
+      File.each_line(passwd_path) do |line|
+        next if line.empty? || line.starts_with?('#')
+        parts = line.split(':', 7)
+        next unless parts[0]? == user
+        uid = parts[2]?
+        gid = parts[3]?
+        return {uid.to_i, gid.to_i} if uid && gid
+        return nil
+      end
+
+      nil
+    rescue ex
+      Log.warn { "Failed to read #{passwd_path}: #{ex.message}" }
+      nil
     end
   end
 end
