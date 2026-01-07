@@ -13,6 +13,7 @@ module Bootstrap
       include_sources = true
       use_system_tar_for_sources = false
       use_system_tar_for_rootfs = false
+      write_tarball = true
 
       OptionParser.parse do |parser|
         parser.banner = "Usage: crystal run src/sysroot_builder_main.cr -- [options]"
@@ -24,13 +25,19 @@ module Bootstrap
         parser.on("--skip-sources", "Skip staging source archives into the rootfs") { include_sources = false }
         parser.on("--system-tar-sources", "Use system tar to extract all staged source archives") { use_system_tar_for_sources = true }
         parser.on("--system-tar-rootfs", "Use system tar to extract the base rootfs") { use_system_tar_for_rootfs = true }
+        parser.on("--no-tarball", "Prepare the chroot tree without writing a tarball") { write_tarball = false }
         parser.on("-h", "--help", "Show this help") { puts parser; exit }
       end
 
       Log.info { "Sysroot builder log level=#{Log.for("").level} (env-configured)" }
       builder = SysrootBuilder.new(workspace, architecture, branch, base_version, use_system_tar_for_sources, use_system_tar_for_rootfs)
-      builder.generate_chroot_tarball(output, include_sources: include_sources)
-      puts "Generated sysroot tarball at #{output}"
+      if write_tarball
+        builder.generate_chroot_tarball(output, include_sources: include_sources)
+        puts "Generated sysroot tarball at #{output}"
+      else
+        chroot_path = builder.generate_chroot(include_sources: include_sources)
+        puts "Prepared chroot directory at #{chroot_path}"
+      end
     end
   end
 end

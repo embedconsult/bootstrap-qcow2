@@ -130,10 +130,10 @@ module Bootstrap
     # directory name when upstream archives use non-standard layouts.
     def packages : Array(PackageSpec)
       [
-        PackageSpec.new("m4", DEFAULT_M4, URI.parse("https://ftp.gnu.org/gnu/m4/m4-#{DEFAULT_M4}.tar.xz")),
+        PackageSpec.new("m4", DEFAULT_M4, URI.parse("https://ftp.gnu.org/gnu/m4/m4-#{DEFAULT_M4}.tar.gz")),
         PackageSpec.new("musl", DEFAULT_MUSL, URI.parse("https://musl.libc.org/releases/musl-#{DEFAULT_MUSL}.tar.gz")),
         PackageSpec.new("cmake", DEFAULT_CMAKE, URI.parse("https://github.com/Kitware/CMake/releases/download/v#{DEFAULT_CMAKE}/cmake-#{DEFAULT_CMAKE}.tar.gz"), strategy: "cmake"),
-        PackageSpec.new("busybox", DEFAULT_BUSYBOX, URI.parse("https://busybox.net/downloads/busybox-#{DEFAULT_BUSYBOX}.tar.bz2"), strategy: "busybox"),
+        PackageSpec.new("busybox", DEFAULT_BUSYBOX, URI.parse("https://github.com/mirror/busybox/archive/refs/tags/#{DEFAULT_BUSYBOX.tr(".", "_")}.tar.gz"), strategy: "busybox"),
         PackageSpec.new("make", DEFAULT_GNU_MAKE, URI.parse("https://ftp.gnu.org/gnu/make/make-#{DEFAULT_GNU_MAKE}.tar.gz")),
         PackageSpec.new("zlib", DEFAULT_ZLIB, URI.parse("https://zlib.net/zlib-#{DEFAULT_ZLIB}.tar.gz")),
         PackageSpec.new("libressl", DEFAULT_LIBRESSL, URI.parse("https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-#{DEFAULT_LIBRESSL}.tar.gz")),
@@ -141,9 +141,9 @@ module Bootstrap
         PackageSpec.new("llvm-project", DEFAULT_LLVM_VER, URI.parse("https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-#{DEFAULT_LLVM_VER}.tar.gz"), strategy: "llvm"),
         PackageSpec.new("bdwgc", DEFAULT_BDWGC, URI.parse("https://github.com/ivmai/bdwgc/releases/download/v#{DEFAULT_BDWGC}/gc-#{DEFAULT_BDWGC}.tar.gz")),
         PackageSpec.new("pcre2", DEFAULT_PCRE2, URI.parse("https://github.com/PhilipHazel/pcre2/releases/download/pcre2-#{DEFAULT_PCRE2}/pcre2-#{DEFAULT_PCRE2}.tar.gz")),
-        PackageSpec.new("gmp", DEFAULT_GMP, URI.parse("https://ftp.gnu.org/gnu/gmp/gmp-#{DEFAULT_GMP}.tar.xz")),
+        PackageSpec.new("gmp", DEFAULT_GMP, URI.parse("https://ftp.gnu.org/gnu/gmp/gmp-#{DEFAULT_GMP}.tar.gz")),
         PackageSpec.new("libiconv", DEFAULT_LIBICONV, URI.parse("https://ftp.gnu.org/pub/gnu/libiconv/libiconv-#{DEFAULT_LIBICONV}.tar.gz")),
-        PackageSpec.new("libxml2", DEFAULT_LIBXML2, URI.parse("https://download.gnome.org/sources/libxml2/#{DEFAULT_LIBXML2.split('.')[0...-1].join(".")}/libxml2-#{DEFAULT_LIBXML2}.tar.xz")),
+        PackageSpec.new("libxml2", DEFAULT_LIBXML2, URI.parse("https://github.com/GNOME/libxml2/archive/refs/tags/v#{DEFAULT_LIBXML2}.tar.gz")),
         PackageSpec.new("libyaml", DEFAULT_LIBYAML, URI.parse("https://pyyaml.org/download/libyaml/yaml-#{DEFAULT_LIBYAML}.tar.gz")),
         PackageSpec.new("libffi", DEFAULT_LIBFFI, URI.parse("https://github.com/libffi/libffi/releases/download/v#{DEFAULT_LIBFFI}/libffi-#{DEFAULT_LIBFFI}.tar.gz")),
       ]
@@ -391,37 +391,18 @@ module Bootstrap
 
     # Produce a gzipped tarball of the prepared rootfs so it can be consumed by
     # tooling that expects a chroot-able environment.
-    def generate_chroot_tarball(output : Path? = nil, include_sources : Bool = true) : Path
+    def generate_chroot(include_sources : Bool = true) : Path
       prepare_rootfs(include_sources: include_sources)
       write_plan
+      rootfs_dir
+    end
+
+    def generate_chroot_tarball(output : Path? = nil, include_sources : Bool = true) : Path
+      generate_chroot(include_sources: include_sources)
       output ||= rootfs_dir.parent / "sysroot.tar.gz"
       FileUtils.mkdir_p(output.parent) if output.parent
       write_tar_gz(rootfs_dir, output)
       output
-    end
-
-    # Execute (or return) the chroot rebuild command. Dry-run returns argv for
-    # testing; normal mode invokes `crystal run` on the coordinator inside the
-    # chroot using Process.chroot.
-    # Called by higher-level orchestration when rebuilding inside the prepared chroot.
-    def rebuild_in_chroot(dry_run : Bool = false)
-      Log.info { "Rebuild in chroot requested (dry_run=#{dry_run})" }
-      coordinator = "/usr/local/bin/sysroot_runner_main.cr"
-      unless File.exists?(rootfs_dir / coordinator)
-        raise "Coordinator not installed at #{coordinator}"
-      end
-
-      commands = [
-        ["apk", "add", "--no-cache", "crystal"],
-        ["crystal", "run", coordinator],
-      ]
-      return commands if dry_run
-
-      Log.info { "Chrooting into #{rootfs_dir} to install Crystal and run coordinator" }
-      Process.chroot(rootfs_dir.to_s)
-      Dir.cd("/")
-      install_crystal(commands[0])
-      run_coordinator(commands[1])
     end
 
     private def strip_archive_extension(filename : String) : String
@@ -457,19 +438,7 @@ module Bootstrap
       raise "Failed to create tarball with system tar" unless status.success?
     end
 
-    private def install_crystal(command : Array(String))
-      Log.info { "Installing Crystal compiler inside chroot with: #{command.join(" ")}" }
-      status = Process.run(command[0], command[1..])
-      raise "Failed to install Crystal in chroot (#{status.exit_code})" unless status.success?
-    end
-
-    private def run_coordinator(command : Array(String))
-      Log.info { "Running sysroot coordinator: #{command.join(" ")}" }
-      status = Process.run(command[0], command[1..])
-      raise "Failed to rebuild packages in chroot (#{status.exit_code})" unless status.success?
-    end
-
-    private def build_commands_for(pkg : PackageSpec, sysroot_prefix : String, cpus : Int32) : Array(Array(String))
+    private def build_commands_for(pkg : PackageSpec, sysroot_prefix : String) : Array(Array(String))
       # The builder remains data-only: embed strategy metadata and let the runner
       # translate into concrete commands.
       Array(Array(String)).new

@@ -229,7 +229,24 @@ describe Bootstrap::SysrootBuilder do
     end
   end
 
-  it "returns chroot command when running in dry-run mode" do
+  it "can prepare a chroot directory without a tarball" do
+    with_tempdir do |dir|
+      tar_dir = dir / "tarroot"
+      FileUtils.mkdir_p(tar_dir)
+      File.write(tar_dir / "etc.txt", "config")
+      tarball = dir / "miniroot.tar"
+      Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
+
+      builder = StubBuilder.new(dir)
+      builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
+      builder.fake_tarball = tarball
+      rootfs = builder.generate_chroot
+      rootfs.should eq builder.rootfs_dir
+      File.exists?(rootfs / "workspace").should be_true
+    end
+  end
+
+  it "prepares a rootfs with the coordinator staged" do
     with_tempdir do |dir|
       tar_dir = dir / "tarroot"
       FileUtils.mkdir_p(tar_dir)
@@ -241,11 +258,7 @@ describe Bootstrap::SysrootBuilder do
       builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
       builder.fake_tarball = tarball
       builder.prepare_rootfs
-      commands = builder.rebuild_in_chroot(true)
-      commands.should eq [
-        ["apk", "add", "--no-cache", "crystal"],
-        ["crystal", "run", "/usr/local/bin/sysroot_runner_main.cr"],
-      ]
+      File.exists?(builder.rootfs_dir / "usr/local/bin/sysroot_runner_main.cr").should be_true
     end
   end
 end
