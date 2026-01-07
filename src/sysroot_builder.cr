@@ -438,6 +438,7 @@ module Bootstrap
     rescue ex
       Log.warn { "Falling back to system tar due to: #{ex.message}" }
       File.delete?(output)
+      Log.info { "Running: tar -czf #{output} -C #{source} ." }
       status = Process.run("tar", ["-czf", output.to_s, "-C", source.to_s, "."])
       raise "Failed to create tarball with system tar" unless status.success?
     end
@@ -483,6 +484,7 @@ module Bootstrap
 
       private def fallback_for_unhandled_compression? : Bool
         if @archive.to_s.ends_with?(".tar.xz") || @archive.to_s.ends_with?(".tar.bz2")
+          Log.info { "Running: tar -xf #{@archive} -C #{@destination}" }
           status = Process.run("tar", ["-xf", @archive.to_s, "-C", @destination.to_s])
           raise "Failed to extract #{@archive}" unless status.success?
           true
@@ -523,7 +525,8 @@ module Bootstrap
             File.chmod(target, header_mode(header))
           when "2" # symlink
             FileUtils.mkdir_p(target.parent)
-            File.symlink(linkname, target)
+            File.delete?(target)
+            FileUtils.ln_s(linkname, target)
           else # regular file
             FileUtils.mkdir_p(target.parent)
             write_file(target, size, header_mode(header))
