@@ -404,13 +404,16 @@ module Bootstrap
         raise "Coordinator not installed at #{coordinator}"
       end
 
-      args = ["crystal", "run", coordinator]
-      return args if dry_run
+      commands = [
+        ["apk", "add", "--no-cache", "crystal"],
+        ["crystal", "run", coordinator],
+      ]
+      return commands if dry_run
 
       Process.chroot(rootfs_dir.to_s)
       Dir.cd("/")
-      status = Process.run(args[0], args[1..])
-      raise "Failed to rebuild packages in chroot (#{status.exit_code})" unless status.success?
+      install_crystal(commands[0])
+      run_coordinator(commands[1])
     end
 
     private def strip_archive_extension(filename : String) : String
@@ -436,6 +439,18 @@ module Bootstrap
       File.delete?(output)
       status = Process.run("tar", ["-czf", output.to_s, "-C", source.to_s, "."])
       raise "Failed to create tarball with system tar" unless status.success?
+    end
+
+    private def install_crystal(command : Array(String))
+      Log.info { "Installing Crystal compiler inside chroot with: #{command.join(" ")}" }
+      status = Process.run(command[0], command[1..])
+      raise "Failed to install Crystal in chroot (#{status.exit_code})" unless status.success?
+    end
+
+    private def run_coordinator(command : Array(String))
+      Log.info { "Running sysroot coordinator: #{command.join(" ")}" }
+      status = Process.run(command[0], command[1..])
+      raise "Failed to rebuild packages in chroot (#{status.exit_code})" unless status.success?
     end
 
     private def build_commands_for(pkg : PackageSpec, sysroot_prefix : String, cpus : Int32) : Array(Array(String))

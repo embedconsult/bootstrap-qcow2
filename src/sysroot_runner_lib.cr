@@ -39,6 +39,7 @@ module Bootstrap
 
       def run(step : BuildStep)
         Dir.cd(step.workdir) do
+          Log.info { "Starting #{step.strategy} build for #{step.name} (cpus=#{step.cpus})" }
           apply_patches(step.patches)
           case step.strategy
           when "cmake"
@@ -58,31 +59,40 @@ module Bootstrap
             run_cmd(["make", "-j#{step.cpus}"])
             run_cmd(["make", "install"])
           end
+          Log.info { "Finished #{step.name}" }
         end
       end
 
       private def apply_patches(patches : Array(String))
         patches.each do |patch|
+          Log.info { "Applying patch #{patch}" }
           status = Process.run("patch", ["-p1", "-i", patch])
           raise "Patch failed (#{status.exit_code}): #{patch}" unless status.success?
         end
       end
 
       private def run_cmd(argv : Array(String))
+        Log.info { "Running: #{argv.join(" ")}" }
         status = Process.run(argv[0], argv[1..])
-        raise "Command failed (#{status.exit_code}): #{argv.join(" ")}" unless status.success?
+        unless status.success?
+          Log.error { "Command failed (#{status.exit_code}): #{argv.join(" ")}" }
+          raise "Command failed (#{status.exit_code}): #{argv.join(" ")}"
+        end
+        Log.debug { "Completed #{argv.first} with exit #{status.exit_code}" }
       end
     end
 
     # Load a JSON build plan from disk and replay it using the provided runner.
     def self.run_plan(path : String = "/var/lib/sysroot-build-plan.json", runner : CommandRunner = SystemRunner.new)
       raise "Missing build plan #{path}" unless File.exists?(path)
+      Log.info { "Loading build plan from #{path}" }
       steps = Array(BuildStep).from_json(File.read(path))
       run_steps(steps, runner)
     end
 
     # Execute a list of BuildStep entries, stopping immediately on failure.
     def self.run_steps(steps : Array(BuildStep), runner : CommandRunner = SystemRunner.new)
+      Log.info { "Executing #{steps.size} build steps" }
       steps.each do |step|
         Log.info { "Building #{step.name} in #{step.workdir}" }
         runner.run(step)

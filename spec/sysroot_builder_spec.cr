@@ -224,8 +224,11 @@ describe Bootstrap::SysrootBuilder do
       builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
       builder.fake_tarball = tarball
       builder.prepare_rootfs
-      args = builder.rebuild_in_chroot(true)
-      args.should eq ["crystal", "run", "/usr/local/bin/sysroot_runner_main.cr"]
+      commands = builder.rebuild_in_chroot(true)
+      commands.should eq [
+        ["apk", "add", "--no-cache", "crystal"],
+        ["crystal", "run", "/usr/local/bin/sysroot_runner_main.cr"],
+      ]
     end
   end
 end
