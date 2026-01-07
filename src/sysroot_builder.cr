@@ -317,10 +317,12 @@ module Bootstrap
     # * stages the coordinator entrypoints
     # Returns the rootfs path on success.
     def prepare_rootfs(base_rootfs : PackageSpec = base_rootfs_spec, include_sources : Bool = true) : Path
+      Log.info { "Preparing rootfs at #{rootfs_dir} (include_sources=#{include_sources})" }
       FileUtils.rm_rf(rootfs_dir)
       FileUtils.mkdir_p(rootfs_dir)
 
       tarball = download_and_verify(base_rootfs)
+      Log.info { "Extracting base rootfs from #{tarball}" }
       extract_tarball(tarball, rootfs_dir)
       FileUtils.mkdir_p(rootfs_dir / "workspace")
       FileUtils.mkdir_p(rootfs_dir / "var/lib")
@@ -333,6 +335,7 @@ module Bootstrap
     def stage_sources : Nil
       workspace_path = rootfs_dir / "workspace"
       download_sources.each do |archive|
+        Log.info { "Extracting source archive #{archive} into #{workspace_path}" }
         extract_tarball(archive, workspace_path)
       end
     end
@@ -399,6 +402,7 @@ module Bootstrap
     # testing; normal mode invokes `crystal run` on the coordinator inside the
     # chroot using Process.chroot.
     def rebuild_in_chroot(dry_run : Bool = false)
+      Log.info { "Rebuild in chroot requested (dry_run=#{dry_run})" }
       coordinator = "/usr/local/bin/sysroot_runner_main.cr"
       unless File.exists?(rootfs_dir / coordinator)
         raise "Coordinator not installed at #{coordinator}"
@@ -510,6 +514,8 @@ module Bootstrap
           break if header.all? { |b| b == 0u8 }
 
           name = cstring(header[0, 100])
+          prefix = cstring(header[345, 155])
+          name = "#{prefix}/#{name}" unless prefix.empty?
           size = octal_to_i(header[124, 12])
           typeflag = header[156].chr
           linkname = cstring(header[157, 100])
@@ -527,6 +533,7 @@ module Bootstrap
             File.chmod(target, header_mode(header))
           when "2" # symlink
             FileUtils.mkdir_p(target.parent)
+            Log.debug { "Creating symlink #{target} -> #{linkname}" }
             FileUtils.ln_sf(linkname, target)
           else # regular file
             FileUtils.mkdir_p(target.parent)
