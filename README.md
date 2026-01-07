@@ -1,18 +1,40 @@
 # bootstrap-qcow2
 
-TODO: Write a description here
+[![CI](https://github.com/jkridner/bootstrap-qcow2/actions/workflows/ci.yml/badge.svg)](https://github.com/jkridner/bootstrap-qcow2/actions/workflows/ci.yml)
+
+Build reproducible QCOW2 and chroot images with Crystal-first tooling. The sysroot builder targets aarch64 by default, caches upstream source tarballs, and stages a chroot that can rebuild the sysroot inside itself using a Crystal coordinator. Alpine’s 3.23.2 minirootfs is the current bootstrap seed, but the builder is designed so the starting rootfs, architecture, and package set remain swappable once a self-hosted rootfs is available.
 
 ## Installation
 
-TODO: Write installation instructions here
+1. Install Crystal 1.18.2 or newer.
+2. Run `shards install` (no postinstall steps are required).
 
 ## Usage
 
-TODO: Write usage instructions here
+Generate a chrootable sysroot tarball (default workspace: `data/sysroot`) with the helper entrypoint:
+
+```bash
+crystal run src/sysroot_builder_main.cr -- --output sysroot.tar.gz
+```
+Pass `--skip-sources` to omit cached source archives when you only need the base rootfs and coordinator.
+
+The tarball includes:
+- Alpine minirootfs 3.23.2 (aarch64 by default)
+- Cached source archives for core packages (musl, busybox, clang/LLVM, etc.)
+- A serialized build plan consumed by the coordinator
+- Coordinator entrypoints at `/usr/local/bin/sysroot_runner_main.cr`
+
+Inside the chroot you can rebuild packages with the coordinator (uses `Process.chroot` instead of the `chroot` binary):
+
+```bash
+crystal run /usr/local/bin/sysroot_runner_main.cr
+```
 
 ## Development
 
-TODO: Write development instructions here
+- Format Crystal code with `crystal tool format`.
+- Run specs with `crystal spec`.
+- CI: GitHub Actions (`.github/workflows/ci.yml`) runs format + specs on push/PR; triggerable from the Actions tab.
 
 ## Contributing
 
