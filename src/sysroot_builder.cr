@@ -445,12 +445,14 @@ module Bootstrap
 
     private def install_crystal(command : Array(String))
       Log.info { "Installing Crystal compiler inside chroot with: #{command.join(" ")}" }
+      Log.info { "Running: #{command.join(" ")}" }
       status = Process.run(command[0], command[1..])
       raise "Failed to install Crystal in chroot (#{status.exit_code})" unless status.success?
     end
 
     private def run_coordinator(command : Array(String))
       Log.info { "Running sysroot coordinator: #{command.join(" ")}" }
+      Log.info { "Running: #{command.join(" ")}" }
       status = Process.run(command[0], command[1..])
       raise "Failed to rebuild packages in chroot (#{status.exit_code})" unless status.success?
     end
@@ -525,8 +527,7 @@ module Bootstrap
             File.chmod(target, header_mode(header))
           when "2" # symlink
             FileUtils.mkdir_p(target.parent)
-            File.delete?(target)
-            FileUtils.ln_s(linkname, target)
+            FileUtils.ln_sf(linkname, target)
           else # regular file
             FileUtils.mkdir_p(target.parent)
             write_file(target, size, header_mode(header))
