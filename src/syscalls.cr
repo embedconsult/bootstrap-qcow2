@@ -86,7 +86,7 @@ module Bootstrap
       end
 
       payload = content.ends_with?("\n") ? content : "#{content}\n"
-      File.open("#{root}/#{entry}", "w") do |file|
+      File.open(File.join(root, entry), "w") do |file|
         file.sync = true
         file.print(payload)
       end
