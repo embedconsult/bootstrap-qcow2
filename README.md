@@ -60,6 +60,7 @@ When you run a coordinator executable in the rootfs, the expected flow is:
 5. Execute the coordinator entrypoint inside the rootfs (e.g. `crystal run /usr/local/bin/sysroot_runner_main.cr`).
 
 The namespace helper in `src/namespace_wrapper.cr` is intended to wrap steps 1–2; a caller is responsible for the mount and pivot/chroot steps so the rootfs becomes the execution context.
+`Bootstrap::Syscalls` raises `RuntimeError.from_errno` on syscall failures, so callers should expect exception-driven error reporting when kernel settings or privileges are missing.
 
 ## Contributing
 

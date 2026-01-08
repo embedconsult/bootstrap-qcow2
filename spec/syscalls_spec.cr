@@ -11,6 +11,56 @@ ensure
 end
 
 describe Bootstrap::Syscalls do
+  describe ".unshare" do
+    pending "requires unprivileged user namespaces on the host kernel" do
+      Bootstrap::Syscalls.unshare(Bootstrap::Syscalls::CLONE_NEWUSER)
+    end
+  end
+
+  describe ".mount" do
+    pending "requires mount namespace privileges on the host kernel" do
+      Bootstrap::Syscalls.mount("tmpfs", "/tmp", "tmpfs", Bootstrap::Syscalls::MS_NODEV)
+    end
+  end
+
+  describe ".umount2" do
+    pending "requires mount namespace privileges on the host kernel" do
+      Bootstrap::Syscalls.umount2("/tmp", Bootstrap::Syscalls::MNT_DETACH)
+    end
+  end
+
+  describe ".pivot_root" do
+    pending "requires mount namespace privileges and a prepared pivot root" do
+      Bootstrap::Syscalls.pivot_root("/new-root", "/new-root/old-root")
+    end
+  end
+
+  describe ".chdir" do
+    it "changes the working directory" do
+      with_tmpdir do |dir|
+        original = Dir.current
+        begin
+          Bootstrap::Syscalls.chdir(dir)
+          Dir.current.should eq(dir)
+        ensure
+          Bootstrap::Syscalls.chdir(original)
+        end
+      end
+    end
+  end
+
+  describe ".chroot" do
+    pending "requires root privileges and a prepared rootfs" do
+      Bootstrap::Syscalls.chroot("/new-root")
+    end
+  end
+
+  describe ".sethostname" do
+    pending "requires UTS namespace privileges on the host kernel" do
+      Bootstrap::Syscalls.sethostname("bootstrap-qcow2")
+    end
+  end
+
   describe ".write_proc_self_map" do
     it "rejects unsupported entries" do
       expect_raises(ArgumentError, "Unsupported proc entry") do
