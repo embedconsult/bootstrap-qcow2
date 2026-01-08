@@ -36,6 +36,31 @@ crystal run /usr/local/bin/sysroot_runner_main.cr
 - Run specs with `crystal spec`.
 - CI: GitHub Actions (`.github/workflows/ci.yml`) runs format + specs on push/PR; triggerable from the Actions tab.
 
+## Namespace setup for rootfs execution
+
+To run build or coordinator executables inside the staged rootfs using user+mount namespaces, the host kernel must allow unprivileged user namespaces and mount namespaces. Ensure the following are enabled in your kernel configuration:
+
+- `CONFIG_USER_NS` (user namespaces)
+- `CONFIG_UTS_NS` (optional, for `sethostname`)
+- `CONFIG_MOUNT_NS` (mount namespaces)
+- `CONFIG_PID_NS` (optional, if you plan to isolate PIDs)
+
+Many distros also gate unprivileged user namespaces behind a sysctl. Enable it before running the coordinator:
+
+```bash
+sudo sysctl -w kernel.unprivileged_userns_clone=1
+```
+
+When you run a coordinator executable in the rootfs, the expected flow is:
+
+1. Unshare user + mount namespaces via `Bootstrap::Syscalls.unshare`.
+2. Write `/proc/self/setgroups`, `/proc/self/uid_map`, and `/proc/self/gid_map` via `Bootstrap::Syscalls.write_proc_self_map`.
+3. Make the rootfs mount private, then bind-mount the rootfs onto itself (for pivoting) using `Bootstrap::Syscalls.mount` with `MS_PRIVATE | MS_REC` and `MS_BIND | MS_REC`.
+4. Use `Bootstrap::Syscalls.pivot_root` (or `Bootstrap::Syscalls.chroot` if pivoting is not required), then `Bootstrap::Syscalls.chdir("/")`.
+5. Execute the coordinator entrypoint inside the rootfs (e.g. `crystal run /usr/local/bin/sysroot_runner_main.cr`).
+
+The namespace helper in `src/namespace_wrapper.cr` is intended to wrap steps 1–2; a caller is responsible for the mount and pivot/chroot steps so the rootfs becomes the execution context.
+
 ## Contributing
 
 1. Fork it (<https://github.com/your-github-user/bootstrap-qcow2/fork>)
