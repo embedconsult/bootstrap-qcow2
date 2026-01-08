@@ -10,6 +10,29 @@ ensure
   FileUtils.rm_rf(dir) if dir
 end
 
+private def user_namespace_available? : Bool
+  pid = Process.fork do
+    begin
+      Bootstrap::Syscalls.unshare(Bootstrap::Syscalls::CLONE_NEWUSER)
+      exit 0
+    rescue ex : Errno
+      exit ex.errno == Errno::EPERM ? 1 : 2
+    rescue
+      exit 2
+    end
+  end
+
+  status = Process.wait(pid)
+  case status.exit_code
+  when 0
+    true
+  when 1
+    false
+  else
+    raise "Unexpected failure probing user namespaces (exit #{status.exit_code})"
+  end
+end
+
 describe Bootstrap::Syscalls do
   describe ".write_proc_self_map" do
     it "rejects unsupported entries" do
@@ -34,6 +57,23 @@ describe Bootstrap::Syscalls do
         content = File.read(File.join(dir, "uid_map"))
         content.should eq("0 1000 1\n")
       end
+    end
+
+    it "writes mappings after unsharing a user namespace" do
+      pending "requires unprivileged user namespaces (see README)" unless user_namespace_available?
+
+      pid = Process.fork do
+        Bootstrap::Syscalls.unshare(Bootstrap::Syscalls::CLONE_NEWUSER)
+        Bootstrap::Syscalls.write_proc_self_map("setgroups", "deny")
+        Bootstrap::Syscalls.write_proc_self_map("uid_map", "0 #{Process.uid} 1")
+        Bootstrap::Syscalls.write_proc_self_map("gid_map", "0 #{Process.gid} 1")
+        exit 0
+      rescue
+        exit 1
+      end
+
+      status = Process.wait(pid)
+      status.exit_code.should eq 0
     end
   end
 end
