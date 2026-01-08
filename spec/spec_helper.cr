@@ -1,6 +1,7 @@
 require "spec"
 require "log"
 require "path"
+require "lib_c"
 require "../src/bootstrap-qcow2"
 require "../src/sysroot_builder"
 require "../src/sysroot_runner_lib"

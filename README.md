@@ -35,6 +35,33 @@ crystal run /usr/local/bin/sysroot_runner_main.cr
 - Format Crystal code with `crystal tool format`.
 - Run specs with `crystal spec`.
 - CI: GitHub Actions (`.github/workflows/ci.yml`) runs format + specs on push/PR; triggerable from the Actions tab.
+- Specs that require kernel privileges run automatically when the host exposes the needed namespaces; otherwise they are marked `pending`.
+
+## Namespace setup for rootfs execution
+
+To run build or coordinator executables inside the staged rootfs using user+mount namespaces, the host kernel must allow unprivileged user namespaces and mount namespaces. Ensure the following are enabled in your kernel configuration:
+
+- `CONFIG_USER_NS` (user namespaces)
+- `CONFIG_UTS_NS` (optional, for `sethostname`)
+- `CONFIG_MOUNT_NS` (mount namespaces)
+- `CONFIG_PID_NS` (optional, if you plan to isolate PIDs)
+
+Many distros also gate unprivileged user namespaces behind a sysctl. Enable it before running the coordinator:
+
+```bash
+sudo sysctl -w kernel.unprivileged_userns_clone=1
+```
+
+When you run a coordinator executable in the rootfs, the expected flow is:
+
+1. Unshare user + mount namespaces via `Bootstrap::Syscalls.unshare`.
+2. Write `/proc/self/setgroups`, `/proc/self/uid_map`, and `/proc/self/gid_map` via `Bootstrap::Syscalls.write_proc_self_map`.
+3. Make the rootfs mount private, then bind-mount the rootfs onto itself (for pivoting) using `Bootstrap::Syscalls.mount` with `MS_PRIVATE | MS_REC` and `MS_BIND | MS_REC`.
+4. Use `Bootstrap::Syscalls.pivot_root` (or `Bootstrap::Syscalls.chroot` if pivoting is not required), then `Bootstrap::Syscalls.chdir("/")`.
+5. Execute the coordinator entrypoint inside the rootfs (e.g. `crystal run /usr/local/bin/sysroot_runner_main.cr`).
+
+The namespace helper in `src/namespace_wrapper.cr` provides `with_updated_root` to perform steps 1–4 and run a caller-provided block inside the updated root context, with cleanup handled via `ensure`.
+`Bootstrap::Syscalls` raises `RuntimeError.from_errno` on syscall failures, so callers should expect exception-driven error reporting when kernel settings or privileges are missing.
 
 ## Contributing
 
