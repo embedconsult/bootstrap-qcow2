@@ -2,7 +2,7 @@ require "./syscalls"
 
 module Bootstrap
   class NamespaceWrapper
-    def self.unshare_user_and_mount(uid : Int32, gid : Int32)
+    def self.unshare_user_and_mount(uid : Int32 = Process.uid, gid : Int32 = Process.gid)
       Syscalls.unshare(Syscalls::CLONE_NEWUSER | Syscalls::CLONE_NEWNS)
       Syscalls.write_proc_self_map("setgroups", "deny")
       Syscalls.write_proc_self_map("uid_map", "0 #{uid} 1")
