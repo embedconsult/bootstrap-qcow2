@@ -1,5 +1,4 @@
 require "./spec_helper"
-require "../src/syscalls"
 require "random/secure"
 
 private def with_tmpdir(&)
@@ -8,29 +7,6 @@ private def with_tmpdir(&)
   yield dir
 ensure
   FileUtils.rm_rf(dir) if dir
-end
-
-private def user_namespace_available? : Bool
-  pid = Process.fork do
-    begin
-      Bootstrap::Syscalls.unshare(Bootstrap::Syscalls::CLONE_NEWUSER)
-      exit 0
-    rescue ex : Errno
-      exit ex.errno == Errno::EPERM ? 1 : 2
-    rescue
-      exit 2
-    end
-  end
-
-  status = Process.wait(pid)
-  case status.exit_code
-  when 0
-    true
-  when 1
-    false
-  else
-    raise "Unexpected failure probing user namespaces (exit #{status.exit_code})"
-  end
 end
 
 describe Bootstrap::Syscalls do
@@ -60,7 +36,8 @@ describe Bootstrap::Syscalls do
     end
 
     it "writes mappings after unsharing a user namespace" do
-      pending "requires unprivileged user namespaces (see README)" unless user_namespace_available?
+      available = namespace_maps_available?
+      pending "requires unprivileged user namespaces (see README)" unless available
 
       pid = Process.fork do
         Bootstrap::Syscalls.unshare(Bootstrap::Syscalls::CLONE_NEWUSER)
@@ -74,6 +51,7 @@ describe Bootstrap::Syscalls do
 
       status = Process.wait(pid)
       status.exit_code.should eq 0
+      available.should be_true
     end
   end
 end
