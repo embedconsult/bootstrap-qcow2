@@ -35,7 +35,7 @@ crystal run /usr/local/bin/sysroot_runner_main.cr
 - Format Crystal code with `crystal tool format`.
 - Run specs with `crystal spec`.
 - CI: GitHub Actions (`.github/workflows/ci.yml`) runs format + specs on push/PR; triggerable from the Actions tab.
-- To run privileged namespace specs locally, set `BOOTSTRAP_QCOW2_PRIVILEGED_SPECS=1` after enabling the kernel settings described below.
+- Specs that require kernel privileges run automatically when the host exposes the needed namespaces; otherwise they are marked `pending`.
 
 ## Namespace setup for rootfs execution
 
@@ -60,7 +60,7 @@ When you run a coordinator executable in the rootfs, the expected flow is:
 4. Use `Bootstrap::Syscalls.pivot_root` (or `Bootstrap::Syscalls.chroot` if pivoting is not required), then `Bootstrap::Syscalls.chdir("/")`.
 5. Execute the coordinator entrypoint inside the rootfs (e.g. `crystal run /usr/local/bin/sysroot_runner_main.cr`).
 
-The namespace helper in `src/namespace_wrapper.cr` is intended to wrap steps 1–2; a caller is responsible for the mount and pivot/chroot steps so the rootfs becomes the execution context.
+The namespace helper in `src/namespace_wrapper.cr` provides `with_updated_root` to perform steps 1–4 and run a caller-provided block inside the updated root context, with cleanup handled via `ensure`.
 `Bootstrap::Syscalls` raises `RuntimeError.from_errno` on syscall failures, so callers should expect exception-driven error reporting when kernel settings or privileges are missing.
 
 ## Contributing

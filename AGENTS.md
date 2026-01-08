@@ -16,12 +16,13 @@ These instructions apply to the entire repository unless overridden by a nested 
 - Avoid adding new shell scripts or Bash-centric tooling. If orchestration is required, implement it as Crystal CLI utilities.
 - Keep dependency additions rare and justified in commit/PR context; prefer vendoring source or Crystal shards that align with the LLVM/Clang toolchain.
 - When touching build steps, prefer deterministic, offline-friendly workflows that keep generated artifacts reproducible.
+- All code must be human-readable: Human-readable code MUST be written for a technically literate human who has a reasonable mental model of what a computer is and the general classes of operations a machine can perform (e.g., data movement, arithmetic and logic, control flow, memory access, and I/O), without requiring knowledge of any specific instruction set architecture. Such code MUST allow the reader to infer, from the high-level structure and naming alone, the types of machine-level operations implied by each section, follow the natural flow of execution without detailed simulation, and progressively build an accurate understanding of behavior through reading the code and its comments. Code that obscures intent, relies on implicit knowledge, or requires external explanation to understand its operational flow SHOULD NOT be considered human-readable.
 
 ## Testing and quality
 - Run `crystal tool format` on modified Crystal files.
 - Add or update automated checks (Crystal specs or integration exercises) when changing build logic, boot flow, or image layout.
 - Document architecture-specific behaviors or assumptions (especially for aarch64) near the code that enforces them.
-- For every task, add documentation updates and specs for all public functions (use `pending` where kernel settings or privileges are required), and rerun `crystal spec` plus `crystal tool format`.
+- For every task, add documentation updates and specs for all public functions; when specs depend on kernel privileges, detect availability and run success paths when possible, otherwise fall back to `pending`. Always rerun `crystal spec` and `crystal tool format`.
 
 ## PR/commit expectations
 - Commit messages should summarize the behavioral change and the architecture(s) affected.

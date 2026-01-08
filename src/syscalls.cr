@@ -12,11 +12,14 @@ module Bootstrap
       fun chdir(path : ::LibC::Char*) : Int32
       fun chroot(path : ::LibC::Char*) : Int32
       fun sethostname(name : ::LibC::Char*, len : ::LibC::SizeT) : Int32
+      fun geteuid : UInt32
+      fun getegid : UInt32
     end
 
     # Clone/unshare flags (see include/uapi/linux/sched.h).
     CLONE_NEWUSER = 0x10000000
     CLONE_NEWNS   = 0x00020000
+    CLONE_NEWUTS  = 0x04000000
 
     # Mount flags (see include/uapi/linux/fs.h and shared subtree docs).
     MS_RDONLY  = ::LibC::ULong.new(0x1)
@@ -88,6 +91,15 @@ module Bootstrap
       result = LibC.sethostname(name.to_unsafe, name.bytesize)
       raise_errno("sethostname") unless result == 0
       result
+    end
+
+    # Effective user/group IDs for privilege detection.
+    def self.euid : UInt32
+      LibC.geteuid
+    end
+
+    def self.egid : UInt32
+      LibC.getegid
     end
 
     # Procfs namespace ABI docs:
