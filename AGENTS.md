@@ -21,6 +21,7 @@ These instructions apply to the entire repository unless overridden by a nested 
 - Run `crystal tool format` on modified Crystal files.
 - Add or update automated checks (Crystal specs or integration exercises) when changing build logic, boot flow, or image layout.
 - Document architecture-specific behaviors or assumptions (especially for aarch64) near the code that enforces them.
+- For every task, add documentation updates and specs for all public functions (use `pending` where kernel settings or privileges are required), and rerun `crystal spec` plus `crystal tool format`.
 
 ## PR/commit expectations
 - Commit messages should summarize the behavioral change and the architecture(s) affected.

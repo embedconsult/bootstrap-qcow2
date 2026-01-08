@@ -3,6 +3,7 @@ require "lib_c"
 module Bootstrap
   module Syscalls
     # Thin libc syscall bindings with small helpers for namespace and mount setup.
+    # Kernel documentation: https://docs.kernel.org/userspace-api/namespaces.html
     lib LibC
       fun unshare(flags : Int32) : Int32
       fun mount(source : ::LibC::Char*, target : ::LibC::Char*, filesystemtype : ::LibC::Char*, mountflags : ::LibC::ULong, data : Void*) : Int32
@@ -13,9 +14,11 @@ module Bootstrap
       fun sethostname(name : ::LibC::Char*, len : ::LibC::SizeT) : Int32
     end
 
+    # Clone/unshare flags (see include/uapi/linux/sched.h).
     CLONE_NEWUSER = 0x10000000
     CLONE_NEWNS   = 0x00020000
 
+    # Mount flags (see include/uapi/linux/fs.h and shared subtree docs).
     MS_RDONLY  = ::LibC::ULong.new(0x1)
     MS_NOSUID  = ::LibC::ULong.new(0x2)
     MS_NODEV   = ::LibC::ULong.new(0x4)
@@ -26,6 +29,7 @@ module Bootstrap
     MS_SLAVE   = ::LibC::ULong.new(0x80000)
     MS_SHARED  = ::LibC::ULong.new(0x100000)
 
+    # Unmount flags (see include/uapi/linux/mount.h).
     MNT_DETACH = 0x2
 
     ALLOWED_PROC_SELF_MAPS = {"uid_map", "gid_map", "setgroups"}
@@ -86,6 +90,10 @@ module Bootstrap
       result
     end
 
+    # Procfs namespace ABI docs:
+    # https://docs.kernel.org/filesystems/proc.html#proc-pid-uid-map
+    # https://docs.kernel.org/filesystems/proc.html#proc-pid-gid-map
+    # https://docs.kernel.org/filesystems/proc.html#proc-pid-setgroups
     PROC_SELF_ROOT = "/proc/self"
 
     # Write validated mapping content to /proc/self/{uid_map,gid_map,setgroups}.

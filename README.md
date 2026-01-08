@@ -35,6 +35,7 @@ crystal run /usr/local/bin/sysroot_runner_main.cr
 - Format Crystal code with `crystal tool format`.
 - Run specs with `crystal spec`.
 - CI: GitHub Actions (`.github/workflows/ci.yml`) runs format + specs on push/PR; triggerable from the Actions tab.
+- To run privileged namespace specs locally, set `BOOTSTRAP_QCOW2_PRIVILEGED_SPECS=1` after enabling the kernel settings described below.
 
 ## Namespace setup for rootfs execution
 
