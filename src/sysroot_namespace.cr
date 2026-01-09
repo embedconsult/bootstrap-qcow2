@@ -37,6 +37,76 @@ module Bootstrap
     class NamespaceError < RuntimeError
     end
 
+    # Collect restriction messages that can prevent user-namespace mounts of
+    # proc/sys/dev from succeeding on the current host.
+    def self.collect_restrictions(proc_root : Path = Path["/proc"],
+                                  filesystems_path : Path = Path["/proc/filesystems"],
+                                  setgroups_path : String = "/proc/self/setgroups",
+                                  userns_toggle_path : String = USERNS_TOGGLE_PATH) : Array(String)
+      restrictions = [] of String
+      restrictions << "kernel.unprivileged_userns_clone is disabled" unless unprivileged_userns_clone_enabled?(userns_toggle_path)
+
+      missing_fs = missing_filesystems(filesystems_path, %w(proc sysfs devtmpfs tmpfs))
+      unless missing_fs.empty?
+        restrictions << "missing filesystem support: #{missing_fs.join(", ")}"
+      end
+
+      restrictions.concat(proc_mask_restrictions(proc_root))
+      if (setgroups_note = setgroups_restriction(setgroups_path))
+        restrictions << setgroups_note
+      end
+      restrictions
+    end
+
+    # Returns a list of filesystem types that are missing from /proc/filesystems.
+    def self.missing_filesystems(path : Path, required : Array(String)) : Array(String)
+      return required unless File.exists?(path)
+      available = File.read_lines(path).map { |line| line.split.last? }.compact
+      required.reject { |fs| available.includes?(fs) }
+    end
+
+    # Returns a list of masked proc paths that indicate mount_too_revealing()
+    # will reject new procfs mounts inside unprivileged namespaces.
+    def self.proc_mask_restrictions(proc_root : Path) : Array(String)
+      masked = [] of String
+      masked_targets = %w(sys sysrq-trigger kcore irq bus fs)
+      masked_targets.each do |entry|
+        target = proc_root / entry
+        readable = if File.exists?(target)
+                     readable_by_mode?(File.info(target).permissions)
+                   else
+                     false
+                   end
+        masked << "proc path #{target} is not readable; procfs mount may be denied" unless readable
+      end
+      masked
+    end
+
+    # Returns a restriction message if setgroups is missing or not writable.
+    def self.setgroups_restriction(setgroups_path : String) : String?
+      if File.exists?(setgroups_path)
+        permissions = File.info(setgroups_path).permissions
+        unless readable_by_mode?(permissions) && writable_by_mode?(permissions)
+          return "setgroups is not writable (#{setgroups_path})"
+        end
+        nil
+      elsif LibC.getuid != 0
+        "missing #{setgroups_path}; unprivileged user namespaces require setgroups support"
+      end
+    end
+
+    private def self.readable_by_mode?(permissions : File::Permissions) : Bool
+      permissions.includes?(File::Permissions::OwnerRead) ||
+        permissions.includes?(File::Permissions::GroupRead) ||
+        permissions.includes?(File::Permissions::OtherRead)
+    end
+
+    private def self.writable_by_mode?(permissions : File::Permissions) : Bool
+      permissions.includes?(File::Permissions::OwnerWrite) ||
+        permissions.includes?(File::Permissions::GroupWrite) ||
+        permissions.includes?(File::Permissions::OtherWrite)
+    end
+
     # Returns true when unprivileged user namespace cloning is enabled.
     # If the toggle path does not exist or contains an unexpected value,
     # default to false for safety.

@@ -2,6 +2,79 @@ require "file_utils"
 require "./spec_helper"
 
 describe Bootstrap::SysrootNamespace do
+  describe ".missing_filesystems" do
+    it "returns missing filesystem types" do
+      file = File.tempfile("filesystems")
+      begin
+        file.print("nodev\tproc\nnodev\tsysfs\n")
+        file.flush
+
+        missing = Bootstrap::SysrootNamespace.missing_filesystems(Path[file.path], ["proc", "sysfs", "tmpfs"])
+        missing.should eq ["tmpfs"]
+      ensure
+        file.close
+      end
+    end
+  end
+
+  describe ".proc_mask_restrictions" do
+    it "reports unreadable proc paths" do
+      temp = File.tempfile("proc-root")
+      proc_root = Path[temp.path]
+      temp.close
+      File.delete(proc_root) if File.exists?(proc_root)
+      FileUtils.mkdir_p(proc_root)
+      FileUtils.mkdir_p(proc_root / "sys")
+
+      restrictions = Bootstrap::SysrootNamespace.proc_mask_restrictions(proc_root)
+      restrictions.any? { |entry| entry.includes?("sysrq-trigger") }.should be_true
+    end
+  end
+
+  describe ".setgroups_restriction" do
+    it "returns nil when setgroups is readable and writable" do
+      file = File.tempfile("setgroups")
+      begin
+        file.print("allow\n")
+        file.flush
+
+        restriction = Bootstrap::SysrootNamespace.setgroups_restriction(file.path)
+        restriction.should be_nil
+      ensure
+        file.close
+      end
+    end
+  end
+
+  describe ".collect_restrictions" do
+    it "aggregates filesystem and proc mask restrictions" do
+      proc_root_temp = File.tempfile("proc-root")
+      proc_root = Path[proc_root_temp.path]
+      proc_root_temp.close
+      File.delete(proc_root) if File.exists?(proc_root)
+      FileUtils.mkdir_p(proc_root / "sys")
+
+      filesystems = File.tempfile("filesystems")
+      begin
+        filesystems.print("nodev\tproc\nnodev\tsysfs\nnodev\tdevtmpfs\n")
+        filesystems.flush
+
+        restrictions = Bootstrap::SysrootNamespace.collect_restrictions(
+          proc_root: proc_root,
+          filesystems_path: Path[filesystems.path],
+          setgroups_path: "/missing/setgroups",
+          userns_toggle_path: "/missing/userns"
+        )
+
+        restrictions.any? { |entry| entry.includes?("missing filesystem support") }.should be_true
+        restrictions.any? { |entry| entry.includes?("proc path") }.should be_true
+        restrictions.any? { |entry| entry.includes?("kernel.unprivileged_userns_clone") }.should be_true
+      ensure
+        filesystems.close
+      end
+    end
+  end
+
   describe ".unprivileged_userns_clone_enabled?" do
     it "returns true when the toggle is enabled" do
       file = File.tempfile("userns")
