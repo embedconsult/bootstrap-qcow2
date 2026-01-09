@@ -58,46 +58,50 @@ describe Bootstrap::SysrootNamespace do
     end
   end
 
-  required_fs = %w(proc sysfs devtmpfs tmpfs)
-  available_fs = File.read_lines("/proc/filesystems").map { |line| line.split.last? }.compact
-  missing_fs = required_fs.reject { |fs| available_fs.includes?(fs) }
-
-  if Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled? && missing_fs.empty?
+  if Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled?
     it "unshares namespaces in a subprocess when enabled" do
       # Run in a subprocess to avoid mutating the namespace state of the spec runner.
+      stdout = IO::Memory.new
+      stderr = IO::Memory.new
       status = Process.run(
         "crystal",
         ["eval", "require \"./src/sysroot_namespace\"; Bootstrap::SysrootNamespace.unshare_namespaces"],
-        chdir: Path[__DIR__] / ".."
+        chdir: Path[__DIR__] / "..",
+        output: stdout,
+        error: stderr
       )
 
-      status.success?.should be_true
+      unless status.success?
+        raise "Namespace unshare failed (exit=#{status.exit_code}). stdout=#{stdout} stderr=#{stderr}"
+      end
     end
+  else
+    pending "unshares namespaces in a subprocess when enabled (kernel does not allow unprivileged user namespaces)" do
+    end
+  end
 
+  if Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled?
     it "enters a rootfs with namespaces when supported" do
       # Run in a subprocess to avoid mutating the namespace state of the spec runner.
       rootfs = File.tempname("sysroot-namespace")
       FileUtils.mkdir_p(rootfs)
 
+      stdout = IO::Memory.new
+      stderr = IO::Memory.new
       status = Process.run(
         "crystal",
         ["eval", "require \"./src/sysroot_namespace\"; Bootstrap::SysrootNamespace.enter_rootfs(#{rootfs.inspect})"],
-        chdir: Path[__DIR__] / ".."
+        chdir: Path[__DIR__] / "..",
+        output: stdout,
+        error: stderr
       )
 
-      status.success?.should be_true
+      unless status.success?
+        raise "Namespace rootfs entry failed (exit=#{status.exit_code}). stdout=#{stdout} stderr=#{stderr}"
+      end
     end
   else
-    reason = if !Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled?
-               "kernel does not allow unprivileged user namespaces"
-             else
-               "missing filesystem support: #{missing_fs.join(", ")}"
-             end
-
-    pending "unshares namespaces in a subprocess when enabled (#{reason})" do
-    end
-
-    pending "enters a rootfs with namespaces when supported (#{reason})" do
+    pending "enters a rootfs with namespaces when supported (kernel does not allow unprivileged user namespaces)" do
     end
   end
 end

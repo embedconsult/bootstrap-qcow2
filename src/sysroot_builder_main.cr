@@ -48,11 +48,6 @@ module Bootstrap
       end
 
       puts "Sysroot builder log level=#{Log.for("").level} (env-configured)"
-      if SysrootNamespace.unprivileged_userns_clone_enabled?
-        suggested_rootfs = workspace / "sysroot"
-        puts "User namespaces available: try sudo-less entry with:"
-        puts "  crystal run src/sysroot_namespace_main.cr -- --rootfs #{suggested_rootfs} -- crystal run /usr/local/bin/sysroot_runner_main.cr"
-      end
       builder = SysrootBuilder.new(
         workspace: workspace,
         architecture: architecture,
