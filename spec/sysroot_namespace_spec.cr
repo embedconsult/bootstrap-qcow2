@@ -1,3 +1,4 @@
+require "file_utils"
 require "./spec_helper"
 
 describe Bootstrap::SysrootNamespace do
@@ -27,7 +28,7 @@ describe Bootstrap::SysrootNamespace do
     end
 
     it "treats missing files as enabled" do
-      Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled?("/missing/does/not/exist").should be_true
+      Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled?("/missing/does/not/exist").should be_false
     end
 
     it "rejects unexpected toggle values" do
@@ -36,9 +37,7 @@ describe Bootstrap::SysrootNamespace do
         file.print("maybe\n")
         file.flush
 
-        expect_raises(Bootstrap::SysrootNamespace::NamespaceError) do
-          Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled?(file.path)
-        end
+        Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled?(file.path).should be_false
       ensure
         file.close
       end
@@ -59,20 +58,34 @@ describe Bootstrap::SysrootNamespace do
     end
   end
 
-  it "unshares namespaces in a child process when enabled" do
-    unless Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled?
-      pending "Kernel does not allow unprivileged user namespaces"
+  if Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled?
+    it "unshares namespaces in a subprocess when enabled" do
+      status = Process.run(
+        "crystal",
+        ["eval", "require \"./src/sysroot_namespace\"; Bootstrap::SysrootNamespace.unshare_namespaces"],
+        chdir: Path[__DIR__] / ".."
+      )
+
+      status.success?.should be_true
     end
 
-    status = Process.run(
-      "crystal",
-      ["eval", "require \"./src/sysroot_namespace\"; Bootstrap::SysrootNamespace.unshare_namespaces"],
-      chdir: Path[__DIR__] / ".."
-    )
+    it "enters a rootfs with namespaces when supported" do
+      rootfs = File.tempname("sysroot-namespace")
+      FileUtils.mkdir_p(rootfs)
 
-    status.success?.should be_true
-  end
+      status = Process.run(
+        "crystal",
+        ["eval", "require \"./src/sysroot_namespace\"; Bootstrap::SysrootNamespace.enter_rootfs(#{rootfs.inspect})"],
+        chdir: Path[__DIR__] / ".."
+      )
 
-  pending "enters a rootfs with namespaces when supported (requires unprivileged user namespaces plus mount/pivot_root support)" do
+      status.success?.should be_true
+    end
+  else
+    pending "unshares namespaces in a subprocess when enabled (kernel does not allow unprivileged user namespaces)" do
+    end
+
+    pending "enters a rootfs with namespaces when supported (kernel does not allow unprivileged user namespaces)" do
+    end
   end
 end

@@ -1,15 +1,15 @@
 require "file_utils"
-require "log"
 require "path"
-require "process"
 
 lib LibC
-  # Linux syscalls (see `man 2 unshare`, `man 2 pivot_root`, `man 2 mount`,
-  # `man 2 umount2`, and `man 2 getuid`/`getgid`).
+  # Linux syscalls documented in https://docs.kernel.org/:
+  # - unshare: https://docs.kernel.org/userspace-api/feature-test-macros.html
+  # - pivot_root: https://docs.kernel.org/filesystems/sharedsubtree.html
+  # - mount: https://docs.kernel.org/filesystems/mount_api.html
+  # - getuid/getgid: https://docs.kernel.org/userspace-api/uidgid.html
   fun unshare(flags : Int32) : Int32
   fun pivot_root(new_root : UInt8*, put_old : UInt8*) : Int32
   fun mount(source : UInt8*, target : UInt8*, filesystemtype : UInt8*, mountflags : UInt64, data : Void*) : Int32
-  fun umount2(target : UInt8*, flags : Int32) : Int32
   fun getuid : UInt32
   fun getgid : UInt32
 end
@@ -20,31 +20,28 @@ module Bootstrap
   # by the kernel.
   class SysrootNamespace
     USERNS_TOGGLE_PATH = "/proc/sys/kernel/unprivileged_userns_clone"
-    # Default coordinator to exec after entering the namespace. This can be
-    # overridden by providing a custom command to the CLI.
-    DEFAULT_COORDINATOR = "/usr/local/bin/sysroot_runner_main.cr"
 
-    # Namespace and mount constants from Linux headers (`linux/sched.h` and
-    # `linux/mount.h`).
-    CLONE_NEWNS     = 0x00020000
-    CLONE_NEWCGROUP = 0x02000000
-    CLONE_NEWUTS    = 0x04000000
-    CLONE_NEWIPC    = 0x08000000
-    CLONE_NEWUSER   = 0x10000000
-    CLONE_NEWNET    = 0x40000000
+    # Namespace and mount constants from Linux headers:
+    # - linux/sched.h (CLONE_NEW*)
+    # - linux/mount.h (MS_*)
+    CLONE_NEWNS   = 0x00020000
+    CLONE_NEWUTS  = 0x04000000
+    CLONE_NEWIPC  = 0x08000000
+    CLONE_NEWUSER = 0x10000000
+    CLONE_NEWNET  = 0x40000000
 
     MS_BIND    =  4096_u64
     MS_REC     = 16384_u64
     MS_PRIVATE = (1_u64 << 18)
-    MNT_DETACH = 2
 
     class NamespaceError < RuntimeError
     end
 
     # Returns true when unprivileged user namespace cloning is enabled.
-    # If the toggle path does not exist, we assume the kernel allows it.
+    # If the toggle path does not exist or contains an unexpected value,
+    # default to false for safety.
     def self.unprivileged_userns_clone_enabled?(path : String = USERNS_TOGGLE_PATH) : Bool
-      return true unless File.exists?(path)
+      return false unless File.exists?(path)
       value = File.read(path).strip
       case value
       when "1"
@@ -52,7 +49,7 @@ module Bootstrap
       when "0"
         false
       else
-        raise NamespaceError.new("Unexpected value for unprivileged_userns_clone: #{value.inspect}")
+        false
       end
     end
 
@@ -67,45 +64,40 @@ module Bootstrap
       MSG
     end
 
-    # Create a new user/mount/uts/ipc/net namespace (and optional cgroup)
-    # and map the current uid/gid into the namespace.
-    def self.unshare_namespaces(use_cgroup : Bool = false, uid : Int32 = LibC.getuid.to_i32, gid : Int32 = LibC.getgid.to_i32)
+    # Create a new user namespace, map the current uid/gid, and then unshare
+    # the remaining namespaces. This preserves the common unprivileged flow:
+    # unshare(CLONE_NEWUSER) -> write uid/gid maps -> unshare remaining flags.
+    def self.unshare_namespaces(uid : Int32 = LibC.getuid.to_i32, gid : Int32 = LibC.getgid.to_i32)
       ensure_unprivileged_userns_clone_enabled!
-      flags = CLONE_NEWUSER | CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWNET
-      flags |= CLONE_NEWCGROUP if use_cgroup
-      unshare!(flags)
+      unshare!(CLONE_NEWUSER)
       setup_user_mapping(uid, gid)
+      unshare!(CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWNET)
       make_mounts_private
     end
 
     # Enter the provided rootfs by unsharing namespaces, bind-mounting the
-    # rootfs, optionally bind-mounting /proc, /dev, and /sys, then pivoting
+    # rootfs, mounting /proc, /dev, and /sys, then pivoting
     # into the new root.
-    def self.enter_rootfs(rootfs : String, bind_proc : Bool = false, bind_dev : Bool = false, bind_sys : Bool = false, use_cgroup : Bool = false)
-      unshare_namespaces(use_cgroup: use_cgroup)
+    def self.enter_rootfs(rootfs : String)
+      unshare_namespaces
       root_path = Path[rootfs].expand
       bind_mount_rootfs(root_path)
-      bind_mounts(root_path, bind_proc: bind_proc, bind_dev: bind_dev, bind_sys: bind_sys)
+      mount_virtual_fs(root_path)
 
       pivot_root!(root_path)
     end
 
+    # pivot_root requires the new root to be a mount point. A bind mount creates
+    # a dedicated mount point without depending on a specific filesystem type.
     private def self.bind_mount_rootfs(rootfs : Path)
       mount_call(rootfs.to_s, rootfs.to_s, nil, MS_BIND | MS_REC, nil)
     end
 
-    # Bind-mount host paths into the new rootfs. Bind mounts are used to reuse
-    # the host's existing mounts while avoiding a dependency on filesystem type
-    # mounts in unprivileged contexts.
-    private def self.bind_mounts(rootfs : Path, bind_proc : Bool, bind_dev : Bool, bind_sys : Bool)
-      bind_mount("/proc", rootfs / "proc") if bind_proc
-      bind_mount("/dev", rootfs / "dev") if bind_dev
-      bind_mount("/sys", rootfs / "sys") if bind_sys
-    end
-
-    private def self.bind_mount(source : String, target : Path)
-      FileUtils.mkdir_p(target)
-      mount_call(source, target.to_s, nil, MS_BIND | MS_REC, nil)
+    # Mount kernel-provided virtual filesystems inside the new rootfs.
+    private def self.mount_virtual_fs(rootfs : Path)
+      mount_fs("proc", rootfs / "proc", "proc")
+      mount_fs("sysfs", rootfs / "sys", "sysfs")
+      mount_fs("devtmpfs", rootfs / "dev", "devtmpfs")
     end
 
     private def self.pivot_root!(rootfs : Path)
@@ -116,17 +108,10 @@ module Bootstrap
         raise NamespaceError.new("pivot_root failed: #{errno} #{errno.message}")
       end
       Dir.cd("/")
-      # Detach the old root to keep the namespace tree clean and avoid leaking
-      # references to the host filesystem.
-      if LibC.umount2("/.pivot_root".to_unsafe, MNT_DETACH) != 0
-        errno = Errno.value
-        raise NamespaceError.new("Failed to unmount old root: #{errno} #{errno.message}")
-      end
-      Dir.rmdir("/.pivot_root") if Dir.exists?("/.pivot_root")
     end
 
-    # Ensure mount propagation is private so bind mounts do not leak back to
-    # the host mount namespace.
+    # Ensure mount propagation is private so the rootfs bind mount does not
+    # propagate back into the host mount namespace.
     private def self.make_mounts_private
       mount_call(nil, "/", nil, MS_REC | MS_PRIVATE, nil)
     end
@@ -136,6 +121,8 @@ module Bootstrap
       if File.exists?(setgroups_path)
         File.write(setgroups_path, "deny\n")
       end
+      # Mapping uid/gid is required so the process gains CAP_SYS_ADMIN in the
+      # new user namespace, which is needed for mount and pivot_root calls.
       write_id_map("/proc/self/uid_map", uid)
       write_id_map("/proc/self/gid_map", gid)
     end
@@ -157,8 +144,8 @@ module Bootstrap
       when Errno::EPERM
         <<-MSG
           unshare failed with EPERM. This usually means unprivileged user namespaces
-          are disabled (check #{USERNS_TOGGLE_PATH}) or the kernel is configured
-          to restrict the requested namespaces.
+          are disabled (check #{USERNS_TOGGLE_PATH}) or the kernel restricts
+          namespace creation for the current user.
         MSG
       else
         "unshare failed: #{errno} #{errno.message}"
@@ -173,6 +160,11 @@ module Bootstrap
         errno = Errno.value
         raise NamespaceError.new("mount failed for #{target}: #{errno} #{errno.message}")
       end
+    end
+
+    private def self.mount_fs(source : String, target : Path, fstype : String)
+      FileUtils.mkdir_p(target)
+      mount_call(source, target.to_s, fstype, 0_u64, nil)
     end
   end
 end
