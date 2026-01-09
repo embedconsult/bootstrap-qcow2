@@ -30,6 +30,21 @@ Inside the chroot you can rebuild packages with the coordinator:
 crystal run /usr/local/bin/sysroot_runner_main.cr
 ```
 
+### Optional user-namespace entrypoint
+
+On kernels that allow unprivileged user namespaces (`/proc/sys/kernel/unprivileged_userns_clone=1`),
+you can enter the sysroot without sudo using the namespace helper:
+
+```bash
+crystal run src/sysroot_namespace_main.cr -- --rootfs data/sysroot/sysroot --bind-proc --bind-dev --bind-sys
+```
+
+This is intended for clean, sudo-less development workflows, not as a security boundary. The
+namespace runner still has access to host files that are reachable from the sysroot rootfs,
+and it requires kernel support for unprivileged namespaces to work at all. If your kernel
+disables user namespaces, you must run the existing chroot flow with sudo or enable the
+setting explicitly.
+
 ## Development
 
 - Format Crystal code with `crystal tool format`.
