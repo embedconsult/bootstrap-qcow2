@@ -37,19 +37,21 @@ describe Bootstrap::Syscalls do
 
     it "writes mappings after unsharing a user namespace" do
       available = namespace_maps_available?
-      pending "requires unprivileged user namespaces (see README)" unless available
+      pending! "requires unprivileged user namespaces (see README)" unless available
 
-      pid = Process.fork do
+      child = Process.fork do
         Bootstrap::Syscalls.unshare(Bootstrap::Syscalls::CLONE_NEWUSER)
         Bootstrap::Syscalls.write_proc_self_map("setgroups", "deny")
-        Bootstrap::Syscalls.write_proc_self_map("uid_map", "0 #{Process.uid} 1")
-        Bootstrap::Syscalls.write_proc_self_map("gid_map", "0 #{Process.gid} 1")
+        uid = Bootstrap::Syscalls.uid
+        gid = Bootstrap::Syscalls.gid
+        Bootstrap::Syscalls.write_proc_self_map("uid_map", "0 #{uid} 1")
+        Bootstrap::Syscalls.write_proc_self_map("gid_map", "0 #{gid} 1")
         exit 0
       rescue
         exit 1
       end
 
-      status = Process.wait(pid)
+      status = child.wait
       status.exit_code.should eq 0
       available.should be_true
     end
