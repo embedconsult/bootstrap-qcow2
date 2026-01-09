@@ -1,22 +1,6 @@
 require "./spec_helper"
 
 describe Bootstrap::SysrootNamespace do
-  describe ".parse_kernel_toggle" do
-    it "parses enabled values" do
-      Bootstrap::SysrootNamespace.parse_kernel_toggle("1\n").should be_true
-    end
-
-    it "parses disabled values" do
-      Bootstrap::SysrootNamespace.parse_kernel_toggle("0").should be_false
-    end
-
-    it "rejects unknown values" do
-      expect_raises(Bootstrap::SysrootNamespace::NamespaceError) do
-        Bootstrap::SysrootNamespace.parse_kernel_toggle("maybe")
-      end
-    end
-  end
-
   describe ".unprivileged_userns_clone_enabled?" do
     it "returns true when the toggle is enabled" do
       file = File.tempfile("userns")
@@ -44,6 +28,20 @@ describe Bootstrap::SysrootNamespace do
 
     it "treats missing files as enabled" do
       Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled?("/missing/does/not/exist").should be_true
+    end
+
+    it "rejects unexpected toggle values" do
+      file = File.tempfile("userns")
+      begin
+        file.print("maybe\n")
+        file.flush
+
+        expect_raises(Bootstrap::SysrootNamespace::NamespaceError) do
+          Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled?(file.path)
+        end
+      ensure
+        file.close
+      end
     end
   end
 
