@@ -8,20 +8,19 @@ module Bootstrap
   # provided command inside the new rootfs.
   class SysrootNamespaceMain
     def self.run
-      rootfs : String? = nil
+      rootfs : String = "data/sysroot/rootfs"
       command : Array(String) = [] of String
 
       OptionParser.parse do |parser|
-        parser.banner = "Usage: crystal run src/sysroot_namespace_main.cr -- [options] [command...]"
-        parser.on("--rootfs=PATH", "Path to the sysroot rootfs") { |val| rootfs = val }
+        parser.banner = "Usage: crystal run src/sysroot_namespace_main.cr -- [options] command..."
+        parser.on("--rootfs=PATH", "Path to the sysroot rootfs (default: #{rootfs})") { |val| rootfs = val }
         parser.on("-h", "--help", "Show this help") { puts parser; exit }
       end
 
       command = ARGV.dup
       raise "Missing command to exec inside the namespace" if command.empty?
 
-      resolved_rootfs = rootfs || raise "Missing --rootfs"
-      SysrootNamespace.enter_rootfs(resolved_rootfs)
+      SysrootNamespace.enter_rootfs(rootfs)
 
       Process.exec(command.first, command[1..])
     end

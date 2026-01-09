@@ -98,6 +98,7 @@ module Bootstrap
       mount_fs("proc", rootfs / "proc", "proc")
       mount_fs("sysfs", rootfs / "sys", "sysfs")
       mount_fs("devtmpfs", rootfs / "dev", "devtmpfs")
+      mount_fs("tmpfs", rootfs / "tmp", "tmpfs")
     end
 
     private def self.pivot_root!(rootfs : Path)
@@ -119,7 +120,13 @@ module Bootstrap
     private def self.setup_user_mapping(uid : Int32, gid : Int32)
       setgroups_path = "/proc/self/setgroups"
       if File.exists?(setgroups_path)
-        File.write(setgroups_path, "deny\n")
+        begin
+          File.write(setgroups_path, "deny\n")
+        rescue error : File::AccessDeniedError
+          raise NamespaceError.new("Failed to write #{setgroups_path}: #{error.message}. This can be caused by LSM policies (e.g., AppArmor).")
+        end
+      elsif LibC.getuid != 0
+        raise NamespaceError.new("Missing #{setgroups_path}; unprivileged user namespaces are not available without uid 0.")
       end
       # Mapping uid/gid is required so the process gains CAP_SYS_ADMIN in the
       # new user namespace, which is needed for mount and pivot_root calls.
@@ -163,8 +170,17 @@ module Bootstrap
     end
 
     private def self.mount_fs(source : String, target : Path, fstype : String)
+      unless filesystem_available?(fstype)
+        raise NamespaceError.new("Filesystem type #{fstype} is not available; check /proc/filesystems.")
+      end
       FileUtils.mkdir_p(target)
       mount_call(source, target.to_s, fstype, 0_u64, nil)
+    end
+
+    private def self.filesystem_available?(fstype : String) : Bool
+      File.read_lines("/proc/filesystems").any? do |line|
+        line.split.last? == fstype
+      end
     end
   end
 end

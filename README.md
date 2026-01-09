@@ -46,10 +46,11 @@ crystal run /usr/local/bin/sysroot_runner_main.cr
 ### `src/sysroot_namespace_main.cr`
 
 Enter the sysroot without sudo when the kernel allows unprivileged user namespaces
-(`/proc/sys/kernel/unprivileged_userns_clone=1`):
+(`/proc/sys/kernel/unprivileged_userns_clone=1`). The rootfs defaults to
+`data/sysroot/rootfs` unless overridden.
 
 ```bash
-crystal run src/sysroot_namespace_main.cr -- --rootfs data/sysroot/sysroot -- crystal run /usr/local/bin/sysroot_runner_main.cr
+crystal run src/sysroot_namespace_main.cr -- --rootfs data/sysroot/rootfs -- crystal run /usr/local/bin/sysroot_runner_main.cr
 ```
 
 This is intended for clean, sudo-less development workflows, not as a security boundary. The

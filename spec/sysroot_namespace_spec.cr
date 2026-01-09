@@ -27,7 +27,7 @@ describe Bootstrap::SysrootNamespace do
       end
     end
 
-    it "treats missing files as enabled" do
+    it "treats missing files as disabled" do
       Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled?("/missing/does/not/exist").should be_false
     end
 
@@ -44,7 +44,7 @@ describe Bootstrap::SysrootNamespace do
     end
   end
 
-  it "fails when unprivileged user namespaces are disabled" do
+  it "fails when unprivileged user namespaces are disabled (ensure helper)" do
     file = File.tempfile("userns")
     begin
       file.print("0\n")
@@ -58,8 +58,13 @@ describe Bootstrap::SysrootNamespace do
     end
   end
 
-  if Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled?
+  required_fs = %w(proc sysfs devtmpfs tmpfs)
+  available_fs = File.read_lines("/proc/filesystems").map { |line| line.split.last? }.compact
+  missing_fs = required_fs.reject { |fs| available_fs.includes?(fs) }
+
+  if Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled? && missing_fs.empty?
     it "unshares namespaces in a subprocess when enabled" do
+      # Run in a subprocess to avoid mutating the namespace state of the spec runner.
       status = Process.run(
         "crystal",
         ["eval", "require \"./src/sysroot_namespace\"; Bootstrap::SysrootNamespace.unshare_namespaces"],
@@ -70,6 +75,7 @@ describe Bootstrap::SysrootNamespace do
     end
 
     it "enters a rootfs with namespaces when supported" do
+      # Run in a subprocess to avoid mutating the namespace state of the spec runner.
       rootfs = File.tempname("sysroot-namespace")
       FileUtils.mkdir_p(rootfs)
 
@@ -82,10 +88,16 @@ describe Bootstrap::SysrootNamespace do
       status.success?.should be_true
     end
   else
-    pending "unshares namespaces in a subprocess when enabled (kernel does not allow unprivileged user namespaces)" do
+    reason = if !Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled?
+               "kernel does not allow unprivileged user namespaces"
+             else
+               "missing filesystem support: #{missing_fs.join(", ")}"
+             end
+
+    pending "unshares namespaces in a subprocess when enabled (#{reason})" do
     end
 
-    pending "enters a rootfs with namespaces when supported (kernel does not allow unprivileged user namespaces)" do
+    pending "enters a rootfs with namespaces when supported (#{reason})" do
     end
   end
 end
