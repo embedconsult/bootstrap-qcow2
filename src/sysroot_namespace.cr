@@ -42,7 +42,7 @@ module Bootstrap
     class NamespaceError < RuntimeError
     end
 
-    # Collect restriction messages that can prevent user-namespace mounts of
+    # Collects restriction messages that can prevent user-namespace mounts of
     # proc/sys/dev from succeeding on the current host.
     def self.collect_restrictions(proc_root : Path = Path["/proc"],
                                   filesystems_path : Path = Path["/proc/filesystems"],
@@ -114,12 +114,14 @@ module Bootstrap
       nil
     end
 
+    # Returns true if the provided permissions include any read bit.
     private def self.readable_by_mode?(permissions : File::Permissions) : Bool
       permissions.includes?(File::Permissions::OwnerRead) ||
         permissions.includes?(File::Permissions::GroupRead) ||
         permissions.includes?(File::Permissions::OtherRead)
     end
 
+    # Returns true if the provided permissions include any write bit.
     private def self.writable_by_mode?(permissions : File::Permissions) : Bool
       permissions.includes?(File::Permissions::OwnerWrite) ||
         permissions.includes?(File::Permissions::GroupWrite) ||
@@ -191,6 +193,8 @@ module Bootstrap
       mount_tmpfs(rootfs / "dev" / "shm")
     end
 
+    # Performs pivot_root with an `.pivot_root` directory inside *rootfs*.
+    # Raises NamespaceError if pivot_root fails.
     private def self.pivot_root!(rootfs : Path)
       put_old = rootfs / ".pivot_root"
       FileUtils.mkdir_p(put_old)
@@ -207,6 +211,8 @@ module Bootstrap
       mount_call(nil, "/", nil, MS_REC | MS_PRIVATE, nil)
     end
 
+    # Writes uid/gid mappings for the current process in the user namespace.
+    # Raises NamespaceError when mappings cannot be applied.
     private def self.setup_user_mapping(uid : Int32, gid : Int32)
       setgroups_path = "/proc/self/setgroups"
       if File.exists?(setgroups_path)
@@ -224,10 +230,12 @@ module Bootstrap
       write_id_map("/proc/self/gid_map", gid)
     end
 
+    # Writes a single-id mapping to the provided uid/gid map file.
     private def self.write_id_map(path : String, outside_id : Int32)
       File.write(path, "0 #{outside_id} 1\n")
     end
 
+    # Calls unshare(2) and raises NamespaceError on failure.
     private def self.unshare!(flags : Int32)
       if LibC.unshare(flags) != 0
         errno = Errno.value
@@ -236,6 +244,7 @@ module Bootstrap
       end
     end
 
+    # Returns a user-facing error message for unshare failures.
     private def self.unshare_error_message(errno : Errno) : String
       case errno
       when Errno::EPERM
@@ -249,6 +258,7 @@ module Bootstrap
       end
     end
 
+    # Calls mount(2) with the provided parameters and raises on failure.
     private def self.mount_call(source : String?, target : String, fstype : String?, flags : UInt64, data : String?)
       source_ptr = source ? source.to_unsafe : Pointer(UInt8).null
       fstype_ptr = fstype ? fstype.to_unsafe : Pointer(UInt8).null
@@ -259,6 +269,7 @@ module Bootstrap
       end
     end
 
+    # Mounts a filesystem by type after verifying it appears in /proc/filesystems.
     private def self.mount_fs(source : String, target : Path, fstype : String)
       unless filesystem_available?(fstype)
         raise NamespaceError.new("Filesystem type #{fstype} is not available; check /proc/filesystems.")
@@ -267,12 +278,14 @@ module Bootstrap
       mount_call(source, target.to_s, fstype, 0_u64, nil)
     end
 
+    # Bind-mounts /proc into the new root and remounts it with safe flags.
     private def self.mount_proc(target : Path)
       FileUtils.mkdir_p(target)
       bind_mount("/proc", target)
       mount_call(nil, target.to_s, nil, MS_REMOUNT | MS_NOSUID | MS_NODEV | MS_NOEXEC | MS_BIND, nil)
     end
 
+    # Bind-mounts /sys into the new root and remounts it read-only.
     private def self.mount_sys(target : Path)
       unless filesystem_available?("sysfs")
         raise NamespaceError.new("Filesystem type sysfs is not available; check /proc/filesystems.")
@@ -282,6 +295,7 @@ module Bootstrap
       mount_call(nil, target.to_s, nil, MS_REMOUNT | MS_RDONLY | MS_BIND, nil)
     end
 
+    # Creates a tmpfs-backed /dev and bind-mounts a small set of device nodes.
     private def self.mount_dev(target : Path, proc_root : Path)
       mount_tmpfs(target)
       bind_mount("/dev/null", target / "null")
@@ -295,6 +309,7 @@ module Bootstrap
       FileUtils.ln_s("/proc/self/fd/2", target / "stderr")
     end
 
+    # Mounts a tmpfs at the target path with safe defaults.
     private def self.mount_tmpfs(target : Path)
       unless filesystem_available?("tmpfs")
         raise NamespaceError.new("Filesystem type tmpfs is not available; check /proc/filesystems.")
@@ -303,11 +318,13 @@ module Bootstrap
       mount_call("tmpfs", target.to_s, "tmpfs", MS_NOSUID | MS_NODEV, nil)
     end
 
+    # Bind-mounts a source path to the target path.
     private def self.bind_mount(source : String | Path, target : Path)
       FileUtils.mkdir_p(target)
       mount_call(source.to_s, target.to_s, nil, MS_BIND | MS_REC, nil)
     end
 
+    # Returns true if the filesystem type appears in /proc/filesystems.
     private def self.filesystem_available?(fstype : String) : Bool
       File.read_lines("/proc/filesystems").any? do |line|
         line.split.last? == fstype
