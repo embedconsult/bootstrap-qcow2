@@ -140,13 +140,13 @@ module Bootstrap
     end
 
     # Create a new user namespace, map the current uid/gid, and then unshare
-    # the remaining namespaces. This preserves the common unprivileged flow:
-    # unshare(CLONE_NEWUSER) -> write uid/gid maps -> unshare remaining flags.
+    # the mount namespace. This preserves the common unprivileged flow:
+    # unshare(CLONE_NEWUSER) -> write uid/gid maps -> unshare(CLONE_NEWNS).
     def self.unshare_namespaces(uid : Int32 = LibC.getuid.to_i32, gid : Int32 = LibC.getgid.to_i32)
       ensure_unprivileged_userns_clone_enabled!
       unshare!(CLONE_NEWUSER)
       setup_user_mapping(uid, gid)
-      unshare!(CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWNET)
+      unshare!(CLONE_NEWNS)
       make_mounts_private
     end
 
