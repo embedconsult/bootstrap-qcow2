@@ -75,6 +75,32 @@ describe Bootstrap::SysrootNamespace do
     end
   end
 
+  describe ".bind_mount_file" do
+    it "creates a target file for bind-mounting" do
+      source = File.tempfile("source")
+      begin
+        source.print("data")
+        source.flush
+
+        target_root = Path[File.tempname("bind-mount-root")]
+        File.delete(target_root) if File.exists?(target_root)
+        FileUtils.mkdir_p(target_root)
+        target = target_root / "file"
+
+        begin
+          Bootstrap::SysrootNamespace.bind_mount_file(source.path, target)
+        rescue Bootstrap::SysrootNamespace::NamespaceError
+          # Ignore mount failures in constrained environments; we only validate
+          # that the target file is created for the bind mount.
+        end
+
+        File.exists?(target).should be_true
+      ensure
+        source.close
+      end
+    end
+  end
+
   describe ".unprivileged_userns_clone_enabled?" do
     it "returns true when the toggle is enabled" do
       file = File.tempfile("userns")
@@ -159,8 +185,7 @@ describe Bootstrap::SysrootNamespace do
     end
   end
 
-  proc_masked = !Bootstrap::SysrootNamespace.proc_mask_restrictions(Path["/proc"]).empty?
-  if Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled? && !proc_masked
+  if Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled?
     it "enters a rootfs with namespaces when supported" do
       # Run in a subprocess to avoid mutating the namespace state of the spec runner.
       rootfs = File.tempname("sysroot-namespace")
@@ -181,12 +206,7 @@ describe Bootstrap::SysrootNamespace do
       end
     end
   else
-    reason = if !Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled?
-               "kernel does not allow unprivileged user namespaces"
-             else
-               "proc is masked; mount_too_revealing likely"
-             end
-    pending "enters a rootfs with namespaces when supported (#{reason})" do
+    pending "enters a rootfs with namespaces when supported (kernel does not allow unprivileged user namespaces)" do
     end
   end
 end

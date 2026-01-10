@@ -338,7 +338,7 @@ module Bootstrap
     end
 
     # Bind-mounts a source file to a file target.
-    private def self.bind_mount_file(source : String | Path, target : Path)
+    def self.bind_mount_file(source : String | Path, target : Path)
       FileUtils.mkdir_p(target.parent)
       FileUtils.touch(target)
       mount_call(source.to_s, target.to_s, nil, MS_BIND, nil)
