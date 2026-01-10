@@ -153,7 +153,8 @@ describe Bootstrap::SysrootNamespace do
     end
   end
 
-  if Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled?
+  proc_masked = !Bootstrap::SysrootNamespace.proc_mask_restrictions(Path["/proc"]).empty?
+  if Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled? && !proc_masked
     it "enters a rootfs with namespaces when supported" do
       # Run in a subprocess to avoid mutating the namespace state of the spec runner.
       rootfs = File.tempname("sysroot-namespace")
@@ -174,7 +175,12 @@ describe Bootstrap::SysrootNamespace do
       end
     end
   else
-    pending "enters a rootfs with namespaces when supported (kernel does not allow unprivileged user namespaces)" do
+    reason = if !Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled?
+               "kernel does not allow unprivileged user namespaces"
+             else
+               "proc is masked; mount_too_revealing likely"
+             end
+    pending "enters a rootfs with namespaces when supported (#{reason})" do
     end
   end
 end
