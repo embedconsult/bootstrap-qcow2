@@ -292,7 +292,11 @@ module Bootstrap
       end
       FileUtils.mkdir_p(target)
       bind_mount("/sys", target)
-      mount_call(nil, target.to_s, nil, MS_REMOUNT | MS_RDONLY | MS_BIND, nil)
+      begin
+        mount_call(nil, target.to_s, nil, MS_REMOUNT | MS_RDONLY | MS_BIND, nil)
+      rescue error : NamespaceError
+        raise NamespaceError.new("#{error.message}. Ensure /sys is visible and not masked by LSM or container policies.")
+      end
     end
 
     # Creates a tmpfs-backed /dev and bind-mounts a small set of device nodes.
