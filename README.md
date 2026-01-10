@@ -49,6 +49,12 @@ Enter the sysroot without sudo when the kernel allows unprivileged user namespac
 (`/proc/sys/kernel/unprivileged_userns_clone=1`). The rootfs defaults to
 `data/sysroot/rootfs` unless overridden.
 
+Preflight host checks (reports missing kernel/sysctl/LSM prerequisites):
+
+```bash
+crystal run src/sysroot_namespace_check_main.cr --
+```
+
 ```bash
 crystal run src/sysroot_namespace_main.cr -- --rootfs data/sysroot/rootfs -- crystal run /usr/local/bin/sysroot_runner_main.cr
 ```
