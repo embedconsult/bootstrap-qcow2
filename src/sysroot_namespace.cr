@@ -108,6 +108,10 @@ module Bootstrap
     # This checks both the current label and the presence of enforcing profiles.
     def self.apparmor_restriction(current_path : Path = Path["/proc/self/attr/current"],
                                   profiles_path : Path = Path["/sys/kernel/security/apparmor/profiles"]) : String?
+      if File.exists?("/sys/kernel/security/lsm")
+        lsm = File.read("/sys/kernel/security/lsm").strip
+        return nil unless lsm.split(",").includes?("apparmor")
+      end
       if File.exists?(current_path)
         status = File.read(current_path).strip
         return "AppArmor confinement detected (#{status}); process must be unconfined" unless status.empty? || status == "unconfined"
@@ -295,18 +299,13 @@ module Bootstrap
       mount_call(nil, target.to_s, nil, MS_REMOUNT | MS_NOSUID | MS_NODEV | MS_NOEXEC | MS_BIND, nil)
     end
 
-    # Bind-mounts /sys into the new root and remounts it read-only.
+    # Bind-mounts /sys into the new root.
     private def self.mount_sys(target : Path)
       unless filesystem_available?("sysfs")
         raise NamespaceError.new("Filesystem type sysfs is not available; check /proc/filesystems.")
       end
       FileUtils.mkdir_p(target)
       bind_mount("/sys", target)
-      begin
-        mount_call(nil, target.to_s, nil, MS_REMOUNT | MS_RDONLY | MS_BIND, nil)
-      rescue error : NamespaceError
-        raise NamespaceError.new("#{error.message}. Ensure /sys is visible and not masked by LSM or container policies.")
-      end
     end
 
     # Creates a tmpfs-backed /dev and bind-mounts a small set of device nodes.
