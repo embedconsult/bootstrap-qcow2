@@ -32,6 +32,11 @@ module Bootstrap
 
     MS_BIND    =  4096_u64
     MS_REC     = 16384_u64
+    MS_RDONLY  = (1_u64 << 0)
+    MS_NOSUID  = (1_u64 << 1)
+    MS_NODEV   = (1_u64 << 2)
+    MS_NOEXEC  = (1_u64 << 3)
+    MS_REMOUNT = (1_u64 << 5)
     MS_PRIVATE = (1_u64 << 18)
 
     class NamespaceError < RuntimeError
@@ -46,7 +51,7 @@ module Bootstrap
       restrictions = [] of String
       restrictions << "kernel.unprivileged_userns_clone is disabled" unless unprivileged_userns_clone_enabled?(userns_toggle_path)
 
-      missing_fs = missing_filesystems(filesystems_path, %w(proc sysfs devtmpfs tmpfs))
+      missing_fs = missing_filesystems(filesystems_path, %w(proc sysfs tmpfs))
       unless missing_fs.empty?
         restrictions << "missing filesystem support: #{missing_fs.join(", ")}"
       end
@@ -165,10 +170,11 @@ module Bootstrap
 
     # Mount kernel-provided virtual filesystems inside the new rootfs.
     private def self.mount_virtual_fs(rootfs : Path)
-      mount_fs("proc", rootfs / "proc", "proc")
-      mount_fs("sysfs", rootfs / "sys", "sysfs")
-      mount_fs("devtmpfs", rootfs / "dev", "devtmpfs")
-      mount_fs("tmpfs", rootfs / "tmp", "tmpfs")
+      mount_proc(rootfs / "proc")
+      mount_sys(rootfs / "sys")
+      mount_dev(rootfs / "dev", rootfs / "proc")
+      mount_tmpfs(rootfs / "tmp")
+      mount_tmpfs(rootfs / "dev" / "shm")
     end
 
     private def self.pivot_root!(rootfs : Path)
@@ -245,6 +251,46 @@ module Bootstrap
       end
       FileUtils.mkdir_p(target)
       mount_call(source, target.to_s, fstype, 0_u64, nil)
+    end
+
+    private def self.mount_proc(target : Path)
+      FileUtils.mkdir_p(target)
+      mount_call("proc", target.to_s, "proc", MS_NOSUID | MS_NODEV | MS_NOEXEC, nil)
+    end
+
+    private def self.mount_sys(target : Path)
+      unless filesystem_available?("sysfs")
+        raise NamespaceError.new("Filesystem type sysfs is not available; check /proc/filesystems.")
+      end
+      FileUtils.mkdir_p(target)
+      bind_mount("/sys", target)
+      mount_call(nil, target.to_s, nil, MS_REMOUNT | MS_RDONLY | MS_BIND, nil)
+    end
+
+    private def self.mount_dev(target : Path, proc_root : Path)
+      mount_tmpfs(target)
+      bind_mount("/dev/null", target / "null")
+      bind_mount("/dev/zero", target / "zero")
+      bind_mount("/dev/random", target / "random")
+      bind_mount("/dev/urandom", target / "urandom")
+      bind_mount("/dev/tty", target / "tty")
+      bind_mount(proc_root / "self" / "fd", target / "fd")
+      FileUtils.ln_s("/proc/self/fd/0", target / "stdin")
+      FileUtils.ln_s("/proc/self/fd/1", target / "stdout")
+      FileUtils.ln_s("/proc/self/fd/2", target / "stderr")
+    end
+
+    private def self.mount_tmpfs(target : Path)
+      unless filesystem_available?("tmpfs")
+        raise NamespaceError.new("Filesystem type tmpfs is not available; check /proc/filesystems.")
+      end
+      FileUtils.mkdir_p(target)
+      mount_call("tmpfs", target.to_s, "tmpfs", MS_NOSUID | MS_NODEV, nil)
+    end
+
+    private def self.bind_mount(source : String | Path, target : Path)
+      FileUtils.mkdir_p(target)
+      mount_call(source.to_s, target.to_s, nil, MS_BIND | MS_REC, nil)
     end
 
     private def self.filesystem_available?(fstype : String) : Bool

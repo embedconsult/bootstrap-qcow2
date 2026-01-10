@@ -6,11 +6,11 @@ describe Bootstrap::SysrootNamespace do
     it "returns missing filesystem types" do
       file = File.tempfile("filesystems")
       begin
-        file.print("nodev\tproc\nnodev\tsysfs\n")
+        file.print("nodev\tproc\nnodev\tsysfs\nnodev\ttmpfs\n")
         file.flush
 
-        missing = Bootstrap::SysrootNamespace.missing_filesystems(Path[file.path], ["proc", "sysfs", "tmpfs"])
-        missing.should eq ["tmpfs"]
+        missing = Bootstrap::SysrootNamespace.missing_filesystems(Path[file.path], ["proc", "sysfs", "tmpfs", "devtmpfs"])
+        missing.should eq ["devtmpfs"]
       ensure
         file.close
       end
@@ -56,7 +56,7 @@ describe Bootstrap::SysrootNamespace do
 
       filesystems = File.tempfile("filesystems")
       begin
-        filesystems.print("nodev\tproc\nnodev\tsysfs\nnodev\tdevtmpfs\n")
+        filesystems.print("nodev\tproc\nnodev\tsysfs\n")
         filesystems.flush
 
         restrictions = Bootstrap::SysrootNamespace.collect_restrictions(
