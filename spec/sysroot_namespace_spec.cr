@@ -131,7 +131,8 @@ describe Bootstrap::SysrootNamespace do
     end
   end
 
-  if Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled?
+  setgroups_issue = Bootstrap::SysrootNamespace.setgroups_restriction("/proc/self/setgroups")
+  if Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled? && setgroups_issue.nil?
     it "unshares namespaces in a subprocess when enabled" do
       # Run in a subprocess to avoid mutating the namespace state of the spec runner.
       stdout = IO::Memory.new
@@ -149,7 +150,12 @@ describe Bootstrap::SysrootNamespace do
       end
     end
   else
-    pending "unshares namespaces in a subprocess when enabled (kernel does not allow unprivileged user namespaces)" do
+    reason = if !Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled?
+               "kernel does not allow unprivileged user namespaces"
+             else
+               "setgroups is not writable; LSM restrictions likely"
+             end
+    pending "unshares namespaces in a subprocess when enabled (#{reason})" do
     end
   end
 
