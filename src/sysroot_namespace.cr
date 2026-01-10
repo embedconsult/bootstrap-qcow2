@@ -56,6 +56,10 @@ module Bootstrap
         restrictions << "missing filesystem support: #{missing_fs.join(", ")}"
       end
 
+      if (apparmor_note = apparmor_restriction)
+        restrictions << apparmor_note
+      end
+
       restrictions.concat(proc_mask_restrictions(proc_root))
       if (setgroups_note = setgroups_restriction(setgroups_path))
         restrictions << setgroups_note
@@ -98,6 +102,16 @@ module Bootstrap
       elsif LibC.getuid != 0
         "missing #{setgroups_path}; unprivileged user namespaces require setgroups support"
       end
+    end
+
+    # Returns a restriction message if AppArmor confinement is detected.
+    def self.apparmor_restriction(path : Path = Path["/proc/self/attr/current"]) : String?
+      return nil unless File.exists?(path)
+      status = File.read(path).strip
+      return nil if status.empty? || status == "unconfined"
+      "AppArmor confinement detected (#{status}); process must be unconfined"
+    rescue
+      nil
     end
 
     private def self.readable_by_mode?(permissions : File::Permissions) : Bool
@@ -255,7 +269,8 @@ module Bootstrap
 
     private def self.mount_proc(target : Path)
       FileUtils.mkdir_p(target)
-      mount_call("proc", target.to_s, "proc", MS_NOSUID | MS_NODEV | MS_NOEXEC, nil)
+      bind_mount("/proc", target)
+      mount_call(nil, target.to_s, nil, MS_REMOUNT | MS_NOSUID | MS_NODEV | MS_NOEXEC | MS_BIND, nil)
     end
 
     private def self.mount_sys(target : Path)
