@@ -25,3 +25,72 @@ These instructions apply to the entire repository unless overridden by a nested 
 ## PR/commit expectations
 - Commit messages should summarize the behavioral change and the architecture(s) affected.
 - PR summaries should call out: target architectures, EFI/boot impacts, new dependencies (if any), and how the change advances self-hosting or Crystal-only tooling.
+
+## Rootless userns + pivot_root procedure
+
+Goal:
+Run a foreign Linux rootfs as a normal user using userns + mntns + pivot_root for development and bootstrapping.
+Isolation is functional, not security-driven.
+
+### Preflight (fail fast)
+
+- Kernel config: CONFIG_USER_NS, CONFIG_MOUNT_NS, CONFIG_PROC_FS, CONFIG_SYSFS, CONFIG_TMPFS
+- Sysctl: kernel.unprivileged_userns_clone=1
+- AppArmor: process must be unconfined
+- All dev executables live under /home/** (AppArmor flags=(unconfined))
+
+### Namespace setup (mandatory order)
+
+1. unshare(CLONE_NEWUSER | CLONE_NEWNS)
+2. Write ID maps:
+   - echo deny > /proc/self/setgroups
+   - write /proc/self/uid_map and /proc/self/gid_map
+3. Disable mount propagation:
+   - mount(NULL, "/", NULL, MS_REC | MS_PRIVATE, NULL)
+
+All mounts must be namespace-local. Nothing propagates to the host.
+
+### Mount plan (prefer bind mounts)
+
+Prepare <newroot>/{proc,sys,dev,dev/shm}.
+
+/proc
+  mount("proc", "<newroot>/proc", "proc",
+        MS_NOSUID | MS_NODEV | MS_NOEXEC, NULL)
+
+/sys
+  Bind-mount host /sys → <newroot>/sys, then remount read-only.
+
+/dev
+  tmpfs on <newroot>/dev
+
+  Bind-mount only:
+  - /dev/null
+  - /dev/zero
+  - /dev/random
+  - /dev/urandom
+  - /dev/tty (optional)
+  - /dev/fd + stdio via /proc/self/fd
+
+  tmpfs on <newroot>/dev/shm
+
+No mknod. No /dev/pts. No host /dev.
+
+### pivot_root behavior
+
+- Perform pivot_root(<newroot>, <newroot>/.oldroot)
+- chdir("/")
+- /oldroot handling:
+  - Removing it is optional
+  - It may be kept for explicit developer access to the host filesystem
+  - Tooling must not depend on it implicitly
+
+Mount namespace lifetime = process lifetime.
+All mounts disappear when the process exits.
+
+### Invariants
+
+- No sudo at runtime
+- No persistent mounts
+- No AppArmor mediation of this tool
+- Any dependency on host paths must be explicit and intentional
