@@ -311,11 +311,11 @@ module Bootstrap
     # Creates a tmpfs-backed /dev and bind-mounts a small set of device nodes.
     private def self.mount_dev(target : Path, proc_root : Path)
       mount_tmpfs(target)
-      bind_mount("/dev/null", target / "null")
-      bind_mount("/dev/zero", target / "zero")
-      bind_mount("/dev/random", target / "random")
-      bind_mount("/dev/urandom", target / "urandom")
-      bind_mount("/dev/tty", target / "tty")
+      bind_mount_file("/dev/null", target / "null")
+      bind_mount_file("/dev/zero", target / "zero")
+      bind_mount_file("/dev/random", target / "random")
+      bind_mount_file("/dev/urandom", target / "urandom")
+      bind_mount_file("/dev/tty", target / "tty")
       bind_mount(proc_root / "self" / "fd", target / "fd")
       FileUtils.ln_s("/proc/self/fd/0", target / "stdin")
       FileUtils.ln_s("/proc/self/fd/1", target / "stdout")
@@ -335,6 +335,13 @@ module Bootstrap
     private def self.bind_mount(source : String | Path, target : Path)
       FileUtils.mkdir_p(target)
       mount_call(source.to_s, target.to_s, nil, MS_BIND | MS_REC, nil)
+    end
+
+    # Bind-mounts a source file to a file target.
+    private def self.bind_mount_file(source : String | Path, target : Path)
+      FileUtils.mkdir_p(target.parent)
+      FileUtils.touch(target)
+      mount_call(source.to_s, target.to_s, nil, MS_BIND, nil)
     end
 
     # Returns true if the filesystem type appears in /proc/filesystems.
