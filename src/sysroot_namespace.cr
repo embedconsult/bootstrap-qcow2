@@ -105,11 +105,21 @@ module Bootstrap
     end
 
     # Returns a restriction message if AppArmor confinement is detected.
-    def self.apparmor_restriction(path : Path = Path["/proc/self/attr/current"]) : String?
-      return nil unless File.exists?(path)
-      status = File.read(path).strip
-      return nil if status.empty? || status == "unconfined"
-      "AppArmor confinement detected (#{status}); process must be unconfined"
+    # This checks both the current label and the presence of enforcing profiles.
+    def self.apparmor_restriction(current_path : Path = Path["/proc/self/attr/current"],
+                                  profiles_path : Path = Path["/sys/kernel/security/apparmor/profiles"]) : String?
+      if File.exists?(current_path)
+        status = File.read(current_path).strip
+        return "AppArmor confinement detected (#{status}); process must be unconfined" unless status.empty? || status == "unconfined"
+      end
+
+      if File.exists?(profiles_path)
+        profiles = File.read_lines(profiles_path)
+        if profiles.any? { |line| line.includes?("enforce") }
+          return "AppArmor enforcing profiles detected; mount operations may be blocked"
+        end
+      end
+      nil
     rescue
       nil
     end
