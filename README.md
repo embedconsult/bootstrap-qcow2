@@ -11,24 +11,58 @@ Build reproducible QCOW2 and chroot images with Crystal-first tooling. The sysro
 
 ## Usage
 
-Generate a chrootable sysroot tarball (default workspace: `data/sysroot`) with the helper entrypoint:
+### `src/sysroot_builder_main.cr`
+
+Utilize an existing rootfs tarball (download if necessary) and add sources to be utilized in building a new rootfs.
+
+The default workspace is: `data/sysroot`
+
+The workspace is made up of:
+* rootfs - the output rootfs
+* cache - checksums for the various downloads
+* sources - downloaded tarballs
+
+Run the helper entrypoint (use `--no-tarball` to skip creating the tarball):
 
 ```bash
 crystal run src/sysroot_builder_main.cr -- --output sysroot.tar.gz
 ```
 Pass `--skip-sources` to omit cached source archives when you only need the base rootfs and coordinator.
 
-The tarball includes:
+The rootfs output includes:
 - Alpine minirootfs 3.23.2 (aarch64 by default)
 - Cached source archives for core packages (musl, busybox, clang/LLVM, etc.)
 - A serialized build plan consumed by the coordinator
 - Coordinator entrypoints at `/usr/local/bin/sysroot_runner_main.cr`
 
-Inside the chroot you can rebuild packages with the coordinator:
+### `src/sysroot_runner_main.cr`
+
+Perform the source build operations inside the new rootfs.
 
 ```bash
 crystal run /usr/local/bin/sysroot_runner_main.cr
 ```
+
+### `src/sysroot_namespace_main.cr`
+
+Enter the sysroot without sudo when the kernel allows unprivileged user namespaces
+(`/proc/sys/kernel/unprivileged_userns_clone=1`). The rootfs defaults to
+`data/sysroot/rootfs` unless overridden.
+
+Preflight host checks (reports missing kernel/sysctl/LSM prerequisites):
+
+```bash
+crystal run src/sysroot_namespace_check_main.cr --
+```
+
+```bash
+crystal run src/sysroot_namespace_main.cr -- --rootfs data/sysroot/rootfs -- crystal run /usr/local/bin/sysroot_runner_main.cr
+```
+
+This is intended for clean, sudo-less development workflows, not as a security boundary. The
+namespace runner still has access to host files that are reachable from the sysroot rootfs,
+and it requires kernel support for unprivileged namespaces to work at all. If your kernel
+disables user namespaces, enable the setting explicitly.
 
 ## Development
 
