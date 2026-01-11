@@ -61,26 +61,40 @@ describe Bootstrap::SysrootNamespace do
   describe ".apparmor_restriction" do
     it "returns nil for unconfined labels" do
       file = File.tempfile("apparmor")
+      sysctl = File.tempfile("apparmor-userns")
       begin
         file.print("unconfined\n")
         file.flush
+        sysctl.print("0\n")
+        sysctl.flush
 
-        restriction = Bootstrap::SysrootNamespace.apparmor_restriction(Path[file.path])
+        restriction = Bootstrap::SysrootNamespace.apparmor_restriction(
+          Path[file.path],
+          Path[sysctl.path]
+        )
         restriction.should be_nil
       ensure
+        sysctl.close
         file.close
       end
     end
 
     it "reports confinement when a label is present" do
       file = File.tempfile("apparmor")
+      sysctl = File.tempfile("apparmor-userns")
       begin
         file.print("profile://container\n")
         file.flush
+        sysctl.print("0\n")
+        sysctl.flush
 
-        restriction = Bootstrap::SysrootNamespace.apparmor_restriction(Path[file.path])
+        restriction = Bootstrap::SysrootNamespace.apparmor_restriction(
+          Path[file.path],
+          Path[sysctl.path]
+        )
         restriction.should_not be_nil
       ensure
+        sysctl.close
         file.close
       end
     end
