@@ -69,6 +69,8 @@ disables user namespaces, enable the setting explicitly.
 - Format Crystal code with `crystal tool format`.
 - Run specs with `crystal spec`.
 - CI: GitHub Actions (`.github/workflows/ci.yml`) runs format + specs on push/PR; triggerable from the Actions tab.
+- API docs are published via GitHub Pages after each push to `main`:
+  <https://jkridner.github.io/bootstrap-qcow2/>
 
 ## Contributing
 
