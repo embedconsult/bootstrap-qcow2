@@ -158,6 +158,7 @@ describe Bootstrap::SysrootNamespace do
   end
 
   setgroups_issue = Bootstrap::SysrootNamespace.setgroups_restriction("/proc/self/setgroups")
+  apparmor_issue = Bootstrap::SysrootNamespace.apparmor_restriction
   if Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled? && setgroups_issue.nil?
     it "unshares namespaces in a subprocess when enabled" do
       # Run in a subprocess to avoid mutating the namespace state of the spec runner.
@@ -178,6 +179,8 @@ describe Bootstrap::SysrootNamespace do
   else
     reason = if !Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled?
                "kernel does not allow unprivileged user namespaces"
+             elsif apparmor_issue
+               "AppArmor is enforcing restrictions"
              else
                "setgroups is not writable; LSM restrictions likely"
              end
@@ -185,7 +188,7 @@ describe Bootstrap::SysrootNamespace do
     end
   end
 
-  if Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled?
+  if Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled? && setgroups_issue.nil?
     it "enters a rootfs with namespaces when supported" do
       # Run in a subprocess to avoid mutating the namespace state of the spec runner.
       rootfs = File.tempname("sysroot-namespace")
@@ -206,7 +209,14 @@ describe Bootstrap::SysrootNamespace do
       end
     end
   else
-    pending "enters a rootfs with namespaces when supported (kernel does not allow unprivileged user namespaces)" do
+    reason = if !Bootstrap::SysrootNamespace.unprivileged_userns_clone_enabled?
+               "kernel does not allow unprivileged user namespaces"
+             elsif apparmor_issue
+               "AppArmor is enforcing restrictions"
+             else
+               "setgroups is not writable; LSM restrictions likely"
+             end
+    pending "enters a rootfs with namespaces when supported (#{reason})" do
     end
   end
 end
