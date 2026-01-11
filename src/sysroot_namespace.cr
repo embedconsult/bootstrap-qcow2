@@ -263,7 +263,8 @@ module Bootstrap
 
     # Creates a tmpfs-backed /dev and bind-mounts a small set of device nodes.
     # The minimal device set supports basic process I/O, entropy, and dynamic
-    # linking without exposing full host /dev or pseudo-terminals.
+    # linking without exposing full host /dev or pseudo-terminals. We rely on
+    # explicit bind mounts here rather than creating additional nodes.
     private def self.mount_dev(target : Path, proc_root : Path)
       mount_tmpfs(target, flags: MS_NOSUID)
       bind_mount_file("/dev/null", target / "null")
