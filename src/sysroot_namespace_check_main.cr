@@ -42,7 +42,13 @@ module Bootstrap
         when .includes?("missing filesystem support")
           puts "- Ensure proc/sysfs/tmpfs are enabled in the kernel (CONFIG_PROC_FS/CONFIG_SYSFS/CONFIG_TMPFS)"
         when .includes?("setgroups")
-          puts "- Ensure /proc/self/setgroups is present and writable (AppArmor/LSM may be blocking it)"
+          puts "- Ensure /proc/self/setgroups is present and writable (AppArmor/LSM/seccomp may be blocking it); consider running without seccomp/NoNewPrivs"
+        when .includes?("no_new_privs")
+          puts "- Run without NoNewPrivs (container runtime security profile may need adjustment)"
+        when .includes?("seccomp")
+          puts "- Disable or relax the seccomp profile (e.g., --security-opt seccomp=unconfined) to allow userns mapping and sockets"
+        when .includes?("user namespace setgroups mapping failed")
+          puts "- Allow setgroups/uid_map writes inside user namespaces (adjust seccomp/LSM or run privileged)"
         end
       end
       exit 1

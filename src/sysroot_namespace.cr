@@ -52,6 +52,7 @@ module Bootstrap
     # proc/sys/dev from succeeding on the current host.
     def self.collect_restrictions(proc_root : Path = Path["/proc"],
                                   filesystems_path : Path = Path["/proc/filesystems"],
+                                  proc_status_path : Path = Path["/proc/self/status"],
                                   userns_toggle_path : String = USERNS_TOGGLE_PATH) : Array(String)
       restrictions = [] of String
       restrictions << "kernel.unprivileged_userns_clone is disabled" unless unprivileged_userns_clone_enabled?(userns_toggle_path)
@@ -59,6 +60,18 @@ module Bootstrap
       missing_fs = missing_filesystems(filesystems_path, %w(proc sysfs tmpfs))
       unless missing_fs.empty?
         restrictions << "missing filesystem support: #{missing_fs.join(", ")}"
+      end
+
+      if no_new_privs?(proc_status_path)
+        restrictions << "no_new_privs is set; user namespace uid/gid mappings may be blocked by the container runtime"
+      end
+
+      if (seccomp = seccomp_mode(proc_status_path)) && seccomp != "0"
+        restrictions << "seccomp is enforced (mode #{seccomp}); setgroups/uid_map writes or sockets may be blocked"
+      end
+
+      if (error = userns_setgroups_probe_error)
+        restrictions << "user namespace setgroups mapping failed: #{error}"
       end
 
       if (apparmor_note = apparmor_restriction)
@@ -72,6 +85,50 @@ module Bootstrap
       return required unless File.exists?(path)
       available = File.read_lines(path).map { |line| line.split.last? }.compact
       required.reject { |fs| available.includes?(fs) }
+    end
+
+    # Returns true when NoNewPrivs is set on the current process.
+    def self.no_new_privs?(status_path : Path = Path["/proc/self/status"]) : Bool
+      value = proc_status_value(status_path, "NoNewPrivs")
+      value == "1"
+    end
+
+    # Returns the seccomp mode from /proc/self/status, or nil when absent.
+    def self.seccomp_mode(status_path : Path = Path["/proc/self/status"]) : String?
+      proc_status_value(status_path, "Seccomp")
+    end
+
+    # Attempts to unshare a user namespace and write /proc/self/setgroups in a
+    # subprocess to detect seccomp/LSM restrictions. Returns an error string
+    # when the probe fails, or nil when it succeeds.
+    def self.userns_setgroups_probe_error : String?
+      stdout = IO::Memory.new
+      stderr = IO::Memory.new
+      begin
+        status = Process.run(
+          "crystal",
+          ["eval", "require \"./src/sysroot_namespace\"; Bootstrap::SysrootNamespace.unshare_namespaces"],
+          chdir: Path[__DIR__] / "..",
+          output: stdout,
+          error: stderr
+        )
+        return nil if status.success?
+        reason = stderr.to_s.strip
+        reason = "exit=#{status.exit_code} #{reason}" unless reason.empty?
+        return "unshare probe failed #{reason}".strip
+      rescue ex : Exception
+        return "unshare probe not available: #{ex.message}"
+      end
+    end
+
+    # Reads a single value from /proc/self/status.
+    private def self.proc_status_value(path : Path, key : String) : String?
+      return nil unless File.exists?(path)
+      line = File.read_lines(path).find { |entry| entry.starts_with?("#{key}:") }
+      return nil unless line
+      line.split(/\s+/)[1]?
+    rescue
+      nil
     end
 
     # Returns a restriction message if AppArmor confinement is detected.
