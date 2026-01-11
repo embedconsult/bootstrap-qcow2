@@ -263,8 +263,8 @@ module Bootstrap
 
     # Creates a tmpfs-backed /dev and bind-mounts a small set of device nodes.
     # The minimal device set supports basic process I/O, entropy, and dynamic
-    # linking without exposing full host /dev or pseudo-terminals. We rely on
-    # explicit bind mounts here rather than creating additional nodes.
+    # linking without exposing full host /dev or pseudo-terminals. We mount
+    # /dev without MS_NODEV so device nodes remain usable for bootstrap.
     private def self.mount_dev(target : Path, proc_root : Path)
       mount_tmpfs(target, flags: MS_NOSUID)
       bind_mount_file("/dev/null", target / "null")
@@ -280,8 +280,9 @@ module Bootstrap
       FileUtils.ln_s("/proc/self/fd/2", target / "stderr")
     end
 
-    # Mounts a tmpfs at the target path with safe defaults, optionally
-    # overriding mount flags for special cases (like /dev needing device nodes).
+    # Mounts a tmpfs at the target path with safe defaults (including MS_NODEV),
+    # optionally overriding mount flags for special cases (like /dev needing
+    # device nodes during bootstrap).
     private def self.mount_tmpfs(target : Path, flags : UInt64 = MS_NOSUID | MS_NODEV)
       unless filesystem_available?("tmpfs")
         raise NamespaceError.new("Filesystem type tmpfs is not available; check /proc/filesystems.")
