@@ -112,6 +112,11 @@ module Bootstrap
         lsm = File.read("/sys/kernel/security/lsm").strip
         return nil unless lsm.split(",").includes?("apparmor")
       end
+      restrict_path = Path["/proc/sys/kernel/apparmor_restrict_unprivileged_userns"]
+      if File.exists?(restrict_path)
+        value = File.read(restrict_path).strip
+        return "kernel.apparmor_restrict_unprivileged_userns is enabled" unless value == "0"
+      end
       if File.exists?(current_path)
         status = File.read(current_path).strip
         return "AppArmor confinement detected (#{status}); process must be unconfined" unless status.empty? || status == "unconfined"
