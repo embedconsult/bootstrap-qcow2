@@ -287,6 +287,7 @@ module Bootstrap
       end
       FileUtils.mkdir_p(target)
       mount_call("tmpfs", target.to_s, "tmpfs", flags, nil)
+      mount_call(nil, target.to_s, nil, MS_REMOUNT | flags, nil)
     end
 
     # Bind-mounts a source path to the target path.
