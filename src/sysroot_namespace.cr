@@ -52,7 +52,6 @@ module Bootstrap
     # proc/sys/dev from succeeding on the current host.
     def self.collect_restrictions(proc_root : Path = Path["/proc"],
                                   filesystems_path : Path = Path["/proc/filesystems"],
-                                  setgroups_path : String = "/proc/self/setgroups",
                                   userns_toggle_path : String = USERNS_TOGGLE_PATH) : Array(String)
       restrictions = [] of String
       restrictions << "kernel.unprivileged_userns_clone is disabled" unless unprivileged_userns_clone_enabled?(userns_toggle_path)
@@ -65,10 +64,6 @@ module Bootstrap
       if (apparmor_note = apparmor_restriction)
         restrictions << apparmor_note
       end
-
-      if (setgroups_note = setgroups_restriction(setgroups_path))
-        restrictions << setgroups_note
-      end
       restrictions
     end
 
@@ -77,20 +72,6 @@ module Bootstrap
       return required unless File.exists?(path)
       available = File.read_lines(path).map { |line| line.split.last? }.compact
       required.reject { |fs| available.includes?(fs) }
-    end
-
-    # Returns a restriction message if setgroups cannot be opened for write.
-    def self.setgroups_restriction(setgroups_path : String) : String?
-      if File.exists?(setgroups_path)
-        begin
-          File.open(setgroups_path, "w") { }
-          nil
-        rescue error : File::AccessDeniedError
-          "setgroups is not writable (#{setgroups_path}): #{error.message}"
-        end
-      elsif LibC.getuid != 0
-        "missing #{setgroups_path}; unprivileged user namespaces require setgroups support"
-      end
     end
 
     # Returns a restriction message if AppArmor confinement is detected.

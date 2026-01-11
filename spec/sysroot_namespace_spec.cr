@@ -17,56 +17,6 @@ describe Bootstrap::SysrootNamespace do
     end
   end
 
-  describe ".setgroups_restriction" do
-    it "returns nil when setgroups is readable and writable" do
-      file = File.tempfile("setgroups")
-      begin
-        file.print("allow\n")
-        file.flush
-        File.chmod(file.path, 0o644)
-
-        restriction = Bootstrap::SysrootNamespace.setgroups_restriction(file.path)
-        restriction.should be_nil
-      ensure
-        file.close
-      end
-    end
-
-    readonly_file = File.tempfile("setgroups")
-    open_blocked = begin
-      readonly_file.print("allow\n")
-      readonly_file.flush
-      File.chmod(readonly_file.path, 0o000)
-      begin
-        File.open(readonly_file.path, "w") { }
-        false
-      rescue File::AccessDeniedError
-        true
-      end
-    ensure
-      readonly_file.close
-    end
-
-    if open_blocked
-      it "reports when setgroups is not writable" do
-        file = File.tempfile("setgroups")
-        begin
-          file.print("allow\n")
-          file.flush
-          File.chmod(file.path, 0o000)
-
-          restriction = Bootstrap::SysrootNamespace.setgroups_restriction(file.path)
-          restriction.should_not be_nil
-        ensure
-          file.close
-        end
-      end
-    else
-      pending "reports when setgroups is not writable (filesystem allows opening write-only)" do
-      end
-    end
-  end
-
   describe ".apparmor_restriction" do
     it "returns nil for unconfined labels" do
       file = File.tempfile("apparmor")
@@ -143,7 +93,6 @@ describe Bootstrap::SysrootNamespace do
         restrictions = Bootstrap::SysrootNamespace.collect_restrictions(
           proc_root: proc_root,
           filesystems_path: Path[filesystems.path],
-          setgroups_path: "/missing/setgroups",
           userns_toggle_path: "/missing/userns"
         )
 
