@@ -23,11 +23,46 @@ describe Bootstrap::SysrootNamespace do
       begin
         file.print("allow\n")
         file.flush
+        File.chmod(file.path, 0o644)
 
         restriction = Bootstrap::SysrootNamespace.setgroups_restriction(file.path)
         restriction.should be_nil
       ensure
         file.close
+      end
+    end
+
+    readonly_file = File.tempfile("setgroups")
+    open_blocked = begin
+      readonly_file.print("allow\n")
+      readonly_file.flush
+      File.chmod(readonly_file.path, 0o000)
+      begin
+        File.open(readonly_file.path, "w") { }
+        false
+      rescue File::AccessDeniedError
+        true
+      end
+    ensure
+      readonly_file.close
+    end
+
+    if open_blocked
+      it "reports when setgroups is not writable" do
+        file = File.tempfile("setgroups")
+        begin
+          file.print("allow\n")
+          file.flush
+          File.chmod(file.path, 0o000)
+
+          restriction = Bootstrap::SysrootNamespace.setgroups_restriction(file.path)
+          restriction.should_not be_nil
+        ensure
+          file.close
+        end
+      end
+    else
+      pending "reports when setgroups is not writable (filesystem allows opening write-only)" do
       end
     end
   end
@@ -100,10 +135,6 @@ describe Bootstrap::SysrootNamespace do
       proc_root_temp.close
       File.delete(proc_root) if File.exists?(proc_root)
       FileUtils.mkdir_p(proc_root / "sys")
-      mountinfo = File.tempfile("mountinfo")
-      mountinfo.print("36 25 0:32 / #{proc_root} rw,nosuid,nodev,noexec,relatime - proc proc rw\n")
-      mountinfo.flush
-
       filesystems = File.tempfile("filesystems")
       begin
         filesystems.print("nodev\tproc\nnodev\tsysfs\n")
@@ -113,14 +144,12 @@ describe Bootstrap::SysrootNamespace do
           proc_root: proc_root,
           filesystems_path: Path[filesystems.path],
           setgroups_path: "/missing/setgroups",
-          userns_toggle_path: "/missing/userns",
-          mountinfo_path: Path[mountinfo.path]
+          userns_toggle_path: "/missing/userns"
         )
 
         restrictions.any? { |entry| entry.includes?("missing filesystem support") }.should be_true
         restrictions.any? { |entry| entry.includes?("kernel.unprivileged_userns_clone") }.should be_true
       ensure
-        mountinfo.close
         filesystems.close
       end
     end

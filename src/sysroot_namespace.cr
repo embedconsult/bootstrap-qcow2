@@ -53,8 +53,7 @@ module Bootstrap
     def self.collect_restrictions(proc_root : Path = Path["/proc"],
                                   filesystems_path : Path = Path["/proc/filesystems"],
                                   setgroups_path : String = "/proc/self/setgroups",
-                                  userns_toggle_path : String = USERNS_TOGGLE_PATH,
-                                  mountinfo_path : Path = Path["/proc/self/mountinfo"]) : Array(String)
+                                  userns_toggle_path : String = USERNS_TOGGLE_PATH) : Array(String)
       restrictions = [] of String
       restrictions << "kernel.unprivileged_userns_clone is disabled" unless unprivileged_userns_clone_enabled?(userns_toggle_path)
 
@@ -80,14 +79,15 @@ module Bootstrap
       required.reject { |fs| available.includes?(fs) }
     end
 
-    # Returns a restriction message if setgroups is missing or not writable.
+    # Returns a restriction message if setgroups cannot be opened for write.
     def self.setgroups_restriction(setgroups_path : String) : String?
       if File.exists?(setgroups_path)
-        permissions = File.info(setgroups_path).permissions
-        unless readable_by_mode?(permissions) && writable_by_mode?(permissions)
-          return "setgroups is not writable (#{setgroups_path})"
+        begin
+          File.open(setgroups_path, "w") { }
+          nil
+        rescue error : File::AccessDeniedError
+          "setgroups is not writable (#{setgroups_path}): #{error.message}"
         end
-        nil
       elsif LibC.getuid != 0
         "missing #{setgroups_path}; unprivileged user namespaces require setgroups support"
       end
@@ -110,30 +110,6 @@ module Bootstrap
       "AppArmor confinement detected (#{status}); process must be unconfined"
     rescue
       nil
-    end
-
-    # Returns true if the provided permissions include any read bit.
-    private def self.readable_by_mode?(permissions : File::Permissions) : Bool
-      permissions.includes?(File::Permissions::OwnerRead) ||
-        permissions.includes?(File::Permissions::GroupRead) ||
-        permissions.includes?(File::Permissions::OtherRead)
-    end
-
-    # Returns true if the provided permissions include any write bit.
-    private def self.writable_by_mode?(permissions : File::Permissions) : Bool
-      permissions.includes?(File::Permissions::OwnerWrite) ||
-        permissions.includes?(File::Permissions::GroupWrite) ||
-        permissions.includes?(File::Permissions::OtherWrite)
-    end
-
-    # Returns true if the current process can open the path for reading.
-    private def self.readable_for_current_user?(path : Path) : Bool
-      File.open(path, "r") do
-        # opening succeeds
-      end
-      true
-    rescue File::AccessDeniedError
-      false
     end
 
     # Returns true when unprivileged user namespace cloning is enabled.
@@ -305,6 +281,8 @@ module Bootstrap
     end
 
     # Creates a tmpfs-backed /dev and bind-mounts a small set of device nodes.
+    # The minimal device set supports basic process I/O, entropy, and dynamic
+    # linking without exposing full host /dev or pseudo-terminals.
     private def self.mount_dev(target : Path, proc_root : Path)
       mount_tmpfs(target)
       bind_mount_file("/dev/null", target / "null")

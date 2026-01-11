@@ -85,9 +85,9 @@ No mknod. No /dev/pts. No host /dev.
 
 ### pivot_root behavior
 
-- Perform pivot_root(<newroot>, <newroot>/.oldroot)
+- Perform pivot_root(<newroot>, <newroot>/.pivot_root)
 - chdir("/")
-- /oldroot handling:
+- /.pivot_root handling:
   - Removing it is optional
   - It may be kept for explicit developer access to the host filesystem
   - Tooling must not depend on it implicitly
