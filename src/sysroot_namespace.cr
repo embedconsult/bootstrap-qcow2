@@ -67,7 +67,6 @@ module Bootstrap
         restrictions << apparmor_note
       end
 
-      restrictions.concat(proc_mask_restrictions(proc_root, mountinfo_path))
       if (setgroups_note = setgroups_restriction(setgroups_path))
         restrictions << setgroups_note
       end
@@ -79,38 +78,6 @@ module Bootstrap
       return required unless File.exists?(path)
       available = File.read_lines(path).map { |line| line.split.last? }.compact
       required.reject { |fs| available.includes?(fs) }
-    end
-
-    # Returns a list of masked proc paths that indicate mount_too_revealing()
-    # will reject new procfs mounts inside unprivileged namespaces when using
-    # new procfs mounts.
-    def self.proc_mask_restrictions(proc_root : Path,
-                                    mountinfo_path : Path = Path["/proc/self/mountinfo"]) : Array(String)
-      return [] of String unless procfs_mountpoint?(proc_root, mountinfo_path)
-      masked = [] of String
-      masked_targets = %w(sys irq bus fs)
-      masked_targets.each do |entry|
-        target = proc_root / entry
-        readable = File.exists?(target) && readable_for_current_user?(target)
-        masked << "proc path #{target} is not readable; procfs mount may be denied" unless readable
-      end
-      masked
-    end
-
-    # Returns true when mountinfo reports *proc_root* is backed by procfs.
-    private def self.procfs_mountpoint?(proc_root : Path, mountinfo_path : Path) : Bool
-      return false unless File.exists?(mountinfo_path)
-      File.each_line(mountinfo_path) do |line|
-        left, right = line.split(" - ", 2)
-        next unless right
-        left_fields = left.split
-        next unless left_fields.size >= 5
-        mount_point = left_fields[4]
-        next unless mount_point == proc_root.to_s
-        fs_type = right.split.first?
-        return fs_type == "proc"
-      end
-      false
     end
 
     # Returns a restriction message if setgroups is missing or not writable.
@@ -320,9 +287,8 @@ module Bootstrap
     end
 
     # Bind-mounts /proc into the new root and remounts it with safe flags.
-    # We avoid a read-only remount because the container needs writable proc
-    # entries for namespace setup (e.g., /proc/self/{setgroups,uid_map,gid_map}).
-    # See Linux kernel docs: Documentation/admin-guide/user-namespaces.rst.
+    # We avoid a read-only remount because EPERM was observed during the
+    # remount attempt on some kernels.
     private def self.mount_proc(target : Path)
       FileUtils.mkdir_p(target)
       bind_mount("/proc", target)

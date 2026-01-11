@@ -61,11 +61,9 @@ All mounts must be namespace-local. Nothing propagates to the host.
 Prepare <newroot>/{proc,sys,dev,dev/shm}.
 
 /proc
-  mount("proc", "<newroot>/proc", "proc",
-        MS_NOSUID | MS_NODEV | MS_NOEXEC, NULL)
-  Note: avoid remounting /proc read-only because namespace setup needs to
-  write /proc/self/{setgroups,uid_map,gid_map} (see
-  Documentation/admin-guide/user-namespaces.rst).
+  Bind-mount host /proc → <newroot>/proc, then remount with
+  MS_NOSUID | MS_NODEV | MS_NOEXEC. Avoid a read-only remount because
+  EPERM was observed during the remount attempt on some kernels.
 
 /sys
   Bind-mount host /sys → <newroot>/sys, then remount read-only.

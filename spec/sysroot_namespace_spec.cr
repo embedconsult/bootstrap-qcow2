@@ -17,27 +17,6 @@ describe Bootstrap::SysrootNamespace do
     end
   end
 
-  describe ".proc_mask_restrictions" do
-    it "reports unreadable proc paths" do
-      temp = File.tempfile("proc-root")
-      proc_root = Path[temp.path]
-      temp.close
-      File.delete(proc_root) if File.exists?(proc_root)
-      FileUtils.mkdir_p(proc_root)
-      FileUtils.mkdir_p(proc_root / "sys")
-      mountinfo = File.tempfile("mountinfo")
-      begin
-        mountinfo.print("36 25 0:32 / #{proc_root} rw,nosuid,nodev,noexec,relatime - proc proc rw\n")
-        mountinfo.flush
-
-        restrictions = Bootstrap::SysrootNamespace.proc_mask_restrictions(proc_root, Path[mountinfo.path])
-        restrictions.any? { |entry| entry.includes?("irq") }.should be_true
-      ensure
-        mountinfo.close
-      end
-    end
-  end
-
   describe ".setgroups_restriction" do
     it "returns nil when setgroups is readable and writable" do
       file = File.tempfile("setgroups")
@@ -139,7 +118,6 @@ describe Bootstrap::SysrootNamespace do
         )
 
         restrictions.any? { |entry| entry.includes?("missing filesystem support") }.should be_true
-        restrictions.any? { |entry| entry.includes?("proc path") }.should be_true
         restrictions.any? { |entry| entry.includes?("kernel.unprivileged_userns_clone") }.should be_true
       ensure
         mountinfo.close
@@ -233,7 +211,6 @@ describe Bootstrap::SysrootNamespace do
   end
 
   restrictions = Bootstrap::SysrootNamespace.collect_restrictions
-  restrictions.reject! { |entry| entry.includes?("proc path") }
   if restrictions.empty?
     it "unshares namespaces in a subprocess when enabled" do
       # Run in a subprocess to avoid mutating the namespace state of the spec runner.
