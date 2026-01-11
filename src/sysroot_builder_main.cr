@@ -1,5 +1,6 @@
 require "option_parser"
 require "./sysroot_builder"
+require "./sysroot_namespace"
 
 module Bootstrap
   # Entry point to generate a chrootable sysroot tarball without using crystal eval.
