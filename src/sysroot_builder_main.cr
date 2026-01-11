@@ -1,9 +1,11 @@
 require "option_parser"
 require "./sysroot_builder"
+require "./sysroot_namespace"
 
 module Bootstrap
   # Entry point to generate a chrootable sysroot tarball without using crystal eval.
   class SysrootBuilderMain
+    # Parse CLI flags and orchestrate sysroot tarball generation.
     def self.run
       output = Path["sysroot.tar.gz"]
       workspace = Path["data/sysroot"]

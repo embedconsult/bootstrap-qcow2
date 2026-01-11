@@ -19,9 +19,85 @@ These instructions apply to the entire repository unless overridden by a nested 
 
 ## Testing and quality
 - Run `crystal tool format` on modified Crystal files.
-- Add or update automated checks (Crystal specs or integration exercises) when changing build logic, boot flow, or image layout.
+- Always run `crystal spec` to verify no test failures.
+- Tests that cannot pass in the current environment should utilize `pending`, but this is never an excuse for not writing tests that should pass when the environment allows.
+- Add or update automated checks (Crystal specs or integration exercises) for all public methods and evaluate any changes in build logic, boot flow, or image layout.
 - Document architecture-specific behaviors or assumptions (especially for aarch64) near the code that enforces them.
+- Document all methods. Use the documentation style of the Crystal's standard library API.
+- Always document the source of magic numbers. Use authoritative sources.
 
 ## PR/commit expectations
 - Commit messages should summarize the behavioral change and the architecture(s) affected.
 - PR summaries should call out: target architectures, EFI/boot impacts, new dependencies (if any), and how the change advances self-hosting or Crystal-only tooling.
+- Ensure PR summaries cover all changes made on the branch, not just the latest commit.
+
+## Rootless userns + pivot_root procedure
+
+Goal:
+Run a foreign Linux rootfs as a normal user using userns + mntns + pivot_root for development and bootstrapping.
+Isolation is functional, not security-driven.
+
+### Preflight (fail fast)
+
+- Kernel config: CONFIG_USER_NS, CONFIG_MOUNT_NS, CONFIG_PROC_FS, CONFIG_SYSFS, CONFIG_TMPFS
+- Sysctl: kernel.unprivileged_userns_clone=1
+- Sysctl (AppArmor): kernel.apparmor_restrict_unprivileged_userns=0
+- AppArmor: process must be unconfined
+
+### Namespace setup (mandatory order)
+
+1. unshare(CLONE_NEWUSER)
+2. Write ID maps:
+   - echo deny > /proc/self/setgroups
+   - write /proc/self/uid_map and /proc/self/gid_map
+3. unshare(CLONE_NEWNS)
+4. Disable mount propagation:
+   - mount(NULL, "/", NULL, MS_REC | MS_PRIVATE, NULL)
+
+All mounts must be namespace-local. Nothing propagates to the host.
+
+### Mount plan (prefer bind mounts)
+
+Prepare <newroot>/{proc,sys,dev,dev/shm}.
+
+/proc
+  Bind-mount host /proc → <newroot>/proc, then remount with
+  MS_NOSUID | MS_NODEV | MS_NOEXEC. Avoid a read-only remount because
+  EPERM was observed during the remount attempt on some kernels.
+
+/sys
+  Bind-mount host /sys → <newroot>/sys, then remount read-only.
+
+/dev
+  tmpfs on <newroot>/dev
+
+  Bind-mount only:
+  - /dev/null
+  - /dev/zero
+  - /dev/random
+  - /dev/urandom
+  - /dev/tty (optional)
+  - /dev/fd + stdio via /proc/self/fd
+
+  tmpfs on <newroot>/dev/shm
+
+No mknod. No /dev/pts. No host /dev.
+
+### pivot_root behavior
+
+- Perform pivot_root(<newroot>, <newroot>/.pivot_root)
+- chdir("/")
+- /.pivot_root handling:
+  - Removing it is optional
+  - It may be kept for explicit developer access to the host filesystem
+  - Tooling must not depend on it implicitly
+
+Mount namespace lifetime = process lifetime.
+All mounts disappear when the process exits.
+
+### Invariants
+
+- No sudo at runtime
+- No persistent mounts
+- No AppArmor mediation of this tool
+- Any dependency on host paths must be explicit and intentional
