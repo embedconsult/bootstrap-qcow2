@@ -1,14 +1,22 @@
-# TODO: Write documentation for `Bootstrap::Qcow2`
+# `Bootstrap::Qcow2` coordinates qcow2 image generation and dependency checks.
+#
+# The class is currently focused on orchestrating image creation via Docker and
+# external tooling, while the rest of the project migrates toward pure
+# Crystal-based tooling.
 require "log"
 
 module Bootstrap
+  # Semantic version of the bootstrap-qcow2 tooling.
   VERSION = "0.1.0"
 
+  # Basic qcow2 wrapper that validates tools and triggers image builds.
   class Qcow2
+    # Create a new qcow2 helper for the provided filename.
     def initialize(@filename : String)
       Log.info { "Working with qcow2 file: #{@filename}" }
     end
 
+    # Check whether required dependencies and local fossils are available.
     def checkDeps
       File.exists?("../fossil-scm.fossil") &&
         File.exists?("../bootstrap-qcow2.fossil") &&
@@ -17,12 +25,14 @@ module Bootstrap
         true
     end
 
+    # Return true when *exeName* resolves to an executable on PATH.
     def self.findExe?(exeName : String)
       exePath = Process.find_executable(exeName)
       Log.info { "Found #{exeName} at #{exePath}" }
       exePath && File::Info.executable?(exePath)
     end
 
+    # Run a command and raise when it fails.
     def self.exec!(command : String, args : Array(String) = [] of String, chdir = "./data")
       result = self.exec(command, args, chdir)
       if !result
@@ -30,6 +40,7 @@ module Bootstrap
       end
     end
 
+    # Run a command, logging stdout/stderr, and return true on success.
     def self.exec(command : String, args : Array(String) = [] of String, chdir = "./data")
       stdout = IO::Memory.new
       stderr = IO::Memory.new
@@ -45,10 +56,12 @@ module Bootstrap
     end
 
     # TODO: Add method to fetch data files
+    # Placeholder for future data-fetch orchestration.
     def fetchData
       # https://github.com/gregkh/linux/archive/refs/tags/v6.12.38.tar.gz --> linux.tar.gz
     end
 
+    # Build a qcow2 image using the Docker-based pipeline.
     def genQcow2
       self.class.exec(command: "docker", args: ["build", "-f", "Dockerfile.uefi_rs", "-t", "jkridner/bootstrap-qcow2", "."])
       self.class.exec(command: "docker", args: ["rm", "temp-img"])
@@ -57,6 +70,7 @@ module Bootstrap
       # self.class.exec(command: "docker", args: ["cp", "temp-img:/tmp/genimage/images/bootstrap.img", "bootstrap.img"])
     end
 
+    # Placeholder for future integration test orchestration.
     def self.test
       # self.exec(command: "docker", args: ["build", "-t", "bootstrap-qcow2-buildroot", "-f", "Dockerfile.buildroot", "."])
       # self.exec(command: "docker", args: ["volume", "create", "buildroot_downloads"])

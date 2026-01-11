@@ -53,11 +53,13 @@ module Bootstrap
       strategy : String = "autotools",
       patches : Array(String) = [] of String,
       extra_urls : Array(URI) = [] of URI do
+      # Prefer a filename that includes the package name for clarity.
       def filename : String
         basename = File.basename(url.path)
         basename.includes?(name) ? basename : "#{name}-#{basename}"
       end
 
+      # Return the canonical URL list: primary URL plus any extras.
       def all_urls : Array(URI)
         [url] + extra_urls
       end
@@ -73,6 +75,7 @@ module Bootstrap
       getter patches : Array(String)
       getter sysroot_prefix : String
 
+      # Create a serialized build step for the sysroot runner.
       def initialize(@name : String, @strategy : String, @workdir : String, @configure_flags : Array(String), @patches : Array(String), @sysroot_prefix : String)
       end
     end
@@ -83,6 +86,7 @@ module Bootstrap
     getter base_version : String
     @resolved_base_version : String?
 
+    # Create a sysroot builder rooted at the workspace directory.
     def initialize(@workspace : Path = Path["data/sysroot"],
                    @architecture : String = DEFAULT_ARCH,
                    @branch : String = DEFAULT_BRANCH,
@@ -99,22 +103,27 @@ module Bootstrap
       FileUtils.mkdir_p(sources_dir)
     end
 
+    # Directory for cached artifacts within the workspace.
     def cache_dir : Path
       @workspace / "cache"
     end
 
+    # Directory for checksum cache entries.
     def checksum_dir : Path
       cache_dir / "checksums"
     end
 
+    # Directory containing downloaded source archives.
     def sources_dir : Path
       @workspace / "sources"
     end
 
+    # Directory containing the extracted rootfs.
     def rootfs_dir : Path
       @workspace / "rootfs"
     end
 
+    # Directory containing the staged sysroot install prefix.
     def sysroot_dir : Path
       @workspace / "sysroot"
     end
@@ -154,6 +163,7 @@ module Bootstrap
       ]
     end
 
+    # Download all configured package sources and return their cached paths.
     def download_sources : Array(Path)
       packages.flat_map { |pkg| download_all(pkg) }
     end
@@ -197,6 +207,7 @@ module Bootstrap
       target
     end
 
+    # Clone a PackageSpec with a different URL and checksum URL.
     private def pkg_with_url(pkg : PackageSpec, url : URI, checksum_url : URI?) : PackageSpec
       PackageSpec.new(pkg.name, pkg.version, url, pkg.sha256, checksum_url, pkg.configure_flags, pkg.build_directory, pkg.strategy, pkg.patches, [] of URI)
     end
@@ -225,11 +236,13 @@ module Bootstrap
       pkg.sha256 || cached_sha256(pkg) || fetch_remote_checksum(pkg)
     end
 
+    # Read a cached SHA256 for the package, if present.
     def cached_sha256(pkg : PackageSpec) : String?
       checksum_path = checksum_dir / "#{pkg.filename}.sha256"
       File.exists?(checksum_path) ? File.read(checksum_path).strip : nil
     end
 
+    # Read a cached CRC32 for the package, if present.
     def cached_crc32(pkg : PackageSpec) : String?
       checksum_path = checksum_dir / "#{pkg.filename}.crc32"
       File.exists?(checksum_path) ? File.read(checksum_path).strip : nil
@@ -243,14 +256,17 @@ module Bootstrap
       body ? normalize_checksum(body) : nil
     end
 
+    # Normalize a checksum file to the first whitespace-delimited token.
     private def normalize_checksum(body : String) : String
       body.strip.split(/\s+/).first
     end
 
+    # Return the base version after resolving the local override.
     private def resolved_base_version : String
       @resolved_base_version ||= @base_version
     end
 
+    # Fetch a URL body as a string while honoring redirect limits.
     private def fetch_string_with_redirects(uri : URI, limit : Int32 = 5) : String?
       buffer = IO::Memory.new
       success = false
@@ -263,6 +279,7 @@ module Bootstrap
       buffer.to_s
     end
 
+    # Download a URL into a target path while honoring redirect limits.
     private def download_with_redirects(uri : URI, target : Path, limit : Int32 = 5) : Nil
       File.open(target, "w") do |file|
         fetch_with_redirects(uri, limit) do |response|
@@ -272,6 +289,7 @@ module Bootstrap
       end
     end
 
+    # Perform HTTP GET requests while handling redirects up to *limit*.
     private def fetch_with_redirects(uri : URI, limit : Int32 = 5, &block : HTTP::Client::Response ->)
       current = uri
       attempts = 0
@@ -289,6 +307,7 @@ module Bootstrap
       end
     end
 
+    # Compute a SHA256 hex digest for a file path.
     def sha256(path : Path) : String
       digest = Digest::SHA256.new
       File.open(path) do |file|
@@ -300,6 +319,7 @@ module Bootstrap
       digest.final.hexstring
     end
 
+    # Compute a CRC32 hex digest for a file path.
     def crc32(path : Path) : String
       digest = Digest::CRC32.new
       File.open(path) do |file|
@@ -311,6 +331,7 @@ module Bootstrap
       digest.final.hexstring
     end
 
+    # Persist checksum entries for a package.
     def write_checksum(pkg : PackageSpec, sha : String, crc : String) : Nil
       File.write(checksum_dir / "#{pkg.filename}.sha256", sha + "\n")
       File.write(checksum_dir / "#{pkg.filename}.crc32", crc + "\n")
@@ -402,6 +423,7 @@ module Bootstrap
       rootfs_dir
     end
 
+    # Generate a chroot tarball for the prepared rootfs.
     def generate_chroot_tarball(output : Path? = nil, include_sources : Bool = true) : Path
       generate_chroot(include_sources: include_sources)
       output ||= rootfs_dir.parent / "sysroot.tar.gz"
@@ -411,6 +433,7 @@ module Bootstrap
       output
     end
 
+    # Remove known archive extensions to derive the directory name.
     private def strip_archive_extension(filename : String) : String
       archive_suffixes = %w[.tar.gz .tar.xz .tar.bz2 .tgz .tbz2 .zip .tar]
       archive_suffixes.each do |suffix|
@@ -422,12 +445,14 @@ module Bootstrap
       simple.empty? ? filename : simple
     end
 
+    # Extract the tarball into the destination, honoring ownership rules.
     private def extract_tarball(path : Path, destination : Path, preserve_ownership : Bool, force_system_tar : Bool = false) : Nil
       FileUtils.mkdir_p(destination)
       return run_system_tar_extract(path, destination, preserve_ownership) if force_system_tar
       Extractor.new(path, destination, preserve_ownership, @owner_uid, @owner_gid).run
     end
 
+    # Extract with system tar when a pure Crystal extraction is not desired.
     private def run_system_tar_extract(path : Path, destination : Path, preserve_ownership : Bool) : Nil
       args = ["-xf", path.to_s, "-C", destination.to_s]
       if preserve_ownership
@@ -444,6 +469,7 @@ module Bootstrap
       raise "Failed to extract #{path}" unless status.success?
     end
 
+    # Write a gzipped tarball with a pure Crystal implementation.
     private def write_tar_gz(source : Path, output : Path) : Nil
       TarWriter.write_gz(source, output)
     rescue ex
@@ -454,6 +480,7 @@ module Bootstrap
       raise "Failed to create tarball with system tar" unless status.success?
     end
 
+    # Placeholder for future build command materialization.
     private def build_commands_for(pkg : PackageSpec, sysroot_prefix : String) : Array(Array(String))
       # The builder remains data-only: embed strategy metadata and let the runner
       # translate into concrete commands.
@@ -462,9 +489,11 @@ module Bootstrap
 
     # Minimal tar extractor/writer implemented in Crystal to avoid shelling out.
     private struct Extractor
+      # Create a tar extractor for a single archive.
       def initialize(@archive : Path, @destination : Path, @preserve_ownership : Bool, @owner_uid : Int32?, @owner_gid : Int32?)
       end
 
+      # Extract the archive contents into the destination.
       def run
         return if fallback_for_unhandled_compression?
         File.open(@archive) do |file|
@@ -473,6 +502,7 @@ module Bootstrap
         end
       end
 
+      # Wrap gzip compressed archives in a gzip reader.
       private def maybe_gzip(io : IO) : IO
         if @archive.to_s.ends_with?(".gz")
           Compress::Gzip::Reader.new(io)
@@ -481,6 +511,7 @@ module Bootstrap
         end
       end
 
+      # Use system tar for compression formats we do not decode in Crystal.
       private def fallback_for_unhandled_compression? : Bool
         if @archive.to_s.ends_with?(".tar.xz") || @archive.to_s.ends_with?(".tar.bz2")
           Log.warn { "Running: tar -xf #{@archive} -C #{@destination}" }
@@ -519,9 +550,11 @@ module Bootstrap
       TYPE_HARDLINK  = '1'
       TYPE_FILE      = '\u0000'
 
+      # Create a tar reader that writes entries into the destination.
       def initialize(@io : IO, @destination : Path, @preserve_ownership : Bool, @owner_uid : Int32?, @owner_gid : Int32?)
       end
 
+      # Extract every entry in the tar stream.
       def extract_all
         loop do
           header = Bytes.new(HEADER_SIZE)
@@ -594,16 +627,19 @@ module Bootstrap
         end
       end
 
+      # Skip the next *size* bytes in the stream.
       private def skip_bytes(size : Int64)
         @io.skip(size) if size > 0
       end
 
+      # Skip zero padding up to the next 512-byte boundary.
       private def skip_padding(size : Int64)
         remainder = size % HEADER_SIZE
         skip = remainder.zero? ? 0 : HEADER_SIZE - remainder
         @io.skip(skip) if skip > 0
       end
 
+      # Write a file payload from the tar stream to disk.
       private def write_file(path : Path, size : Int64, mode : Int32)
         File.open(path, "w") do |target_io|
           bytes_left = size
@@ -619,11 +655,13 @@ module Bootstrap
         File.chmod(path, mode)
       end
 
+      # Resolve uid/gid ownership for an entry based on preservation settings.
       private def resolved_owner(header_uid : Int32, header_gid : Int32) : {Int32?, Int32?}
         return {nil, nil} unless @preserve_ownership
         {(@owner_uid || header_uid), (@owner_gid || header_gid)}
       end
 
+      # Apply ownership metadata to a path when requested.
       private def apply_ownership(path : Path, uid : Int32?, gid : Int32?)
         return unless @preserve_ownership
         return unless uid || gid
@@ -632,6 +670,7 @@ module Bootstrap
         Log.warn { "Failed to apply ownership to #{path}: #{ex.message}" }
       end
 
+      # Ensure a tar entry stays within the destination root.
       private def safe_target_path(name : String) : Path?
         return nil if name.starts_with?("/")
         clean = name
@@ -644,15 +683,18 @@ module Bootstrap
         @destination / clean
       end
 
+      # Decode a NUL-terminated byte slice into a string.
       private def cstring(bytes : Bytes) : String
         String.new(bytes).split("\0", 2)[0].to_s
       end
 
+      # Parse an octal-encoded integer from tar header bytes.
       private def octal_to_i(bytes : Bytes) : Int64
         cleaned = String.new(bytes).tr("\0", "").strip.gsub(/[^0-7]/, "")
         cleaned.empty? ? 0_i64 : cleaned.to_i64(8)
       end
 
+      # Resolve a file mode from a tar header, defaulting to 0755.
       private def header_mode(header : Bytes) : Int32
         mode = octal_to_i(header[MODE_OFFSET, MODE_LENGTH]).to_i
         mode.zero? ? 0o755 : mode
@@ -690,6 +732,7 @@ module Bootstrap
 
       class LongPathError < Exception; end
 
+      # Write a gzipped tarball for a directory tree.
       def self.write_gz(source : Path, output : Path)
         assert_paths_fit(source)
         File.open(output, "w") do |file|
@@ -700,9 +743,11 @@ module Bootstrap
         end
       end
 
+      # Create a tar writer rooted at a source directory.
       def initialize(@io : IO, @source : Path)
       end
 
+      # Write every entry in the source tree to the tar stream.
       def write_all
         walk(@source) do |entry, stat|
           relative = Path.new(entry).relative_to(@source).to_s
@@ -722,6 +767,7 @@ module Bootstrap
         @io.write(Bytes.new(HEADER_SIZE * 2, 0))
       end
 
+      # Walk the directory tree and yield every entry with its metadata.
       private def walk(path : Path, &block : Path, File::Info ->)
         Dir.children(path).each do |child|
           entry = path / child
@@ -731,6 +777,7 @@ module Bootstrap
         end
       end
 
+      # Write a tar entry, emitting PAX headers for long names if needed.
       private def write_entry(name : String, size : Int64, stat : File::Info, typeflag : Char, linkname : String = "")
         if name.bytesize > 99 || linkname.bytesize > 99
           write_pax_header(name, linkname, stat)
@@ -740,6 +787,7 @@ module Bootstrap
         write_header(header_name, size, stat, typeflag, header_linkname)
       end
 
+      # Emit a PAX extended header for long path or link names.
       private def write_pax_header(name : String, linkname : String, stat : File::Info)
         entries = [] of String
         entries << pax_record("path", name) if name.bytesize > 99
@@ -751,6 +799,7 @@ module Bootstrap
         pad_file(payload.bytesize.to_i64)
       end
 
+      # Format a single PAX record with a correct length prefix.
       private def pax_record(key : String, value : String) : String
         record = "#{key}=#{value}\n"
         length = record.bytesize + 2
@@ -762,12 +811,14 @@ module Bootstrap
         end
       end
 
+      # Generate a deterministic PAX header filename based on the entry name.
       private def pax_header_name(name : String) : String
         digest = Digest::CRC32.new
         digest.update(name)
         "PaxHeaders.0/#{digest.final.hexstring}"
       end
 
+      # Return a tar header-safe name, truncating when required.
       private def header_name_for(name : String) : String
         return name if name.bytesize <= 99
         base = File.basename(name)
@@ -775,6 +826,7 @@ module Bootstrap
         base.byte_slice(0, 99)
       end
 
+      # Write a tar header for the provided entry.
       private def write_header(name : String, size : Int64, stat : File::Info, typeflag : Char, linkname : String = "")
         header = Bytes.new(HEADER_SIZE, 0)
         write_string(header, NAME_OFFSET, NAME_LENGTH, name)
@@ -791,6 +843,7 @@ module Bootstrap
         @io.write(header)
       end
 
+      # Write a NUL-terminated string into a tar header field.
       private def write_string(buffer : Bytes, offset : Int32, length : Int32, value : String)
         slice = buffer[offset, length]
         slice.fill(0u8)
@@ -799,6 +852,7 @@ module Bootstrap
         slice_part.copy_from(str.to_slice)
       end
 
+      # Write an octal integer into a tar header field.
       private def write_octal(buffer : Bytes, offset : Int32, length : Int32, value : Int64)
         str = value.to_s(8)
         padded = str.rjust(length - 1, '0')
@@ -807,18 +861,21 @@ module Bootstrap
         buffer[offset + length - 1] = 0u8
       end
 
+      # Calculate the tar header checksum.
       private def checksum(header : Bytes) : Int64
         temp = header.dup
         (CHECKSUM_OFFSET...(CHECKSUM_OFFSET + CHECKSUM_LENGTH)).each { |i| temp[i] = 32u8 }
         temp.sum(&.to_i64)
       end
 
+      # Pad the tar stream to the next header boundary.
       private def pad_file(size : Int64)
         remainder = size % HEADER_SIZE
         pad = remainder.zero? ? 0 : HEADER_SIZE - remainder
         @io.write(Bytes.new(pad, 0)) if pad > 0
       end
 
+      # Ensure all entries can fit in the tar header naming limits.
       private def self.assert_paths_fit(source : Path)
         Dir.glob(["#{source}/**/*"], match: File::MatchOptions::DotFiles).each do |entry|
           rel = Path.new(entry).relative_to(source).to_s
@@ -830,6 +887,7 @@ module Bootstrap
       end
     end
 
+    # Try to chown the tarball to the invoking sudo user for convenience.
     private def chown_tarball_to_sudo_user(path : Path)
       return unless sudo_user = ENV["SUDO_USER"]?
       begin
@@ -843,6 +901,7 @@ module Bootstrap
       end
     end
 
+    # Resolve uid/gid from /etc/passwd for a username.
     private def sudo_user_ids(user : String) : Tuple(Int32, Int32)?
       passwd_path = Path["/etc/passwd"]
       return nil unless File.exists?(passwd_path)

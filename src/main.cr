@@ -4,6 +4,7 @@ require "./sysroot_runner_lib"
 
 module Bootstrap
   class Main
+    # Prototype entrypoint to build and mount a sysroot in-place.
     def self.run
       workspace = Path["data/sysroot"]
       architecture = SysrootBuilder::DEFAULT_ARCH

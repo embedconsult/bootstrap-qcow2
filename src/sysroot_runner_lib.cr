@@ -20,6 +20,7 @@ module Bootstrap
       property patches : Array(String)
       property sysroot_prefix : String
 
+      # Initialize a build-step record for JSON serialization.
       def initialize(@name : String, @strategy : String, @workdir : String, @configure_flags : Array(String), @patches : Array(String), @sysroot_prefix : String)
       end
     end
@@ -34,6 +35,7 @@ module Bootstrap
     struct SystemRunner
       include CommandRunner
 
+      # Run a build step using the selected strategy.
       def run(step : BuildStep)
         Dir.cd(step.workdir) do
           cpus = (System.cpu_count || 1).to_i32
@@ -61,6 +63,7 @@ module Bootstrap
         end
       end
 
+      # Apply patch files before invoking build commands.
       private def apply_patches(patches : Array(String))
         patches.each do |patch|
           Log.info { "Applying patch #{patch}" }
@@ -69,6 +72,7 @@ module Bootstrap
         end
       end
 
+      # Run a command array and raise if it fails.
       private def run_cmd(argv : Array(String))
         Log.info { "Running in #{Dir.current}: #{argv.join(" ")}" }
         status = Process.run(argv[0], argv[1..])
