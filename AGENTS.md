@@ -63,6 +63,9 @@ Prepare <newroot>/{proc,sys,dev,dev/shm}.
 /proc
   mount("proc", "<newroot>/proc", "proc",
         MS_NOSUID | MS_NODEV | MS_NOEXEC, NULL)
+  Note: avoid remounting /proc read-only because namespace setup needs to
+  write /proc/self/{setgroups,uid_map,gid_map} (see
+  Documentation/admin-guide/user-namespaces.rst).
 
 /sys
   Bind-mount host /sys → <newroot>/sys, then remount read-only.

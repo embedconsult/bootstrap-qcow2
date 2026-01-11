@@ -233,6 +233,7 @@ describe Bootstrap::SysrootNamespace do
   end
 
   restrictions = Bootstrap::SysrootNamespace.collect_restrictions
+  restrictions.reject! { |entry| entry.includes?("proc path") }
   if restrictions.empty?
     it "unshares namespaces in a subprocess when enabled" do
       # Run in a subprocess to avoid mutating the namespace state of the spec runner.

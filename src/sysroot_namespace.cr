@@ -320,6 +320,9 @@ module Bootstrap
     end
 
     # Bind-mounts /proc into the new root and remounts it with safe flags.
+    # We avoid a read-only remount because the container needs writable proc
+    # entries for namespace setup (e.g., /proc/self/{setgroups,uid_map,gid_map}).
+    # See Linux kernel docs: Documentation/admin-guide/user-namespaces.rst.
     private def self.mount_proc(target : Path)
       FileUtils.mkdir_p(target)
       bind_mount("/proc", target)
