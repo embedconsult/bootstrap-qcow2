@@ -88,7 +88,7 @@ module Bootstrap
                                     mountinfo_path : Path = Path["/proc/self/mountinfo"]) : Array(String)
       return [] of String unless procfs_mountpoint?(proc_root, mountinfo_path)
       masked = [] of String
-      masked_targets = %w(sys kcore irq bus fs)
+      masked_targets = %w(sys irq bus fs)
       masked_targets.each do |entry|
         target = proc_root / entry
         readable = File.exists?(target) && readable_for_current_user?(target)

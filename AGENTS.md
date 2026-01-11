@@ -43,7 +43,6 @@ Isolation is functional, not security-driven.
 - Sysctl: kernel.unprivileged_userns_clone=1
 - Sysctl (AppArmor): kernel.apparmor_restrict_unprivileged_userns=0
 - AppArmor: process must be unconfined
-- All dev executables live under /home/** (AppArmor flags=(unconfined))
 
 ### Namespace setup (mandatory order)
 

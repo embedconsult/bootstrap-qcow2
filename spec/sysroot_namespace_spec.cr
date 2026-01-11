@@ -31,7 +31,7 @@ describe Bootstrap::SysrootNamespace do
         mountinfo.flush
 
         restrictions = Bootstrap::SysrootNamespace.proc_mask_restrictions(proc_root, Path[mountinfo.path])
-        restrictions.any? { |entry| entry.includes?("kcore") }.should be_true
+        restrictions.any? { |entry| entry.includes?("irq") }.should be_true
       ensure
         mountinfo.close
       end
