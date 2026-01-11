@@ -30,7 +30,5 @@ end
 
 # Entry-point invoked on the host to enter a user/mount namespace before
 # handing off to the provided command.
-unless ENV["BOOTSTRAP_QCOW2_SKIP_MAIN"]? == "1"
-  Log.setup_from_env
-  Bootstrap::SysrootNamespaceMain.run
-end
+Log.setup_from_env
+Bootstrap::SysrootNamespaceMain.run

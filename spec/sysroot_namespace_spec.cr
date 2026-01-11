@@ -1,10 +1,5 @@
-ENV["BOOTSTRAP_QCOW2_SKIP_MAIN"] = "1"
-
 require "file_utils"
 require "./spec_helper"
-require "../src/sysroot_builder_main"
-require "../src/sysroot_namespace_check_main"
-require "../src/sysroot_namespace_main"
 
 describe Bootstrap::SysrootNamespace do
   describe ".missing_filesystems" do
@@ -285,20 +280,5 @@ describe Bootstrap::SysrootNamespace do
     reason = restrictions.join("; ")
     pending "enters a rootfs with namespaces when supported (#{reason})" do
     end
-  end
-end
-
-describe Bootstrap::SysrootNamespaceMain do
-  pending "execs the provided command inside the namespace (exits the process; exercise via integration tests)" do
-  end
-end
-
-describe Bootstrap::SysrootNamespaceCheckMain do
-  pending "prints namespace diagnostics to stdout (CLI output is integration-tested to avoid exit/STDOUT interception)" do
-  end
-end
-
-describe Bootstrap::SysrootBuilderMain do
-  pending "builds a sysroot based on CLI flags (CLI entrypoint performs filesystem work best covered by integration tests)" do
   end
 end

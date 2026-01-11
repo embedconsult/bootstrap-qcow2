@@ -51,6 +51,4 @@ module Bootstrap
   end
 end
 
-unless ENV["BOOTSTRAP_QCOW2_SKIP_MAIN"]? == "1"
-  Bootstrap::SysrootNamespaceCheckMain.run
-end
+Bootstrap::SysrootNamespaceCheckMain.run

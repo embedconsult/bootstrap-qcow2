@@ -72,7 +72,5 @@ module Bootstrap
   end
 end
 
-unless ENV["BOOTSTRAP_QCOW2_SKIP_MAIN"]? == "1"
-  Log.setup_from_env
-  Bootstrap::SysrootBuilderMain.run
-end
+Log.setup_from_env
+Bootstrap::SysrootBuilderMain.run
