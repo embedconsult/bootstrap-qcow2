@@ -19,24 +19,28 @@ These instructions apply to the entire repository unless overridden by a nested 
 
 ## Testing and quality
 - Run `crystal tool format` on modified Crystal files.
-- Add or update automated checks (Crystal specs or integration exercises) when changing build logic, boot flow, or image layout.
+- Always run `crystal spec` to verify no test failures.
+- Tests that cannot pass in the current environment should utilize `pending`, but this is never an excuse for not writing tests that should pass when the environment allows.
+- Add or update automated checks (Crystal specs or integration exercises) for all public methods and evaluate any changes in build logic, boot flow, or image layout.
+- Document all methods. Use the documentation style of the Crystal's standard library API.
 - Document architecture-specific behaviors or assumptions (especially for aarch64) near the code that enforces them.
+- Always document the source of magic numbers. Use authoritative sources.
 
 ## PR/commit expectations
 - Commit messages should summarize the behavioral change and the architecture(s) affected.
 - PR summaries should call out: target architectures, EFI/boot impacts, new dependencies (if any), and how the change advances self-hosting or Crystal-only tooling.
+- Ensure PR summaries cover all changes made on the branch, not just the latest commit.
 
 ## Rootless userns + pivot_root procedure
 
-Goal:
-Run a foreign Linux rootfs as a normal user using userns + mntns + pivot_root for development and bootstrapping.
+Goal: Run a foreign Linux rootfs as a normal user using userns + mntns + pivot_root for development and bootstrapping.
 Isolation is functional, not security-driven.
 
 ### Preflight (fail fast)
 
 - Kernel config: CONFIG_USER_NS, CONFIG_MOUNT_NS, CONFIG_PROC_FS, CONFIG_SYSFS, CONFIG_TMPFS
 - Sysctl: kernel.unprivileged_userns_clone=1
-- AppArmor: process must be unconfined
+- AppArmor: process must be unconfined, kernel.
 - All dev executables live under /home/** (AppArmor flags=(unconfined))
 
 ### Namespace setup (mandatory order)
@@ -55,11 +59,12 @@ All mounts must be namespace-local. Nothing propagates to the host.
 Prepare <newroot>/{proc,sys,dev,dev/shm}.
 
 /proc
-  mount("proc", "<newroot>/proc", "proc",
-        MS_NOSUID | MS_NODEV | MS_NOEXEC, NULL)
+  Bind-mount host /proc → <newroot>/proc.
+
+  Adjust permissions to: MS_REMOUNT | MS_NOSUID | MS_NODEV | MS_NOEXEC | MS_BIND
 
 /sys
-  Bind-mount host /sys → <newroot>/sys, then remount read-only.
+  Bind-mount host /sys → <newroot>/sys.
 
 /dev
   tmpfs on <newroot>/dev
@@ -70,7 +75,8 @@ Prepare <newroot>/{proc,sys,dev,dev/shm}.
   - /dev/random
   - /dev/urandom
   - /dev/tty (optional)
-  - /dev/fd + stdio via /proc/self/fd
+
+  Symlink /dev/fd + stdio via /proc/self/fd
 
   tmpfs on <newroot>/dev/shm
 

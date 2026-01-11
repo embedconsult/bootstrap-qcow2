@@ -20,16 +20,18 @@ module Bootstrap
   # by the kernel.
   class SysrootNamespace
     USERNS_TOGGLE_PATH = "/proc/sys/kernel/unprivileged_userns_clone"
+    APPARMOR_RESTRICT_USERNS_TOGGLE_PATH = "/proc/sys/kernel/apparmor_restrict_unprivileged_userns"
 
-    # Namespace and mount constants from Linux headers:
-    # - linux/sched.h (CLONE_NEW*)
-    # - linux/mount.h (MS_*)
+    # Namespace constants from Linux headers:
+    # - linux/sched.h
     CLONE_NEWNS   = 0x00020000
     CLONE_NEWUTS  = 0x04000000
     CLONE_NEWIPC  = 0x08000000
     CLONE_NEWUSER = 0x10000000
     CLONE_NEWNET  = 0x40000000
 
+    # Mount constants from Linux headers:
+    # - linux/mount.h
     MS_BIND    =  4096_u64
     MS_REC     = 16384_u64
     MS_RDONLY  = (1_u64 << 0)
@@ -48,6 +50,7 @@ module Bootstrap
                                   filesystems_path : Path = Path["/proc/filesystems"],
                                   setgroups_path : String = "/proc/self/setgroups",
                                   userns_toggle_path : String = USERNS_TOGGLE_PATH,
+                                  apparmor_restrict_userns_toggle_path : String = APPARMOR_RESTRICT_USERNS_TOGGLE_PATH,
                                   mountinfo_path : Path = Path["/proc/self/mountinfo"]) : Array(String)
       restrictions = [] of String
       restrictions << "kernel.unprivileged_userns_clone is disabled" unless unprivileged_userns_clone_enabled?(userns_toggle_path)
@@ -57,7 +60,7 @@ module Bootstrap
         restrictions << "missing filesystem support: #{missing_fs.join(", ")}"
       end
 
-      if (apparmor_note = apparmor_restriction)
+      if (apparmor_note = apparmor_restriction(apparmor_restrict_userns_toggle_path))
         restrictions << apparmor_note
       end
 
@@ -120,14 +123,32 @@ module Bootstrap
       end
     end
 
-    # Returns a restriction message if AppArmor confinement is detected.
+    def self.apparmor_restrict_unprivileged_userns_enabled?(path : String = APPARMOR_RESTRICT_USERNS_TOGGLE_PATH) : Bool
+      return false unless File.exists?(path)
+      value = File.read(path).strip
+      case value
+      when "1"
+        true
+      when "0"
+        false
+      else
+        false
+      end
+    end
+
+    # Returns an array of restriction messages if AppArmor restrictions are detected.
     # This only checks the current label to avoid false positives from global
     # enforcing profiles.
-    def self.apparmor_restriction(current_path : Path = Path["/proc/self/attr/current"]) : String?
+    def self.apparmor_restriction(apparmor_restrict_userns_toggle_path : String = APPARMOR_RESTRICT_USERNS_TOGGLE_PATH,
+              current_path : Path = Path["/proc/self/attr/current"]) : Array(String)?
       return nil unless File.exists?(current_path)
+      messages = [] of String
+      if apparmor_restrict_unprivileged_userns_enabled?
+        messages << "AppArmor is restricting unprivileged userns operations"
+      end
       status = File.read(current_path).strip
       return nil if status.empty? || status == "unconfined"
-      "AppArmor confinement detected (#{status}); process must be unconfined"
+      messages << "AppArmor confinement detected (#{status}); process must be unconfined"
     rescue
       nil
     end
