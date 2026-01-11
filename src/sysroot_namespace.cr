@@ -263,16 +263,17 @@ module Bootstrap
 
     # Creates a tmpfs-backed /dev and bind-mounts a small set of device nodes.
     # The minimal device set supports basic process I/O, entropy, and dynamic
-    # linking without exposing full host /dev or pseudo-terminals. We mount
-    # /dev without MS_NODEV so device nodes remain usable for bootstrap.
+    # linking without exposing full host /dev or pseudo-terminals. /dev stays
+    # MS_NODEV so new device nodes cannot be created; the curated bind mounts
+    # are remounted as device-enabled entries instead.
     private def self.mount_dev(target : Path, proc_root : Path)
-      mount_tmpfs(target, flags: MS_NOSUID)
-      bind_mount_file("/dev/null", target / "null")
-      bind_mount_file("/dev/zero", target / "zero")
-      bind_mount_file("/dev/random", target / "random")
-      bind_mount_file("/dev/urandom", target / "urandom")
+      mount_tmpfs(target)
+      bind_mount_device("/dev/null", target / "null")
+      bind_mount_device("/dev/zero", target / "zero")
+      bind_mount_device("/dev/random", target / "random")
+      bind_mount_device("/dev/urandom", target / "urandom")
       if File.exists?("/dev/tty")
-        bind_mount_file("/dev/tty", target / "tty")
+        bind_mount_device("/dev/tty", target / "tty")
       end
       bind_mount(proc_root / "self" / "fd", target / "fd")
       FileUtils.ln_s("/proc/self/fd/0", target / "stdin")
@@ -303,6 +304,13 @@ module Bootstrap
       FileUtils.mkdir_p(target.parent)
       FileUtils.touch(target)
       mount_call(source.to_s, target.to_s, nil, MS_BIND, nil)
+    end
+
+    # Bind-mounts a device node and remounts it without MS_NODEV so the
+    # device remains usable even though /dev itself is MS_NODEV.
+    private def self.bind_mount_device(source : String | Path, target : Path)
+      bind_mount_file(source, target)
+      mount_call(nil, target.to_s, nil, MS_REMOUNT | MS_BIND | MS_NOSUID, nil)
     end
 
     # Returns true if the filesystem type appears in /proc/filesystems.
