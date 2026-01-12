@@ -25,7 +25,7 @@ module Bootstrap
         raise "apk install failed" unless status.success?
       end
 
-      Process.run(command.first, command[1..], output: STDOUT, error: STDERR)
+      Process.run(command.first, command[1..], input: STDIN, output: STDOUT, error: STDERR)
     end
   end
 end
