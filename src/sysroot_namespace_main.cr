@@ -21,11 +21,23 @@ module Bootstrap
       command = ARGV.dup
       if command.empty?
         command = ["/bin/sh"]
+        Log.debug { "No command provided; defaulting to #{command.join(" ")}" }
       end
+
+      Log.debug { "Entering namespace with rootfs=#{rootfs} cwd=#{Dir.current}" }
+      Log.debug { "rootfs/bin/sh present? #{File.exists?(Path[rootfs] / "bin/sh")}" }
 
       SysrootNamespace.enter_rootfs(rootfs)
 
-      Process.exec(command.first, command[1..])
+      Log.debug { "Inside namespace cwd=#{Dir.current} command=#{command.join(" ")}" }
+      Log.debug { "/bin/sh present? #{File.exists?(Path["/bin/sh"])}" }
+
+      begin
+        Process.exec(command.first, command[1..])
+      rescue ex : File::Error
+        Log.error { "Process exec failed for #{command.join(" ")}: #{ex.message}" }
+        raise
+      end
     end
   end
 end
