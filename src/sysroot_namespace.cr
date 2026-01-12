@@ -74,6 +74,10 @@ module Bootstrap
         restrictions << "user namespace setgroups mapping failed: #{error}"
       end
 
+      if (device_error = device_bind_probe_error)
+        restrictions << "device bind/remount failed inside user namespace: #{device_error}"
+      end
+
       if (apparmor_note = apparmor_restriction)
         restrictions << apparmor_note
       end
@@ -333,31 +337,49 @@ module Bootstrap
       bind_mount("/sys", target)
     end
 
-    # Creates a tmpfs-backed /dev and bind-mounts a small set of device nodes.
-    # The minimal device set supports basic process I/O, entropy, and dynamic
-    # linking without exposing full host /dev or pseudo-terminals.
+    # Populates /dev by bind-mounting a curated set of host device nodes. We
+    # avoid mounting a tmpfs here because some hosts forbid dev-enabled tmpfs
+    # inside user namespaces; if the host devices cannot be bound or written,
+    # we fail fast with a clear message.
     private def self.mount_dev(target : Path, proc_root : Path)
-      mount_tmpfs(target)
-      bind_mount_file("/dev/null", target / "null")
-      bind_mount_file("/dev/zero", target / "zero")
-      bind_mount_file("/dev/random", target / "random")
-      bind_mount_file("/dev/urandom", target / "urandom")
+      FileUtils.mkdir_p(target)
+      ensure_device_node(target / "null", "/dev/null")
+      ensure_device_node(target / "zero", "/dev/zero")
+      ensure_device_node(target / "random", "/dev/random")
+      ensure_device_node(target / "urandom", "/dev/urandom")
       if File.exists?("/dev/tty")
-        bind_mount_file("/dev/tty", target / "tty")
+        ensure_device_node(target / "tty", "/dev/tty")
       end
       bind_mount(proc_root / "self" / "fd", target / "fd")
+      {target / "stdin", target / "stdout", target / "stderr"}.each { |link| File.delete?(link) }
       FileUtils.ln_s("/proc/self/fd/0", target / "stdin")
       FileUtils.ln_s("/proc/self/fd/1", target / "stdout")
       FileUtils.ln_s("/proc/self/fd/2", target / "stderr")
     end
 
-    # Mounts a tmpfs at the target path with safe defaults.
-    private def self.mount_tmpfs(target : Path)
+    # Mounts a tmpfs at the target path with safe defaults (including MS_NODEV),
+    # optionally overriding mount flags and allowing device nodes when requested.
+    private def self.mount_tmpfs(target : Path, flags : UInt64 = MS_NOSUID | MS_NODEV, allow_devices : Bool = false)
       unless filesystem_available?("tmpfs")
         raise NamespaceError.new("Filesystem type tmpfs is not available; check /proc/filesystems.")
       end
       FileUtils.mkdir_p(target)
-      mount_call("tmpfs", target.to_s, "tmpfs", MS_NOSUID | MS_NODEV, nil)
+      mount_call("tmpfs", target.to_s, "tmpfs", flags, nil)
+      remount_flags = MS_REMOUNT | flags
+      remount_data = nil
+      if allow_devices
+        # Explicitly request dev to drop nodev; if the host disallows this
+        # inside user namespaces, fail fast with a clear error.
+        remount_data = "dev"
+      end
+      mount_call(nil, target.to_s, nil, remount_flags, remount_data)
+
+      if allow_devices
+        opts = mount_info_flags(target.to_s)
+        if opts.includes?("nodev")
+          raise NamespaceError.new("Mounted #{target} still has nodev; ensure /dev is provided with dev-enabled tmpfs or run the container with /dev:rw,exec,dev,nosuid and no seccomp/no-new-privs blocking remounts.")
+        end
+      end
     end
 
     # Bind-mounts a source path to the target path.
@@ -371,6 +393,99 @@ module Bootstrap
       FileUtils.mkdir_p(target.parent)
       FileUtils.touch(target)
       mount_call(source.to_s, target.to_s, nil, MS_BIND, nil)
+    end
+
+    # Attempts to bind a device node inside a fresh user namespace to detect
+    # environments that block device remounts under MS_NODEV. Returns an error
+    # string when the probe fails, or nil when it succeeds.
+    private def self.device_bind_probe_error : String?
+      reader, writer = IO.pipe
+      pid = LibC.fork
+      return "device probe not available: fork failed" if pid < 0
+
+      if pid == 0
+        reader.close
+        begin
+          unshare_namespaces
+          dir = Path[Dir.tempdir] / "ns-device-probe-#{Random::Secure.hex(4)}"
+          FileUtils.mkdir_p(dir)
+          ensure_device_node(dir / "null", "/dev/null")
+          File.open(dir / "null", "w") { |io| io.write Bytes.empty }
+          writer.puts "ok"
+          LibC._exit(0)
+        rescue ex
+          writer.puts ex.message
+          LibC._exit(1)
+        end
+      end
+
+      writer.close
+      status_code = uninitialized Int32
+      waited = LibC.waitpid(pid, pointerof(status_code), 0)
+      output = reader.gets_to_end.to_s.strip
+      reader.close
+
+      return "device probe failed: waitpid errno=#{Errno.value}" if waited < 0
+
+      signaled = (status_code & 0x7f) != 0
+      exit_status = (status_code & 0xff00) >> 8
+      return nil if !signaled && exit_status == 0
+
+      detail = signaled ? "signaled" : "exit=#{exit_status}"
+      detail = "#{detail} #{output}".strip unless output.empty?
+      "device probe failed #{detail}".strip
+    end
+
+    # Parses /proc/self/mountinfo to extract mount flags for a given mount point.
+    # Returns an empty array when the mount point is not found.
+    private def self.mount_info_flags(mount_point : String) : Array(String)
+      abs_target = File.realpath(mount_point)
+      File.read_lines("/proc/self/mountinfo").each do |line|
+        fields = line.split
+        target = fields[4]?
+        opts = fields[5]?
+        next unless target && opts
+        return opts.split(",") if File.realpath(target) == abs_target
+      end
+      [] of String
+    rescue
+      [] of String
+    end
+
+    # Bind-mounts a device node and remounts it without MS_NODEV so the device
+    # remains usable even though /dev itself is MS_NODEV.
+    private def self.bind_mount_device(source : String | Path, target : Path)
+      bind_mount_file(source, target)
+      preserved = mount_info_flags(source.to_s)
+      flags = MS_REMOUNT | MS_BIND | MS_NOSUID
+      flags |= MS_NOEXEC if preserved.includes?("noexec")
+      mount_call(nil, target.to_s, nil, flags, nil)
+    end
+
+    # Ensure a usable device node is available at the target by bind-mounting
+    # the host device. Raises NamespaceError with guidance when binding or
+    # writing the device fails so callers surface clear requirements.
+    private def self.ensure_device_node(target : Path, source : String)
+      FileUtils.mkdir_p(target.parent)
+      begin
+        bind_mount_device(source, target)
+        # Only write-probe devices that are expected to be writable without extra caps.
+        if ["/dev/null", "/dev/zero"].includes?(source)
+          File.open(target, "w") { |io| io.write Bytes.empty }
+        else
+          # /dev/tty may legitimately return ENXIO/ENOTTY when no controlling TTY exists.
+          begin
+            File.open(target, "r") { |_| }
+          rescue ex : File::Error
+            unless source == "/dev/tty" && (ex.os_error == Errno::ENXIO || ex.os_error == Errno::ENOTTY)
+              raise ex
+            end
+          end
+        end
+        return
+      rescue ex
+        raise NamespaceError.new("Device bind failed for #{source} -> #{target}: #{ex.message}. Ensure host /dev allows dev-enabled bind mounts and the node is writable inside user namespaces (e.g., provide /dev as tmpfs with dev,nosuid,exec).")
+      end
     end
 
     # Returns true if the filesystem type appears in /proc/filesystems.

@@ -28,7 +28,13 @@ module Bootstrap
 
       File.write(chroot_path / "/etc/resolv.conf", "nameserver 8.8.8.8", perm = 0o644)
       SysrootNamespace.enter_rootfs(chroot_path.to_s)
-      Process.run("apk", ["add", "crystal", "clang", "lld"], output: STDOUT)
+      Process.run(
+        "apk",
+        ["add", "crystal", "clang", "lld"],
+        input: STDIN,
+        output: STDOUT,
+        error: STDERR,
+      )
     end
   end
 end
