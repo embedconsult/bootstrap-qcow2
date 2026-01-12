@@ -31,8 +31,34 @@ module Bootstrap
 
       Log.debug { "Inside namespace cwd=#{Dir.current} command=#{command.join(" ")}" }
       Log.debug { "/bin/sh present? #{File.exists?(Path["/bin/sh"])}" }
+      Log.debug { "/bin/sh info: #{safe_file_info(Path["/bin/sh"])}" }
+      Log.debug { "ld-musl candidates: #{safe_glob("/lib/ld-musl-*").join(", ")}" }
 
-      Process.exec(command.first, command[1..])
+      begin
+        Process.exec(command.first, command[1..])
+      rescue ex : File::Error
+        Log.error { "Process exec failed for #{command.join(" ")}: #{ex.message}" }
+        Log.error { "/bin/sh info: #{safe_file_info(Path["/bin/sh"])}" }
+        Log.error { "ld-musl candidates: #{safe_glob("/lib/ld-musl-*").join(", ")}" }
+        raise ex
+      end
+    end
+
+    private def self.safe_file_info(path : Path) : String
+      info = File.info?(path)
+      if info
+        "#{info.type} size=#{info.size} mode=#{info.permissions} owner=#{info.owner} group=#{info.group}"
+      else
+        "missing"
+      end
+    rescue ex
+      "error reading info: #{ex.message}"
+    end
+
+    private def self.safe_glob(pattern : String) : Array(String)
+      Dir.glob(pattern)
+    rescue
+      [] of String
     end
   end
 end
