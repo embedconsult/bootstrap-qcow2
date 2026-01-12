@@ -18,11 +18,13 @@ module Bootstrap
       extra_binds << {Path["codex/work"].expand, Path["work"]} if bind_codex_work
 
       SysrootNamespace.enter_rootfs(rootfs.to_s, extra_binds: extra_binds)
-      Dir.cd("/workspace")
+      Dir.cd("/work")
 
       if alpine_setup
-        status = Process.run("apk", ["add", "nodejs", "npm", "bash"], output: STDOUT, error: STDERR)
+        status = Process.run("apk", ["add", "nodejs-lts", "npm", "bash"], output: STDOUT, error: STDERR)
         raise "apk install failed" unless status.success?
+        status = Process.run("npm", ["i", "-g", "@openai/codex"], output: STDOUT, error: STDERR)
+        raise "npm install failed" unless status.success?
       end
 
       Process.run(command.first, command[1..], input: STDIN, output: STDOUT, error: STDERR)
