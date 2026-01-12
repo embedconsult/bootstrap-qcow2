@@ -91,6 +91,19 @@ module Bootstrap
       required.reject { |fs| available.includes?(fs) }
     end
 
+    # Unshare user and mount namespaces, set up proc/sys/dev/tmp, then run the
+    # provided command in the new namespace. Raises NamespaceError on failure.
+    def self.run_in_namespace(command : Array(String), chdir : Path = Path["."]) : Process::Status
+      raise NamespaceError.new("Empty command") if command.empty?
+      unshare_namespaces
+      make_mounts_private
+      mount_dev(Path["/dev"], Path["/proc"])
+      mount_proc(Path["/proc"])
+      mount_sys(Path["/sys"])
+      mount_tmpfs(Path["/tmp"])
+      Process.run(command.first, command[1..], chdir: chdir)
+    end
+
     # Returns true when NoNewPrivs is set on the current process.
     def self.no_new_privs?(status_path : Path = Path["/proc/self/status"]) : Bool
       value = proc_status_value(status_path, "NoNewPrivs")
