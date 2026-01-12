@@ -337,13 +337,12 @@ module Bootstrap
       bind_mount("/sys", target)
     end
 
-    # Creates a tmpfs-backed /dev and bind-mounts a small set of device nodes.
-    # The minimal device set supports basic process I/O, entropy, and dynamic
-    # linking without exposing full host /dev or pseudo-terminals. /dev is
-    # mounted to allow devices; if the host forbids this, we fail fast with a
-    # clear message so the user can adjust the environment.
+    # Populates /dev by bind-mounting a curated set of host device nodes. We
+    # avoid mounting a tmpfs here because some hosts forbid dev-enabled tmpfs
+    # inside user namespaces; if the host devices cannot be bound or written,
+    # we fail fast with a clear message.
     private def self.mount_dev(target : Path, proc_root : Path)
-      mount_tmpfs(target, flags: MS_NOSUID | MS_NOEXEC, allow_devices: true)
+      FileUtils.mkdir_p(target)
       ensure_device_node(target / "null", "/dev/null")
       ensure_device_node(target / "zero", "/dev/zero")
       ensure_device_node(target / "random", "/dev/random")
@@ -352,6 +351,7 @@ module Bootstrap
         ensure_device_node(target / "tty", "/dev/tty")
       end
       bind_mount(proc_root / "self" / "fd", target / "fd")
+      {target / "stdin", target / "stdout", target / "stderr"}.each { |link| File.delete?(link) }
       FileUtils.ln_s("/proc/self/fd/0", target / "stdin")
       FileUtils.ln_s("/proc/self/fd/1", target / "stdout")
       FileUtils.ln_s("/proc/self/fd/2", target / "stderr")
@@ -409,7 +409,6 @@ module Bootstrap
           unshare_namespaces
           dir = Path[Dir.tempdir] / "ns-device-probe-#{Random::Secure.hex(4)}"
           FileUtils.mkdir_p(dir)
-          mount_tmpfs(dir, allow_devices: true)
           ensure_device_node(dir / "null", "/dev/null")
           File.open(dir / "null", "w") { |io| io.write Bytes.empty }
           writer.puts "ok"
