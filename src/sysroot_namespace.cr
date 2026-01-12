@@ -92,54 +92,10 @@ module Bootstrap
       required.reject { |fs| available.includes?(fs) }
     end
 
-    # Unshare user and mount namespaces, set up proc/sys/dev/tmp, then run the
-    # provided command in the new namespace. Optionally pivot into a fresh root
-    # with only a bind-mounted working directory to reduce host exposure.
-    def self.run_in_namespace(command : Array(String),
-                              chdir : Path = Path["."],
-                              detach_host_root : Bool = false,
-                              bind_work : Bool = true,
-                              alpine_setup : Bool = false) : Process::Status
-      raise NamespaceError.new("Empty command") if command.empty?
-      unshare_namespaces
-      make_mounts_private
-      if detach_host_root
-        new_root = Path[Dir.mktmpdir("ns-root")]
-        bind_mount_rootfs(new_root)
-        mount_virtual_fs(new_root)
-        host_workdir = chdir.expand
-        bind_mount(host_workdir, new_root / "workdir")
-        if bind_work
-          host_codex_work = Path["codex/work"].expand
-          bind_mount(host_codex_work, new_root / "work")
-        end
-        pivot_root!(new_root)
-        # Best-effort detach of the old root to drop host visibility.
-        LibC.umount2("/.pivot_root", MNT_DETACH) rescue nil
-        Dir.cd("/workdir")
-        maybe_install_alpine_runtime(alpine_setup)
-        Process.run(command.first, command[1..])
-      else
-        mount_dev(Path["/dev"], Path["/proc"])
-        mount_proc(Path["/proc"])
-        mount_sys(Path["/sys"])
-        mount_tmpfs(Path["/tmp"])
-        maybe_install_alpine_runtime(alpine_setup)
-        Process.run(command.first, command[1..], chdir: chdir)
-      end
-    end
-
     # Returns true when NoNewPrivs is set on the current process.
     def self.no_new_privs?(status_path : Path = Path["/proc/self/status"]) : Bool
       value = proc_status_value(status_path, "NoNewPrivs")
       value == "1"
-    end
-
-    # Optionally install runtime dependencies inside an Alpine rootfs to run codex.
-    private def self.maybe_install_alpine_runtime(alpine : Bool)
-      return unless alpine
-      # apk is expected in the rootfs; install nodejs/npm.
-      Process.run("apk", ["add", "nodejs", "npm", "bash"], output: STDOUT, error: STDERR)
     end
 
     # Returns the seccomp mode from /proc/self/status, or nil when absent.
@@ -255,10 +211,13 @@ module Bootstrap
     # Enter the provided rootfs by unsharing namespaces, bind-mounting the
     # rootfs, mounting /proc, /dev, and /sys, then pivoting
     # into the new root.
-    def self.enter_rootfs(rootfs : String)
+    def self.enter_rootfs(rootfs : String, extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path))
       unshare_namespaces
       root_path = Path[rootfs].expand
       bind_mount_rootfs(root_path)
+      extra_binds.each do |(source, target)|
+        bind_mount(source, root_path / target)
+      end
       mount_virtual_fs(root_path)
 
       pivot_root!(root_path)
