@@ -106,9 +106,11 @@ module Bootstrap
       stderr = IO::Memory.new
       begin
         status = Process.run(
-          "crystal",
-          ["eval", "require \"./src/sysroot_namespace\"; Bootstrap::SysrootNamespace.unshare_namespaces"],
-          chdir: Path[__DIR__] / "..",
+          "unshare",
+          [
+            "-Ur",
+            "true",
+          ],
           output: stdout,
           error: stderr
         )
