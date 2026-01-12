@@ -32,12 +32,7 @@ module Bootstrap
       Log.debug { "Inside namespace cwd=#{Dir.current} command=#{command.join(" ")}" }
       Log.debug { "/bin/sh present? #{File.exists?(Path["/bin/sh"])}" }
 
-      begin
-        Process.exec(command.first, command[1..])
-      rescue ex : File::Error
-        Log.error { "Process exec failed for #{command.join(" ")}: #{ex.message}" }
-        raise
-      end
+      Process.exec(command.first, command[1..])
     end
   end
 end
