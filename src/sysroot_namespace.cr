@@ -402,6 +402,14 @@ module Bootstrap
     # environments that block device remounts under MS_NODEV. Returns an error
     # string when the probe fails, or nil when it succeeds.
     private def self.device_bind_probe_error : String?
+      # Fail fast if the host /dev is nodev and cannot provide usable device
+      # nodes to a child namespace. This avoids attempting an impossible
+      # dev-enabled tmpfs mount that yields EINVAL/EPERM on many kernels.
+      dev_flags = mount_info_flags("/dev")
+      if dev_flags.includes?("nodev")
+        return "/dev is mounted with nodev; provide a dev-enabled /dev (devtmpfs or tmpfs,dev) so device binds work inside user namespaces."
+      end
+
       reader, writer = IO.pipe
       pid = LibC.fork
       return "device probe not available: fork failed" if pid < 0
@@ -412,9 +420,6 @@ module Bootstrap
           unshare_namespaces
           dir = Path[Dir.tempdir] / "ns-device-probe-#{Random::Secure.hex(4)}"
           FileUtils.mkdir_p(dir)
-          # Use a fresh dev-enabled tmpfs for probing so host mounts with
-          # nodev do not cause false negatives.
-          mount_tmpfs(dir, allow_devices: true)
           ensure_device_node(dir / "null", "/dev/null")
           File.open(dir / "null", "w") { |io| io.write Bytes.empty }
           writer.puts "ok"
