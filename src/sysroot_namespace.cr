@@ -201,6 +201,12 @@ module Bootstrap
     # the mount namespace. This preserves the common unprivileged flow:
     # unshare(CLONE_NEWUSER) -> write uid/gid maps -> unshare(CLONE_NEWNS).
     def self.unshare_namespaces(uid : Int32 = LibC.getuid.to_i32, gid : Int32 = LibC.getgid.to_i32)
+      if privileged_mount_only?
+        unshare!(CLONE_NEWNS)
+        make_mounts_private
+        return
+      end
+
       ensure_unprivileged_userns_clone_enabled!
       unshare!(CLONE_NEWUSER)
       setup_user_mapping(uid, gid)
@@ -264,7 +270,14 @@ module Bootstrap
         begin
           File.write(setgroups_path, "deny\n")
         rescue error : File::AccessDeniedError
-          raise NamespaceError.new("Failed to write #{setgroups_path}: #{error.message}. This can be caused by LSM policies (e.g., AppArmor).")
+          # Privileged callers (uid 0 in the parent namespace) can still write
+          # gid_map without disabling setgroups. Allow the flow to continue for
+          # uid 0 so seccomp/NoNewPrivs filters on setgroups do not block the
+          # user namespace setup. Unprivileged callers must still disable
+          # setgroups.
+          unless uid == 0
+            raise NamespaceError.new("Failed to write #{setgroups_path}: #{error.message}. This can be caused by LSM policies (e.g., AppArmor).")
+          end
         end
       elsif LibC.getuid != 0
         raise NamespaceError.new("Missing #{setgroups_path}; unprivileged user namespaces are not available without uid 0.")
@@ -273,6 +286,42 @@ module Bootstrap
       # new user namespace, which is needed for mount and pivot_root calls.
       write_id_map("/proc/self/uid_map", uid)
       write_id_map("/proc/self/gid_map", gid)
+    end
+
+    # Returns true when the current process already has CAP_SYS_ADMIN and
+    # user namespace setup is likely to be blocked by NoNewPrivs/seccomp,
+    # so we should skip the user namespace and only isolate mounts.
+    private def self.privileged_mount_only? : Bool
+      cap_sys_admin? && (no_new_privs? || seccomp_enforced?)
+    end
+
+    private def self.no_new_privs?(proc_status_path : Path = Path["/proc/self/status"]) : Bool
+      status_value("NoNewPrivs", proc_status_path) == "1"
+    end
+
+    private def self.seccomp_enforced?(proc_status_path : Path = Path["/proc/self/status"]) : Bool
+      status_value("Seccomp", proc_status_path) == "2"
+    end
+
+    private def self.cap_sys_admin? : Bool
+      hex = status_value("CapEff", Path["/proc/self/status"])
+      return false unless hex
+      value = hex.to_u64(16)
+      # CAP_SYS_ADMIN is bit 21
+      (value & (1_u64 << 21)) != 0
+    rescue
+      false
+    end
+
+    private def self.status_value(key : String, path : Path) : String?
+      File.each_line(path) do |line|
+        if line.starts_with?("#{key}:")
+          return line.split(":")[1]?.try &.strip
+        end
+      end
+      nil
+    rescue
+      nil
     end
 
     # Writes a single-id mapping to the provided uid/gid map file.
