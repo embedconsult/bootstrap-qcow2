@@ -339,11 +339,11 @@ module Bootstrap
 
     # Creates a tmpfs-backed /dev and bind-mounts a small set of device nodes.
     # The minimal device set supports basic process I/O, entropy, and dynamic
-    # linking without exposing full host /dev or pseudo-terminals. /dev stays
-    # MS_NODEV so new device nodes cannot be created; the curated bind mounts
-    # are remounted as device-enabled entries instead.
+    # linking without exposing full host /dev or pseudo-terminals. /dev is
+    # mounted without MS_NODEV so curated bind mounts remain usable; we still
+    # avoid creating new device nodes by not calling mknod.
     private def self.mount_dev(target : Path, proc_root : Path)
-      mount_tmpfs(target)
+      mount_tmpfs(target, flags: MS_NOSUID | MS_NOEXEC)
       bind_mount_device("/dev/null", target / "null")
       bind_mount_device("/dev/zero", target / "zero")
       bind_mount_device("/dev/random", target / "random")
@@ -398,6 +398,7 @@ module Bootstrap
           FileUtils.mkdir_p(dir)
           mount_tmpfs(dir)
           bind_mount_device("/dev/null", dir / "null")
+          File.open(dir / "null", "w") { |io| io.write Bytes.empty }
           writer.puts "ok"
           LibC._exit(0)
         rescue ex
@@ -445,7 +446,6 @@ module Bootstrap
       bind_mount_file(source, target)
       preserved = mount_info_flags(source.to_s)
       flags = MS_REMOUNT | MS_BIND | MS_NOSUID
-      flags |= MS_RDONLY if preserved.includes?("ro")
       flags |= MS_NOEXEC if preserved.includes?("noexec")
       mount_call(nil, target.to_s, nil, flags, nil)
     end
