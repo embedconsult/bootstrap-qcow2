@@ -368,15 +368,14 @@ module Bootstrap
         raise NamespaceError.new("Filesystem type tmpfs is not available; check /proc/filesystems.")
       end
       FileUtils.mkdir_p(target)
-      mount_call("tmpfs", target.to_s, "tmpfs", flags, nil)
-      remount_flags = MS_REMOUNT | flags
-      remount_data = nil
-      if allow_devices
-        # Explicitly request dev to drop nodev; if the host disallows this
-        # inside user namespaces, fail fast with a clear error.
-        remount_data = "dev"
+      mount_flags = allow_devices ? (flags & ~MS_NODEV) : flags
+      mount_data = allow_devices ? "mode=755" : nil
+      mount_call("tmpfs", target.to_s, "tmpfs", mount_flags, mount_data)
+
+      unless allow_devices
+        remount_flags = MS_REMOUNT | mount_flags
+        mount_call(nil, target.to_s, nil, remount_flags, nil)
       end
-      mount_call(nil, target.to_s, nil, remount_flags, remount_data)
 
       if allow_devices
         opts = mount_info_flags(target.to_s)
@@ -413,6 +412,9 @@ module Bootstrap
           unshare_namespaces
           dir = Path[Dir.tempdir] / "ns-device-probe-#{Random::Secure.hex(4)}"
           FileUtils.mkdir_p(dir)
+          # Use a fresh dev-enabled tmpfs for probing so host mounts with
+          # nodev do not cause false negatives.
+          mount_tmpfs(dir, allow_devices: true)
           ensure_device_node(dir / "null", "/dev/null")
           File.open(dir / "null", "w") { |io| io.write Bytes.empty }
           writer.puts "ok"

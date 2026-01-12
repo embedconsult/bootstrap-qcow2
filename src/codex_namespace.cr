@@ -6,7 +6,7 @@ module Bootstrap
     DEFAULT_ROOTFS = Path["data/sysroot/rootfs"]
 
     # Runs a command inside a fresh namespace rooted at *rootfs*. Binds the host
-    # repository into /workspace and optionally binds ./codex/work into /work.
+    # optionally binds ./codex/work into /work.
     # Optionally installs node/npm via apk when targeting Alpine rootfs.
     def self.run(command : Array(String) = ["npx", "codex"],
                  rootfs : Path = DEFAULT_ROOTFS,
@@ -15,10 +15,7 @@ module Bootstrap
       raise "Empty command" if command.empty?
 
       extra_binds = [] of Tuple(Path, Path)
-      extra_binds << {Path[Dir.current], Path["workspace"]}
-      if bind_codex_work
-        extra_binds << {Path["codex/work"].expand, Path["work"]}
-      end
+      extra_binds << {Path["codex/work"].expand, Path["work"]} if bind_codex_work
 
       SysrootNamespace.enter_rootfs(rootfs.to_s, extra_binds: extra_binds)
       Dir.cd("/workspace")
