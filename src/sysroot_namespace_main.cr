@@ -46,11 +46,8 @@ module Bootstrap
 
     private def self.safe_file_info(path : Path) : String
       info = File.info?(path)
-      if info
-        "#{info.type} size=#{info.size} mode=#{info.permissions} owner=#{info.owner} group=#{info.group}"
-      else
-        "missing"
-      end
+      return "missing" unless info
+      "type=#{info.type} size=#{info.size} mode=#{info.permissions} uid=#{info.owner_id} gid=#{info.group_id}"
     rescue ex
       "error reading info: #{ex.message}"
     end
