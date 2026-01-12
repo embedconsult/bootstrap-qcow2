@@ -9,11 +9,13 @@ module Bootstrap
   class CodexNamespaceMain
     def self.run
       workdir = Path["."]
+      detach_root = true
       command = [] of String
 
       OptionParser.parse do |parser|
         parser.banner = "Usage: crystal run src/codex_namespace_main.cr -- [options] [-- cmd ...]"
         parser.on("-C DIR", "Working directory for the command (default: .)") { |dir| workdir = Path[dir].expand }
+        parser.on("--keep-host-root", "Do not pivot/detach the host root (default detaches)") { detach_root = false }
         parser.on("-h", "--help", "Show this help") { puts parser; exit }
       end
 
@@ -21,7 +23,7 @@ module Bootstrap
       command = ARGV.dup
       command = ["npx", "codex"] if command.empty?
 
-      status = SysrootNamespace.run_in_namespace(command, chdir: workdir)
+      status = SysrootNamespace.run_in_namespace(command, chdir: workdir, detach_host_root: detach_root)
       exit status.exit_code
     rescue ex : SysrootNamespace::NamespaceError
       STDERR.puts "Namespace setup failed: #{ex.message}"

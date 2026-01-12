@@ -44,6 +44,7 @@ module Bootstrap
     MS_NOEXEC  = (1_u64 << 3)
     MS_REMOUNT = (1_u64 << 5)
     MS_PRIVATE = (1_u64 << 18)
+    MNT_DETACH = 2
 
     class NamespaceError < RuntimeError
     end
@@ -92,16 +93,30 @@ module Bootstrap
     end
 
     # Unshare user and mount namespaces, set up proc/sys/dev/tmp, then run the
-    # provided command in the new namespace. Raises NamespaceError on failure.
-    def self.run_in_namespace(command : Array(String), chdir : Path = Path["."]) : Process::Status
+    # provided command in the new namespace. Optionally pivot into a fresh root
+    # with only a bind-mounted working directory to reduce host exposure.
+    def self.run_in_namespace(command : Array(String), chdir : Path = Path["."], detach_host_root : Bool = false) : Process::Status
       raise NamespaceError.new("Empty command") if command.empty?
       unshare_namespaces
       make_mounts_private
-      mount_dev(Path["/dev"], Path["/proc"])
-      mount_proc(Path["/proc"])
-      mount_sys(Path["/sys"])
-      mount_tmpfs(Path["/tmp"])
-      Process.run(command.first, command[1..], chdir: chdir)
+      if detach_host_root
+        new_root = Path[Dir.mktmpdir("ns-root")]
+        bind_mount_rootfs(new_root)
+        mount_virtual_fs(new_root)
+        host_workdir = chdir.expand
+        bind_mount(host_workdir, new_root / "workdir")
+        pivot_root!(new_root)
+        # Best-effort detach of the old root to drop host visibility.
+        LibC.umount2("/.pivot_root", MNT_DETACH) rescue nil
+        Dir.cd("/workdir")
+        Process.run(command.first, command[1..])
+      else
+        mount_dev(Path["/dev"], Path["/proc"])
+        mount_proc(Path["/proc"])
+        mount_sys(Path["/sys"])
+        mount_tmpfs(Path["/tmp"])
+        Process.run(command.first, command[1..], chdir: chdir)
+      end
     end
 
     # Returns true when NoNewPrivs is set on the current process.
