@@ -102,25 +102,38 @@ module Bootstrap
     # subprocess to detect seccomp/LSM restrictions. Returns an error string
     # when the probe fails, or nil when it succeeds.
     def self.userns_setgroups_probe_error : String?
-      stdout = IO::Memory.new
-      stderr = IO::Memory.new
-      begin
-        status = Process.run(
-          "unshare",
-          [
-            "-Ur",
-            "true",
-          ],
-          output: stdout,
-          error: stderr
-        )
-        return nil if status.success?
-        reason = stderr.to_s.strip
-        reason = "exit=#{status.exit_code} #{reason}" unless reason.empty?
-        return "unshare probe failed #{reason}".strip
-      rescue ex : Exception
-        return "unshare probe not available: #{ex.message}"
+      reader, writer = IO.pipe
+      pid = LibC.fork
+      return "unshare probe not available: fork failed" if pid < 0
+
+      if pid == 0
+        reader.close
+        begin
+          unshare_namespaces
+          writer.puts "ok"
+          LibC._exit(0)
+        rescue ex
+          writer.puts ex.message
+          LibC._exit(1)
+        end
       end
+
+      writer.close
+      status_code = uninitialized Int32
+      waited = LibC.waitpid(pid, pointerof(status_code), 0)
+      output = reader.gets_to_end.to_s.strip
+      reader.close
+
+      return "unshare probe failed: waitpid errno=#{Errno.value}" if waited < 0
+
+      # Decode wait status per POSIX: lower 7 bits for signal, next 8 for exit code.
+      signaled = (status_code & 0x7f) != 0
+      exit_status = (status_code & 0xff00) >> 8
+      return nil if !signaled && exit_status == 0
+
+      detail = signaled ? "signaled" : "exit=#{exit_status}"
+      detail = "#{detail} #{output}".strip unless output.empty?
+      "unshare probe failed #{detail}".strip
     end
 
     # Reads a single value from /proc/self/status.
