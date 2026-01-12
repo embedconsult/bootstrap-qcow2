@@ -74,6 +74,10 @@ module Bootstrap
         restrictions << "user namespace setgroups mapping failed: #{error}"
       end
 
+      if (device_error = device_bind_probe_error)
+        restrictions << "device bind/remount failed inside user namespace: #{device_error}"
+      end
+
       if (apparmor_note = apparmor_restriction)
         restrictions << apparmor_note
       end
@@ -376,6 +380,47 @@ module Bootstrap
       FileUtils.mkdir_p(target.parent)
       FileUtils.touch(target)
       mount_call(source.to_s, target.to_s, nil, MS_BIND, nil)
+    end
+
+    # Attempts to bind a device node inside a fresh user namespace to detect
+    # environments that block device remounts under MS_NODEV. Returns an error
+    # string when the probe fails, or nil when it succeeds.
+    private def self.device_bind_probe_error : String?
+      reader, writer = IO.pipe
+      pid = LibC.fork
+      return "device probe not available: fork failed" if pid < 0
+
+      if pid == 0
+        reader.close
+        begin
+          unshare_namespaces
+          dir = Path[Dir.tempdir] / "ns-device-probe-#{Random::Secure.hex(4)}"
+          FileUtils.mkdir_p(dir)
+          mount_tmpfs(dir)
+          bind_mount_device("/dev/null", dir / "null")
+          writer.puts "ok"
+          LibC._exit(0)
+        rescue ex
+          writer.puts ex.message
+          LibC._exit(1)
+        end
+      end
+
+      writer.close
+      status_code = uninitialized Int32
+      waited = LibC.waitpid(pid, pointerof(status_code), 0)
+      output = reader.gets_to_end.to_s.strip
+      reader.close
+
+      return "device probe failed: waitpid errno=#{Errno.value}" if waited < 0
+
+      signaled = (status_code & 0x7f) != 0
+      exit_status = (status_code & 0xff00) >> 8
+      return nil if !signaled && exit_status == 0
+
+      detail = signaled ? "signaled" : "exit=#{exit_status}"
+      detail = "#{detail} #{output}".strip unless output.empty?
+      "device probe failed #{detail}".strip
     end
 
     # Bind-mounts a device node and remounts it without MS_NODEV so the device
