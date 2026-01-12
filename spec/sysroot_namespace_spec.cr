@@ -102,6 +102,33 @@ describe Bootstrap::SysrootNamespace do
         filesystems.close
       end
     end
+
+    it "reports no_new_privs and seccomp from /proc/self/status" do
+      status = File.tempfile("status")
+      filesystems = File.tempfile("filesystems")
+      begin
+        filesystems.print("nodev\tproc\nnodev\tsysfs\nnodev\ttmpfs\n")
+        filesystems.flush
+
+        status.print("Name:\tproc\n")
+        status.print("NoNewPrivs:\t1\n")
+        status.print("Seccomp:\t2\n")
+        status.flush
+
+        restrictions = Bootstrap::SysrootNamespace.collect_restrictions(
+          proc_root: Path["/proc"],
+          filesystems_path: Path[filesystems.path],
+          proc_status_path: Path[status.path],
+          userns_toggle_path: "/missing/userns"
+        )
+
+        restrictions.any? { |entry| entry.includes?("no_new_privs") }.should be_true
+        restrictions.any? { |entry| entry.includes?("seccomp") }.should be_true
+      ensure
+        filesystems.close
+        status.close
+      end
+    end
   end
 
   describe ".bind_mount_file" do
@@ -253,6 +280,26 @@ describe Bootstrap::SysrootNamespace do
 
       unless status.success?
         raise "Namespace device usability failed (exit=#{status.exit_code}). stdout=#{stdout} stderr=#{stderr}"
+      end
+
+      # Ensure /dev/std* symlinks exist and point to fds.
+      symlink_status = Process.run(
+        "crystal",
+        [
+          "eval",
+          <<-CR
+            require "./src/sysroot_namespace"
+            rootfs = #{rootfs.inspect}
+            Bootstrap::SysrootNamespace.enter_rootfs(rootfs)
+            %w(/dev/stdin /dev/stdout /dev/stderr).each do |path|
+              raise "missing symlink \#{path}" unless File.symlink?(path)
+            end
+          CR
+        ],
+        chdir: Path[__DIR__] / "..",
+      )
+      unless symlink_status.success?
+        raise "Namespace stdio symlinks missing (exit=#{symlink_status.exit_code})"
       end
     end
   else
