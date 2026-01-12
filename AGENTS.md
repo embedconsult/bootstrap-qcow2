@@ -24,7 +24,7 @@ These instructions apply to the entire repository unless overridden by a nested 
 - Default service: `docker compose run codex` (seccomp/apparmor unconfined, SYS_ADMIN added, userns sysctls set, tmpfs for /run). No `privileged` or `userns_mode: host`; mirrors expected host restrictions while allowing namespace tests when the host permits.
 - Fallback: `docker compose run codex-privileged` (previous fully privileged setup) if your host/runtime cannot satisfy the namespace requirements above.
 - Ensure `/dev` inside the container is dev-enabled (compose config provides defaults); if device binds still fail, adjust host `/dev` or use the privileged service as a last resort.
-- Namespace tooling binds `./codex/work` to `/work` by default; `/workspace` should come from the rootfs itself.
+- Namespace tooling binds `./codex/work` to `/work` by default; `/workspace` should come from the rootfs itself. For namespace setup we now follow the LFS kernfs pattern: bind-mount host `/dev` recursively, mount proc/sys inside the namespace, and keep a single path rather than synthesizing /dev.
 
 ## Contribution guidelines
 - Favor readable, declarative Crystal code; prefer small, focused modules over sprawling scripts.

@@ -215,16 +215,20 @@ module Bootstrap
     end
 
     # Enter the provided rootfs by unsharing namespaces, bind-mounting the
-    # rootfs, mounting /proc, /dev, and /sys, then pivoting
-    # into the new root.
-    def self.enter_rootfs(rootfs : String, extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path))
+    # rootfs, mounting /proc, /dev, and /sys, then pivoting into the new root.
+    # When *bind_host_dev* is true, /dev is bind-mounted recursively from the
+    # host (Linux From Scratch kernfs style) to avoid relying on dev-enabled
+    # tmpfs inside user namespaces.
+    def self.enter_rootfs(rootfs : String,
+                          extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path),
+                          bind_host_dev : Bool = true)
       unshare_namespaces
       root_path = Path[rootfs].expand
       bind_mount_rootfs(root_path)
       extra_binds.each do |(source, target)|
         bind_mount(source, root_path / target)
       end
-      mount_virtual_fs(root_path)
+      mount_virtual_fs(root_path, bind_host_dev: bind_host_dev)
 
       pivot_root!(root_path)
     end
@@ -236,12 +240,12 @@ module Bootstrap
     end
 
     # Mount kernel-provided virtual filesystems inside the new rootfs.
-    private def self.mount_virtual_fs(rootfs : Path)
+    private def self.mount_virtual_fs(rootfs : Path, bind_host_dev : Bool = true)
       mount_proc(rootfs / "proc")
       mount_sys(rootfs / "sys")
-      mount_dev(rootfs / "dev", rootfs / "proc")
+      mount_dev(rootfs / "dev", rootfs / "proc", bind_host_dev: bind_host_dev)
       mount_tmpfs(rootfs / "tmp")
-      mount_tmpfs(rootfs / "dev" / "shm")
+      mount_tmpfs(rootfs / "dev" / "shm") unless bind_host_dev
     end
 
     # Performs pivot_root with an `.pivot_root` directory inside *rootfs*.
@@ -390,11 +394,15 @@ module Bootstrap
       bind_mount("/sys", target)
     end
 
-    # Populates /dev by bind-mounting a curated set of host device nodes. We
-    # avoid mounting a tmpfs here because some hosts forbid dev-enabled tmpfs
-    # inside user namespaces; if the host devices cannot be bound or written,
-    # we fail fast with a clear message.
-    private def self.mount_dev(target : Path, proc_root : Path)
+    # Mounts /dev on the provided target. When *bind_host_dev* is true, bind the
+    # host /dev recursively (LFS kernfs style). Otherwise, create a fresh tmpfs
+    # with essential device nodes bind-mounted from the host.
+    private def self.mount_dev(target : Path, proc_root : Path, bind_host_dev : Bool = true)
+      if bind_host_dev
+        bind_mount("/dev", target)
+        return
+      end
+
       FileUtils.mkdir_p(target)
       ensure_device_node(target / "null", "/dev/null")
       ensure_device_node(target / "zero", "/dev/zero")
