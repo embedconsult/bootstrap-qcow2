@@ -17,7 +17,7 @@ These instructions apply to the entire repository unless overridden by a nested 
 - Host `/dev` must allow bind-mounting core device nodes and writing to them (`/dev/null`, `/dev/zero`, `/dev/random`, `/dev/urandom`, `/dev/tty` when present). `/dev` should be a writable `devtmpfs` or equivalent; device nodes must be writable inside the user namespace.
 - Mounting proc/sys/dev/tmpfs inside the unshared mount namespace must be permitted (requires CAP_SYS_ADMIN in the user namespace).
 - Outbound HTTP/DNS required to fetch sources when running `crystal run src/main.cr`.
-- No synthetic device nodes: /dev/null, /dev/zero, /dev/random, /dev/urandom (and /dev/tty when present) must be bind-mountable and writable inside the user namespace; nodev must not block these binds.
+- No synthetic device nodes: /dev/null, /dev/zero, /dev/random, /dev/urandom (and /dev/tty when present) must be bind-mountable and writable inside the user namespace; nodev must not block these binds. If running in a container, provide /dev as tmpfs with dev,nosuid,exec (e.g., Docker: `--tmpfs /dev:rw,exec,dev,nosuid` plus device passthrough or `--privileged --security-opt seccomp=unconfined` to drop nodev).
 
 ## Contribution guidelines
 - Favor readable, declarative Crystal code; prefer small, focused modules over sprawling scripts.

@@ -340,10 +340,10 @@ module Bootstrap
     # Creates a tmpfs-backed /dev and bind-mounts a small set of device nodes.
     # The minimal device set supports basic process I/O, entropy, and dynamic
     # linking without exposing full host /dev or pseudo-terminals. /dev is
-    # mounted without MS_NODEV so curated bind mounts remain usable; we still
-    # avoid creating new device nodes by not calling mknod.
+    # mounted to allow devices; if the host forbids this, we fail fast with a
+    # clear message so the user can adjust the environment.
     private def self.mount_dev(target : Path, proc_root : Path)
-      mount_tmpfs(target, flags: MS_NOSUID | MS_NOEXEC)
+      mount_tmpfs(target, flags: MS_NOSUID | MS_NOEXEC, allow_devices: true)
       ensure_device_node(target / "null", "/dev/null")
       ensure_device_node(target / "zero", "/dev/zero")
       ensure_device_node(target / "random", "/dev/random")
@@ -358,15 +358,28 @@ module Bootstrap
     end
 
     # Mounts a tmpfs at the target path with safe defaults (including MS_NODEV),
-    # optionally overriding mount flags for special cases (like /dev needing
-    # device nodes during bootstrap).
-    private def self.mount_tmpfs(target : Path, flags : UInt64 = MS_NOSUID | MS_NODEV)
+    # optionally overriding mount flags and allowing device nodes when requested.
+    private def self.mount_tmpfs(target : Path, flags : UInt64 = MS_NOSUID | MS_NODEV, allow_devices : Bool = false)
       unless filesystem_available?("tmpfs")
         raise NamespaceError.new("Filesystem type tmpfs is not available; check /proc/filesystems.")
       end
       FileUtils.mkdir_p(target)
       mount_call("tmpfs", target.to_s, "tmpfs", flags, nil)
-      mount_call(nil, target.to_s, nil, MS_REMOUNT | flags, nil)
+      remount_flags = MS_REMOUNT | flags
+      remount_data = nil
+      if allow_devices
+        # Explicitly request dev to drop nodev; if the host disallows this
+        # inside user namespaces, fail fast with a clear error.
+        remount_data = "dev"
+      end
+      mount_call(nil, target.to_s, nil, remount_flags, remount_data)
+
+      if allow_devices
+        opts = mount_info_flags(target.to_s)
+        if opts.includes?("nodev")
+          raise NamespaceError.new("Mounted #{target} still has nodev; ensure /dev is provided with dev-enabled tmpfs or run the container with /dev:rw,exec,dev,nosuid and no seccomp/no-new-privs blocking remounts.")
+        end
+      end
     end
 
     # Bind-mounts a source path to the target path.
@@ -396,7 +409,7 @@ module Bootstrap
           unshare_namespaces
           dir = Path[Dir.tempdir] / "ns-device-probe-#{Random::Secure.hex(4)}"
           FileUtils.mkdir_p(dir)
-          mount_tmpfs(dir)
+          mount_tmpfs(dir, allow_devices: true)
           ensure_device_node(dir / "null", "/dev/null")
           File.open(dir / "null", "w") { |io| io.write Bytes.empty }
           writer.puts "ok"
@@ -460,7 +473,7 @@ module Bootstrap
         File.open(target, "w") { |io| io.write Bytes.empty }
         return
       rescue ex
-        raise NamespaceError.new("Device bind failed for #{source} -> #{target}: #{ex.message}. Ensure host /dev allows bind mounts and the node is writable inside user namespaces.")
+        raise NamespaceError.new("Device bind failed for #{source} -> #{target}: #{ex.message}. Ensure host /dev allows dev-enabled bind mounts and the node is writable inside user namespaces (e.g., provide /dev as tmpfs with dev,nosuid,exec).")
       end
     end
 
