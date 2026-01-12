@@ -469,7 +469,12 @@ module Bootstrap
       FileUtils.mkdir_p(target.parent)
       begin
         bind_mount_device(source, target)
-        File.open(target, "w") { |io| io.write Bytes.empty }
+        # Only write-probe devices that are expected to be writable without extra caps.
+        if ["/dev/null", "/dev/zero"].includes?(source)
+          File.open(target, "w") { |io| io.write Bytes.empty }
+        else
+          File.open(target, "r") { |_| }
+        end
         return
       rescue ex
         raise NamespaceError.new("Device bind failed for #{source} -> #{target}: #{ex.message}. Ensure host /dev allows dev-enabled bind mounts and the node is writable inside user namespaces (e.g., provide /dev as tmpfs with dev,nosuid,exec).")
