@@ -423,11 +423,31 @@ module Bootstrap
       "device probe failed #{detail}".strip
     end
 
+    # Parses /proc/self/mountinfo to extract mount flags for a given mount point.
+    # Returns an empty array when the mount point is not found.
+    private def self.mount_info_flags(mount_point : String) : Array(String)
+      abs_target = File.realpath(mount_point)
+      File.read_lines("/proc/self/mountinfo").each do |line|
+        fields = line.split
+        target = fields[4]?
+        opts = fields[5]?
+        next unless target && opts
+        return opts.split(",") if File.realpath(target) == abs_target
+      end
+      [] of String
+    rescue
+      [] of String
+    end
+
     # Bind-mounts a device node and remounts it without MS_NODEV so the device
     # remains usable even though /dev itself is MS_NODEV.
     private def self.bind_mount_device(source : String | Path, target : Path)
       bind_mount_file(source, target)
-      mount_call(nil, target.to_s, nil, MS_REMOUNT | MS_BIND | MS_NOSUID, nil)
+      preserved = mount_info_flags(source.to_s)
+      flags = MS_REMOUNT | MS_BIND | MS_NOSUID
+      flags |= MS_RDONLY if preserved.includes?("ro")
+      flags |= MS_NOEXEC if preserved.includes?("noexec")
+      mount_call(nil, target.to_s, nil, flags, nil)
     end
 
     # Returns true if the filesystem type appears in /proc/filesystems.
