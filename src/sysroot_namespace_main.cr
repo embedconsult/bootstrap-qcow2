@@ -19,7 +19,9 @@ module Bootstrap
       end
 
       command = ARGV.dup
-      raise "Missing command to exec inside the namespace" if command.empty?
+      if command.empty?
+        command = ["/bin/sh"]
+      end
 
       SysrootNamespace.enter_rootfs(rootfs)
 
