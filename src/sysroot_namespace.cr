@@ -473,7 +473,14 @@ module Bootstrap
         if ["/dev/null", "/dev/zero"].includes?(source)
           File.open(target, "w") { |io| io.write Bytes.empty }
         else
-          File.open(target, "r") { |_| }
+          # /dev/tty may legitimately return ENXIO/ENOTTY when no controlling TTY exists.
+          begin
+            File.open(target, "r") { |_| }
+          rescue ex : File::Error
+            unless source == "/dev/tty" && (ex.os_error == Errno::ENXIO || ex.os_error == Errno::ENOTTY)
+              raise ex
+            end
+          end
         end
         return
       rescue ex
