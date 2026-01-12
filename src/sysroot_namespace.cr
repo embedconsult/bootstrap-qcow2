@@ -6,10 +6,12 @@ lib LibC
   # - unshare: https://docs.kernel.org/userspace-api/feature-test-macros.html
   # - pivot_root: https://docs.kernel.org/filesystems/sharedsubtree.html
   # - mount: https://docs.kernel.org/filesystems/mount_api.html
+  # - umount2: https://man7.org/linux/man-pages/man2/umount.2.html
   # - getuid/getgid: https://docs.kernel.org/userspace-api/uidgid.html
   fun unshare(flags : Int32) : Int32
   fun pivot_root(new_root : UInt8*, put_old : UInt8*) : Int32
   fun mount(source : UInt8*, target : UInt8*, filesystemtype : UInt8*, mountflags : UInt64, data : Void*) : Int32
+  fun umount2(target : UInt8*, flags : Int32) : Int32
   fun getuid : UInt32
   fun getgid : UInt32
 end
@@ -178,9 +180,11 @@ module Bootstrap
     # When *bind_host_dev* is true, /dev is bind-mounted recursively from the
     # host (Linux From Scratch kernfs style) to avoid relying on dev-enabled
     # tmpfs inside user namespaces.
+    # When *unmount_old_root* is true, the old root is detached after pivot_root.
     def self.enter_rootfs(rootfs : String,
                           extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path),
-                          bind_host_dev : Bool = true)
+                          bind_host_dev : Bool = true,
+                          unmount_old_root : Bool = true)
       unshare_namespaces
       root_path = Path[rootfs].expand
       bind_mount_rootfs(root_path)
@@ -189,7 +193,7 @@ module Bootstrap
       end
       mount_virtual_fs(root_path, bind_host_dev: bind_host_dev)
 
-      pivot_root!(root_path)
+      pivot_root!(root_path, unmount_old_root: unmount_old_root)
     end
 
     # pivot_root requires the new root to be a mount point. A bind mount creates
@@ -208,8 +212,9 @@ module Bootstrap
     end
 
     # Performs pivot_root with an `.pivot_root` directory inside *rootfs*.
-    # Raises NamespaceError if pivot_root fails.
-    private def self.pivot_root!(rootfs : Path)
+    # Raises NamespaceError if pivot_root fails. When *unmount_old_root* is
+    # true, detaches the old root mount after switching to `/`.
+    private def self.pivot_root!(rootfs : Path, unmount_old_root : Bool = true)
       put_old = rootfs / ".pivot_root"
       FileUtils.mkdir_p(put_old)
       if LibC.pivot_root(rootfs.to_s.to_unsafe, put_old.to_s.to_unsafe) != 0
@@ -217,6 +222,17 @@ module Bootstrap
         raise NamespaceError.new("pivot_root failed: #{errno} #{errno.message}")
       end
       Dir.cd("/")
+      return unless unmount_old_root
+      unmount_old_root!
+    end
+
+    # Detaches the old root mount created by pivot_root.
+    private def self.unmount_old_root!(mount_point : Path = Path["/.pivot_root"])
+      if LibC.umount2(mount_point.to_s.to_unsafe, MNT_DETACH) != 0
+        errno = Errno.value
+        raise NamespaceError.new("umount2 #{mount_point} failed: #{errno} #{errno.message}")
+      end
+      FileUtils.rm_rf(mount_point)
     end
 
     # Ensure mount propagation is private so the rootfs bind mount does not

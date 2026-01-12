@@ -302,6 +302,56 @@ describe Bootstrap::SysrootNamespace do
         raise "Namespace stdio symlinks missing (exit=#{symlink_status.exit_code})"
       end
     end
+
+    it "unmounts the old root by default but allows keeping it" do
+      # Run in a subprocess to avoid mutating the namespace state of the spec runner.
+      rootfs = File.tempname("sysroot-namespace")
+      FileUtils.mkdir_p(rootfs)
+
+      stdout = IO::Memory.new
+      stderr = IO::Memory.new
+      status = Process.run(
+        "crystal",
+        [
+          "eval",
+          <<-CR
+            require "./src/sysroot_namespace"
+            rootfs = #{rootfs.inspect}
+            Bootstrap::SysrootNamespace.enter_rootfs(rootfs)
+            raise "old root still present" if File.exists?("/.pivot_root")
+          CR
+        ],
+        chdir: Path[__DIR__] / "..",
+        output: stdout,
+        error: stderr
+      )
+
+      unless status.success?
+        raise "Namespace old root unmount failed (exit=#{status.exit_code}). stdout=#{stdout} stderr=#{stderr}"
+      end
+
+      stdout = IO::Memory.new
+      stderr = IO::Memory.new
+      status = Process.run(
+        "crystal",
+        [
+          "eval",
+          <<-CR
+            require "./src/sysroot_namespace"
+            rootfs = #{rootfs.inspect}
+            Bootstrap::SysrootNamespace.enter_rootfs(rootfs, unmount_old_root: false)
+            raise "old root missing" unless File.exists?("/.pivot_root")
+          CR
+        ],
+        chdir: Path[__DIR__] / "..",
+        output: stdout,
+        error: stderr
+      )
+
+      unless status.success?
+        raise "Namespace old root override failed (exit=#{status.exit_code}). stdout=#{stdout} stderr=#{stderr}"
+      end
+    end
   else
     reason = restrictions.join("; ")
     pending "enters a rootfs with namespaces when supported (#{reason})" do
