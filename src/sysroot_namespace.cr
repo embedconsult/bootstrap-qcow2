@@ -71,12 +71,9 @@ module Bootstrap
         restrictions << "seccomp is enforced (mode #{seccomp}); setgroups/uid_map writes or sockets may be blocked"
       end
 
-      if (error = userns_setgroups_probe_error)
-        restrictions << "user namespace setgroups mapping failed: #{error}"
-      end
-
-      if (device_error = device_bind_probe_error)
-        restrictions << "device bind/remount failed inside user namespace: #{device_error}"
+      dev_flags = mount_info_flags("/dev")
+      if dev_flags.includes?("nodev")
+        restrictions << "/dev is mounted with nodev; provide a dev-enabled /dev (devtmpfs or tmpfs,dev) so device binds work inside user namespaces."
       end
 
       if (apparmor_note = apparmor_restriction)
@@ -101,44 +98,6 @@ module Bootstrap
     # Returns the seccomp mode from /proc/self/status, or nil when absent.
     def self.seccomp_mode(status_path : Path = Path["/proc/self/status"]) : String?
       proc_status_value(status_path, "Seccomp")
-    end
-
-    # Attempts to unshare a user namespace and write /proc/self/setgroups in a
-    # subprocess to detect seccomp/LSM restrictions. Returns an error string
-    # when the probe fails, or nil when it succeeds.
-    def self.userns_setgroups_probe_error : String?
-      reader, writer = IO.pipe
-      pid = LibC.fork
-      return "unshare probe not available: fork failed" if pid < 0
-
-      if pid == 0
-        reader.close
-        begin
-          unshare_namespaces
-          writer.puts "ok"
-          LibC._exit(0)
-        rescue ex
-          writer.puts ex.message
-          LibC._exit(1)
-        end
-      end
-
-      writer.close
-      status_code = uninitialized Int32
-      waited = LibC.waitpid(pid, pointerof(status_code), 0)
-      output = reader.gets_to_end.to_s.strip
-      reader.close
-
-      return "unshare probe failed: waitpid errno=#{Errno.value}" if waited < 0
-
-      # Decode wait status per POSIX: lower 7 bits for signal, next 8 for exit code.
-      signaled = (status_code & 0x7f) != 0
-      exit_status = (status_code & 0xff00) >> 8
-      return nil if !signaled && exit_status == 0
-
-      detail = signaled ? "signaled" : "exit=#{exit_status}"
-      detail = "#{detail} #{output}".strip unless output.empty?
-      "unshare probe failed #{detail}".strip
     end
 
     # Reads a single value from /proc/self/status.
@@ -453,55 +412,6 @@ module Bootstrap
       FileUtils.mkdir_p(target.parent)
       FileUtils.touch(target)
       mount_call(source.to_s, target.to_s, nil, MS_BIND, nil)
-    end
-
-    # Attempts to bind a device node inside a fresh user namespace to detect
-    # environments that block device remounts under MS_NODEV. Returns an error
-    # string when the probe fails, or nil when it succeeds.
-    private def self.device_bind_probe_error : String?
-      # Fail fast if the host /dev is nodev and cannot provide usable device
-      # nodes to a child namespace. This avoids attempting an impossible
-      # dev-enabled tmpfs mount that yields EINVAL/EPERM on many kernels.
-      dev_flags = mount_info_flags("/dev")
-      if dev_flags.includes?("nodev")
-        return "/dev is mounted with nodev; provide a dev-enabled /dev (devtmpfs or tmpfs,dev) so device binds work inside user namespaces."
-      end
-
-      reader, writer = IO.pipe
-      pid = LibC.fork
-      return "device probe not available: fork failed" if pid < 0
-
-      if pid == 0
-        reader.close
-        begin
-          unshare_namespaces
-          dir = Path[Dir.tempdir] / "ns-device-probe-#{Random::Secure.hex(4)}"
-          FileUtils.mkdir_p(dir)
-          ensure_device_node(dir / "null", "/dev/null")
-          File.open(dir / "null", "w") { |io| io.write Bytes.empty }
-          writer.puts "ok"
-          LibC._exit(0)
-        rescue ex
-          writer.puts ex.message
-          LibC._exit(1)
-        end
-      end
-
-      writer.close
-      status_code = uninitialized Int32
-      waited = LibC.waitpid(pid, pointerof(status_code), 0)
-      output = reader.gets_to_end.to_s.strip
-      reader.close
-
-      return "device probe failed: waitpid errno=#{Errno.value}" if waited < 0
-
-      signaled = (status_code & 0x7f) != 0
-      exit_status = (status_code & 0xff00) >> 8
-      return nil if !signaled && exit_status == 0
-
-      detail = signaled ? "signaled" : "exit=#{exit_status}"
-      detail = "#{detail} #{output}".strip unless output.empty?
-      "device probe failed #{detail}".strip
     end
 
     # Parses /proc/self/mountinfo to extract mount flags for a given mount point.
