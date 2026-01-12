@@ -11,6 +11,14 @@ These instructions apply to the entire repository unless overridden by a nested 
 - Default to Clang/LLVM toolchains for C/C++ builds (including userland libs); use GCC only when strictly necessary for bootstrapping or compatibility.
 - Self-hosting trajectory: the environment should be capable of building complete versions of Crystal and Fossil; long-term direction is to migrate version control to Fossil/SQLite and ultimately replace Linux with a Crystal-based kernel inspired by Tanenbaum.
 
+## Environment requirements (for namespace + build tooling)
+- Unprivileged user namespaces enabled: `kernel.unprivileged_userns_clone=1`, `kernel.apparmor_restrict_unprivileged_userns=0`, AppArmor label `unconfined`.
+- No seccomp/NoNewPrivs restrictions that block setgroups/uid_map or socket creation.
+- Host `/dev` must allow bind-mounting core device nodes and writing to them (`/dev/null`, `/dev/zero`, `/dev/random`, `/dev/urandom`, `/dev/tty` when present). `/dev` should be a writable `devtmpfs` or equivalent; device nodes must be writable inside the user namespace.
+- Mounting proc/sys/dev/tmpfs inside the unshared mount namespace must be permitted (requires CAP_SYS_ADMIN in the user namespace).
+- Outbound HTTP/DNS required to fetch sources when running `crystal run src/main.cr`.
+- No synthetic device nodes: /dev/null, /dev/zero, /dev/random, /dev/urandom (and /dev/tty when present) must be bind-mountable and writable inside the user namespace; nodev must not block these binds.
+
 ## Contribution guidelines
 - Favor readable, declarative Crystal code; prefer small, focused modules over sprawling scripts.
 - Avoid adding new shell scripts or Bash-centric tooling. If orchestration is required, implement it as Crystal CLI utilities.

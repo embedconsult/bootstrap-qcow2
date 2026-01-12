@@ -231,6 +231,29 @@ describe Bootstrap::SysrootNamespace do
       unless status.success?
         raise "Namespace rootfs entry failed (exit=#{status.exit_code}). stdout=#{stdout} stderr=#{stderr}"
       end
+
+      # Ensure device nodes inside the namespace are usable for write.
+      stdout = IO::Memory.new
+      stderr = IO::Memory.new
+      status = Process.run(
+        "crystal",
+        [
+          "eval",
+          <<-CR
+            require "./src/sysroot_namespace"
+            rootfs = #{rootfs.inspect}
+            Bootstrap::SysrootNamespace.enter_rootfs(rootfs)
+            File.write("/dev/null", "")
+          CR
+        ],
+        chdir: Path[__DIR__] / "..",
+        output: stdout,
+        error: stderr
+      )
+
+      unless status.success?
+        raise "Namespace device usability failed (exit=#{status.exit_code}). stdout=#{stdout} stderr=#{stderr}"
+      end
     end
   else
     reason = restrictions.join("; ")

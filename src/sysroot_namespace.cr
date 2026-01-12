@@ -344,12 +344,12 @@ module Bootstrap
     # avoid creating new device nodes by not calling mknod.
     private def self.mount_dev(target : Path, proc_root : Path)
       mount_tmpfs(target, flags: MS_NOSUID | MS_NOEXEC)
-      ensure_device_node(target / "null", "/dev/null", 1_u64, 3_u64)
-      ensure_device_node(target / "zero", "/dev/zero", 1_u64, 5_u64)
-      ensure_device_node(target / "random", "/dev/random", 1_u64, 8_u64)
-      ensure_device_node(target / "urandom", "/dev/urandom", 1_u64, 9_u64)
+      ensure_device_node(target / "null", "/dev/null")
+      ensure_device_node(target / "zero", "/dev/zero")
+      ensure_device_node(target / "random", "/dev/random")
+      ensure_device_node(target / "urandom", "/dev/urandom")
       if File.exists?("/dev/tty")
-        ensure_device_node(target / "tty", "/dev/tty", 5_u64, 0_u64)
+        ensure_device_node(target / "tty", "/dev/tty")
       end
       bind_mount(proc_root / "self" / "fd", target / "fd")
       FileUtils.ln_s("/proc/self/fd/0", target / "stdin")
@@ -397,7 +397,7 @@ module Bootstrap
           dir = Path[Dir.tempdir] / "ns-device-probe-#{Random::Secure.hex(4)}"
           FileUtils.mkdir_p(dir)
           mount_tmpfs(dir)
-          ensure_device_node(dir / "null", "/dev/null", 1_u64, 3_u64)
+          ensure_device_node(dir / "null", "/dev/null")
           File.open(dir / "null", "w") { |io| io.write Bytes.empty }
           writer.puts "ok"
           LibC._exit(0)
@@ -450,30 +450,18 @@ module Bootstrap
       mount_call(nil, target.to_s, nil, flags, nil)
     end
 
-    # Best-effort creation of a usable device node at target. First tries to
-    # bind-mount the host device; if that fails or remains unusable, falls back
-    # to mknod with the provided major/minor.
-    private def self.ensure_device_node(target : Path, source : String, major : UInt64, minor : UInt64)
+    # Ensure a usable device node is available at the target by bind-mounting
+    # the host device. Raises NamespaceError with guidance when binding or
+    # writing the device fails so callers surface clear requirements.
+    private def self.ensure_device_node(target : Path, source : String)
       FileUtils.mkdir_p(target.parent)
       begin
         bind_mount_device(source, target)
         File.open(target, "w") { |io| io.write Bytes.empty }
         return
-      rescue
-        # Fall through to mknod fallback
+      rescue ex
+        raise NamespaceError.new("Device bind failed for #{source} -> #{target}: #{ex.message}. Ensure host /dev allows bind mounts and the node is writable inside user namespaces.")
       end
-
-      File.delete?(target)
-      dev = make_dev_number(major, minor)
-      mode = LibC::S_IFCHR | 0o666
-      if LibC.mknod(target.to_s, mode, dev) != 0
-        raise NamespaceError.new("Failed to create #{target} (#{major},#{minor}) via mknod: #{Errno.value.message}")
-      end
-    end
-
-    # Computes a Linux device number (dev_t) from major/minor values.
-    private def self.make_dev_number(major : UInt64, minor : UInt64) : LibC::DevT
-      (((major & 0xfff) << 8) | (minor & 0xff) | ((major & ~0xfff) << 32) | ((minor & ~0xff) << 12)).to_u64
     end
 
     # Returns true if the filesystem type appears in /proc/filesystems.
