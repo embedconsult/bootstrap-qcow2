@@ -44,6 +44,7 @@ module Bootstrap
     MS_NOEXEC  = (1_u64 << 3)
     MS_REMOUNT = (1_u64 << 5)
     MS_PRIVATE = (1_u64 << 18)
+    MNT_DETACH = 2
 
     class NamespaceError < RuntimeError
     end
@@ -70,12 +71,9 @@ module Bootstrap
         restrictions << "seccomp is enforced (mode #{seccomp}); setgroups/uid_map writes or sockets may be blocked"
       end
 
-      if (error = userns_setgroups_probe_error)
-        restrictions << "user namespace setgroups mapping failed: #{error}"
-      end
-
-      if (device_error = device_bind_probe_error)
-        restrictions << "device bind/remount failed inside user namespace: #{device_error}"
+      dev_flags = mount_info_flags("/dev")
+      if dev_flags.includes?("nodev")
+        restrictions << "/dev is mounted with nodev; provide a dev-enabled /dev (devtmpfs or tmpfs,dev) so device binds work inside user namespaces."
       end
 
       if (apparmor_note = apparmor_restriction)
@@ -100,44 +98,6 @@ module Bootstrap
     # Returns the seccomp mode from /proc/self/status, or nil when absent.
     def self.seccomp_mode(status_path : Path = Path["/proc/self/status"]) : String?
       proc_status_value(status_path, "Seccomp")
-    end
-
-    # Attempts to unshare a user namespace and write /proc/self/setgroups in a
-    # subprocess to detect seccomp/LSM restrictions. Returns an error string
-    # when the probe fails, or nil when it succeeds.
-    def self.userns_setgroups_probe_error : String?
-      reader, writer = IO.pipe
-      pid = LibC.fork
-      return "unshare probe not available: fork failed" if pid < 0
-
-      if pid == 0
-        reader.close
-        begin
-          unshare_namespaces
-          writer.puts "ok"
-          LibC._exit(0)
-        rescue ex
-          writer.puts ex.message
-          LibC._exit(1)
-        end
-      end
-
-      writer.close
-      status_code = uninitialized Int32
-      waited = LibC.waitpid(pid, pointerof(status_code), 0)
-      output = reader.gets_to_end.to_s.strip
-      reader.close
-
-      return "unshare probe failed: waitpid errno=#{Errno.value}" if waited < 0
-
-      # Decode wait status per POSIX: lower 7 bits for signal, next 8 for exit code.
-      signaled = (status_code & 0x7f) != 0
-      exit_status = (status_code & 0xff00) >> 8
-      return nil if !signaled && exit_status == 0
-
-      detail = signaled ? "signaled" : "exit=#{exit_status}"
-      detail = "#{detail} #{output}".strip unless output.empty?
-      "unshare probe failed #{detail}".strip
     end
 
     # Reads a single value from /proc/self/status.
@@ -200,6 +160,12 @@ module Bootstrap
     # the mount namespace. This preserves the common unprivileged flow:
     # unshare(CLONE_NEWUSER) -> write uid/gid maps -> unshare(CLONE_NEWNS).
     def self.unshare_namespaces(uid : Int32 = LibC.getuid.to_i32, gid : Int32 = LibC.getgid.to_i32)
+      if privileged_mount_only?
+        unshare!(CLONE_NEWNS)
+        make_mounts_private
+        return
+      end
+
       ensure_unprivileged_userns_clone_enabled!
       unshare!(CLONE_NEWUSER)
       setup_user_mapping(uid, gid)
@@ -208,13 +174,20 @@ module Bootstrap
     end
 
     # Enter the provided rootfs by unsharing namespaces, bind-mounting the
-    # rootfs, mounting /proc, /dev, and /sys, then pivoting
-    # into the new root.
-    def self.enter_rootfs(rootfs : String)
+    # rootfs, mounting /proc, /dev, and /sys, then pivoting into the new root.
+    # When *bind_host_dev* is true, /dev is bind-mounted recursively from the
+    # host (Linux From Scratch kernfs style) to avoid relying on dev-enabled
+    # tmpfs inside user namespaces.
+    def self.enter_rootfs(rootfs : String,
+                          extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path),
+                          bind_host_dev : Bool = true)
       unshare_namespaces
       root_path = Path[rootfs].expand
       bind_mount_rootfs(root_path)
-      mount_virtual_fs(root_path)
+      extra_binds.each do |(source, target)|
+        bind_mount(source, root_path / target)
+      end
+      mount_virtual_fs(root_path, bind_host_dev: bind_host_dev)
 
       pivot_root!(root_path)
     end
@@ -226,12 +199,12 @@ module Bootstrap
     end
 
     # Mount kernel-provided virtual filesystems inside the new rootfs.
-    private def self.mount_virtual_fs(rootfs : Path)
+    private def self.mount_virtual_fs(rootfs : Path, bind_host_dev : Bool = true)
       mount_proc(rootfs / "proc")
       mount_sys(rootfs / "sys")
-      mount_dev(rootfs / "dev", rootfs / "proc")
+      mount_dev(rootfs / "dev", rootfs / "proc", bind_host_dev: bind_host_dev)
       mount_tmpfs(rootfs / "tmp")
-      mount_tmpfs(rootfs / "dev" / "shm")
+      mount_tmpfs(rootfs / "dev" / "shm") unless bind_host_dev
     end
 
     # Performs pivot_root with an `.pivot_root` directory inside *rootfs*.
@@ -260,7 +233,14 @@ module Bootstrap
         begin
           File.write(setgroups_path, "deny\n")
         rescue error : File::AccessDeniedError
-          raise NamespaceError.new("Failed to write #{setgroups_path}: #{error.message}. This can be caused by LSM policies (e.g., AppArmor).")
+          # Privileged callers (uid 0 in the parent namespace) can still write
+          # gid_map without disabling setgroups. Allow the flow to continue for
+          # uid 0 so seccomp/NoNewPrivs filters on setgroups do not block the
+          # user namespace setup. Unprivileged callers must still disable
+          # setgroups.
+          unless uid == 0
+            raise NamespaceError.new("Failed to write #{setgroups_path}: #{error.message}. This can be caused by LSM policies (e.g., AppArmor).")
+          end
         end
       elsif LibC.getuid != 0
         raise NamespaceError.new("Missing #{setgroups_path}; unprivileged user namespaces are not available without uid 0.")
@@ -269,6 +249,42 @@ module Bootstrap
       # new user namespace, which is needed for mount and pivot_root calls.
       write_id_map("/proc/self/uid_map", uid)
       write_id_map("/proc/self/gid_map", gid)
+    end
+
+    # Returns true when the current process already has CAP_SYS_ADMIN and
+    # user namespace setup is likely to be blocked by NoNewPrivs/seccomp,
+    # so we should skip the user namespace and only isolate mounts.
+    private def self.privileged_mount_only? : Bool
+      cap_sys_admin? && (no_new_privs? || seccomp_enforced?)
+    end
+
+    private def self.no_new_privs?(proc_status_path : Path = Path["/proc/self/status"]) : Bool
+      status_value("NoNewPrivs", proc_status_path) == "1"
+    end
+
+    private def self.seccomp_enforced?(proc_status_path : Path = Path["/proc/self/status"]) : Bool
+      status_value("Seccomp", proc_status_path) == "2"
+    end
+
+    private def self.cap_sys_admin? : Bool
+      hex = status_value("CapEff", Path["/proc/self/status"])
+      return false unless hex
+      value = hex.to_u64(16)
+      # CAP_SYS_ADMIN is bit 21
+      (value & (1_u64 << 21)) != 0
+    rescue
+      false
+    end
+
+    private def self.status_value(key : String, path : Path) : String?
+      File.each_line(path) do |line|
+        if line.starts_with?("#{key}:")
+          return line.split(":")[1]?.try &.strip
+        end
+      end
+      nil
+    rescue
+      nil
     end
 
     # Writes a single-id mapping to the provided uid/gid map file.
@@ -337,11 +353,15 @@ module Bootstrap
       bind_mount("/sys", target)
     end
 
-    # Populates /dev by bind-mounting a curated set of host device nodes. We
-    # avoid mounting a tmpfs here because some hosts forbid dev-enabled tmpfs
-    # inside user namespaces; if the host devices cannot be bound or written,
-    # we fail fast with a clear message.
-    private def self.mount_dev(target : Path, proc_root : Path)
+    # Mounts /dev on the provided target. When *bind_host_dev* is true, bind the
+    # host /dev recursively (LFS kernfs style). Otherwise, create a fresh tmpfs
+    # with essential device nodes bind-mounted from the host.
+    private def self.mount_dev(target : Path, proc_root : Path, bind_host_dev : Bool = true)
+      if bind_host_dev
+        bind_mount("/dev", target)
+        return
+      end
+
       FileUtils.mkdir_p(target)
       ensure_device_node(target / "null", "/dev/null")
       ensure_device_node(target / "zero", "/dev/zero")
@@ -364,15 +384,14 @@ module Bootstrap
         raise NamespaceError.new("Filesystem type tmpfs is not available; check /proc/filesystems.")
       end
       FileUtils.mkdir_p(target)
-      mount_call("tmpfs", target.to_s, "tmpfs", flags, nil)
-      remount_flags = MS_REMOUNT | flags
-      remount_data = nil
-      if allow_devices
-        # Explicitly request dev to drop nodev; if the host disallows this
-        # inside user namespaces, fail fast with a clear error.
-        remount_data = "dev"
+      mount_flags = allow_devices ? (flags & ~MS_NODEV) : flags
+      mount_data = allow_devices ? "mode=755" : nil
+      mount_call("tmpfs", target.to_s, "tmpfs", mount_flags, mount_data)
+
+      unless allow_devices
+        remount_flags = MS_REMOUNT | mount_flags
+        mount_call(nil, target.to_s, nil, remount_flags, nil)
       end
-      mount_call(nil, target.to_s, nil, remount_flags, remount_data)
 
       if allow_devices
         opts = mount_info_flags(target.to_s)
@@ -393,47 +412,6 @@ module Bootstrap
       FileUtils.mkdir_p(target.parent)
       FileUtils.touch(target)
       mount_call(source.to_s, target.to_s, nil, MS_BIND, nil)
-    end
-
-    # Attempts to bind a device node inside a fresh user namespace to detect
-    # environments that block device remounts under MS_NODEV. Returns an error
-    # string when the probe fails, or nil when it succeeds.
-    private def self.device_bind_probe_error : String?
-      reader, writer = IO.pipe
-      pid = LibC.fork
-      return "device probe not available: fork failed" if pid < 0
-
-      if pid == 0
-        reader.close
-        begin
-          unshare_namespaces
-          dir = Path[Dir.tempdir] / "ns-device-probe-#{Random::Secure.hex(4)}"
-          FileUtils.mkdir_p(dir)
-          ensure_device_node(dir / "null", "/dev/null")
-          File.open(dir / "null", "w") { |io| io.write Bytes.empty }
-          writer.puts "ok"
-          LibC._exit(0)
-        rescue ex
-          writer.puts ex.message
-          LibC._exit(1)
-        end
-      end
-
-      writer.close
-      status_code = uninitialized Int32
-      waited = LibC.waitpid(pid, pointerof(status_code), 0)
-      output = reader.gets_to_end.to_s.strip
-      reader.close
-
-      return "device probe failed: waitpid errno=#{Errno.value}" if waited < 0
-
-      signaled = (status_code & 0x7f) != 0
-      exit_status = (status_code & 0xff00) >> 8
-      return nil if !signaled && exit_status == 0
-
-      detail = signaled ? "signaled" : "exit=#{exit_status}"
-      detail = "#{detail} #{output}".strip unless output.empty?
-      "device probe failed #{detail}".strip
     end
 
     # Parses /proc/self/mountinfo to extract mount flags for a given mount point.
