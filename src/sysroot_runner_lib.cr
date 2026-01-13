@@ -57,7 +57,9 @@ module Bootstrap
           when "crystal"
             run_cmd(["shards", "build"])
             run_cmd(["install", "-d", "#{step.sysroot_prefix}/bin"])
-            run_cmd(["install", "-m", "0755", "bin/bq2", "#{step.sysroot_prefix}/bin/bq2"])
+            Dir.glob("bin/*").each do |artifact|
+              run_cmd(["install", "-m", "0755", artifact, "#{step.sysroot_prefix}/bin/"])
+            end
           else # autotools/default
             run_cmd(["./configure", "--prefix=#{step.sysroot_prefix}"] + step.configure_flags)
             run_cmd(["make", "-j#{cpus}"])
