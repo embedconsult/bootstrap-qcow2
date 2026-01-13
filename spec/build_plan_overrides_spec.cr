@@ -2,6 +2,32 @@ require "./spec_helper"
 require "../src/build_plan_overrides"
 
 describe Bootstrap::BuildPlanOverrides do
+  it "preserves step order when applying package allowlist" do
+    plan = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        workspace: "/workspace",
+        environment: "test",
+        install_prefix: "/opt/sysroot",
+        steps: [
+          Bootstrap::BuildStep.new(name: "a", strategy: "autotools", workdir: "/a", configure_flags: [] of String, patches: [] of String),
+          Bootstrap::BuildStep.new(name: "b", strategy: "autotools", workdir: "/b", configure_flags: [] of String, patches: [] of String),
+          Bootstrap::BuildStep.new(name: "c", strategy: "autotools", workdir: "/c", configure_flags: [] of String, patches: [] of String),
+        ],
+      ),
+    ])
+
+    overrides = Bootstrap::BuildPlanOverrides.new(
+      phases: {
+        "one" => Bootstrap::PhaseOverride.new(packages: ["c", "a"]),
+      },
+    )
+
+    updated = overrides.apply(plan)
+    updated.phases.first.steps.map(&.name).should eq ["a", "c"]
+  end
+
   it "applies phase and step overrides" do
     plan = Bootstrap::BuildPlan.new([
       Bootstrap::BuildPhase.new(
