@@ -42,28 +42,44 @@ These instructions apply to the entire repository unless overridden by a nested 
 
 Goal: iterate on sysroot/rootfs build issues inside the running container, then back-port working changes into `src/sysroot_builder.cr` so builds remain reproducible.
 
-- Start from a login shell (`bash --login`) when possible; if Crystal cache permissions fail, prefer `CRYSTAL_CACHE_DIR=/tmp/crystal_cache`.
-- Host build: `shards build` then `./bin/bq2 --install`.
-- Generate a bootstrap rootfs (includes `/var/lib/sysroot-build-plan.json`): `./bin/sysroot-builder --no-tarball`.
-- Enter rootfs for iteration: `./bin/sysroot-namespace --rootfs data/sysroot/rootfs -- /bin/sh`.
-- Inside rootfs, build the CLI from staged source: `cd /workspace/bootstrap-qcow2 && shards build`.
-- Run phases:
-  - Default (first phase only): `./bin/bq2 sysroot-runner`
-  - Select phase: `./bin/bq2 sysroot-runner --phase rootfs-from-sysroot`
-  - Narrow to a package: `./bin/bq2 sysroot-runner --phase sysroot-from-alpine --package musl`
-- Capture lessons-learned:
-  - On failure, the runner writes a JSON report under `/var/lib/sysroot-build-reports` (override with `--report-dir`, disable with `--no-report`).
-  - Use the report to decide the next tweak (flags/env/DESTDIR), then apply it via an overrides file.
-- Fast iteration with overrides (no rebuild required):
-  - Create/edit `/var/lib/sysroot-build-overrides.json` (or pass `--overrides PATH`).
-  - Re-run the affected phase/package until it works.
-  - Once stable, back-port the overrides into `SysrootBuilder.phase_specs` (or its helpers) and delete the overrides file so the clean build stays deterministic.
+See `codex/skills/bootstrap-qcow2-build-plan-iteration/SKILL.md` for Codex-oriented iteration guidance.
+
+1. Start from a login shell (`bash --login`) when possible; if Crystal cache permissions fail, prefer `CRYSTAL_CACHE_DIR=/tmp/crystal_cache`.
+2. Build and refresh local CLI entrypoints (host): `shards build && ./bin/bq2 --install`.
+3. Prepare (or reuse) the sysroot rootfs workspace:
+   - Prepare: `./bin/sysroot-builder --no-tarball`
+   - Reuse: `./bin/sysroot-builder --reuse-rootfs` (optionally add `--no-tarball` when you only need the directory)
+   - Reset: delete `data/sysroot/rootfs` (or pick a new `--workspace`).
+   - Bookmarks/state (inside rootfs):
+     - Build plan (immutable during iterations): `/var/lib/sysroot-build-plan.json` (host path: `data/sysroot/rootfs/var/lib/sysroot-build-plan.json`)
+     - Overrides (mutable, back-annotate later): `/var/lib/sysroot-build-overrides.json` (host path: `data/sysroot/rootfs/var/lib/sysroot-build-overrides.json`)
+     - Iteration state/bookmark (created/updated by `sysroot-runner`): `/var/lib/sysroot-build-state.json` (host path: `data/sysroot/rootfs/var/lib/sysroot-build-state.json`)
+     - Failure reports (append-only): `/var/lib/sysroot-build-reports/*.json` (host path: `data/sysroot/rootfs/var/lib/sysroot-build-reports/*.json`)
+4. Enter the rootfs:
+   - Manual shell: `./bin/sysroot-namespace --rootfs data/sysroot/rootfs -- /bin/sh`
+   - Codex-assisted iteration: `./bin/bq2 codex-namespace` (binds host `./codex/work` into `/work` by default; saves/resumes the last Codex session via `/work/.codex-session-id`).
+   - Note: steps 1–4 are typically performed manually to launch the iteration environment; Codex iteration usually begins at step 5 or step 7 depending on the prompt.
+5. Confirm you are inside the intended rootfs before iterating:
+   - `test -f /var/lib/sysroot-build-state.json && cat /var/lib/sysroot-build-state.json`
+   - `test -f /var/lib/sysroot-build-plan.json`
+   - `test -d /workspace && ls /workspace | head`
+6. Choose the source tree mode:
+   - Live, mutable repo: `cd /work/bootstrap-qcow2` (preferred while updating builder/runner)
+   - Staged snapshot (static): `cd /workspace/bootstrap-qcow2-master`
+7. Iterate builds without touching the plan:
+   - Update tooling: `shards build && ./bin/bq2 --install`
+   - Re-run the plan runner: `./bin/bq2 sysroot-runner` (auto-resumes based on `/var/lib/sysroot-build-state.json`)
+8. Capture lessons-learned and back-annotate:
+   - On failure, read the JSON report in `/var/lib/sysroot-build-reports`.
+   - Encode fixes in `/var/lib/sysroot-build-overrides.json` and rerun.
+   - After a full successful round, back-port the overrides into `SysrootBuilder.phase_specs` (or helpers) in the live repo, then delete the overrides and state files and retry from scratch for reproducibility.
 
 ## PR/commit expectations
 - Commit messages should summarize the behavioral change and the architecture(s) affected.
 - PR summaries should call out: target architectures, EFI/boot impacts, new dependencies (if any), and how the change advances self-hosting or Crystal-only tooling.
 - Ensure PR summaries cover all changes made on the branch, not just the latest commit.
 - For GitHub PR automation, prefer using the in-repo helper `Bootstrap::CodexUtils.create_pull_request(repo, title, head, base, body, credentials_path = "../.git-credentials")`. It reads the x-access-token from `.git-credentials` and POSTs to the GitHub REST API; inject a custom HTTP sender when testing. Avoid external CLI dependencies.
+- See `codex/skills/bootstrap-qcow2-create-pr/SKILL.md` for a Codex-oriented workflow that uses `create_pull_request` without `gh`.
 - Default PR base is `master` unless explicitly requested otherwise; set the head branch accordingly before calling `create_pull_request`.
 
 ## Rootless userns + pivot_root procedure
