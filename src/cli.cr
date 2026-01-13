@@ -7,14 +7,12 @@ module Bootstrap
     # Returns the basename of the invoked executable, falling back to a default
     # when it cannot be resolved (e.g., when Process.executable_path is nil).
     def self.invoked_name(default : String = "bq2") : String
+      argv0 = ARGV[0]? || PROGRAM_NAME
+      return File.basename(argv0) if argv0 && !argv0.empty?
       if exe = Process.executable_path
         return File.basename(exe)
       end
-      begin
-        return File.basename(PROGRAM_NAME)
-      rescue
-        return default
-      end
+      default
     end
 
     # Selects a command name based on the executable name or the first argument
