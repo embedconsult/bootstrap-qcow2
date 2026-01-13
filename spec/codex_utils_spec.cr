@@ -50,4 +50,59 @@ describe Bootstrap::CodexUtils do
       file.close
     end
   end
+
+  it "fetches pull request feedback via the GitHub API" do
+    token = "github_pat_TEST"
+    credentials = "https://x-access-token:#{token}@github.com"
+    file = File.tempfile("git-credentials")
+    begin
+      file.print(credentials)
+      file.flush
+
+      calls = [] of Tuple(String, HTTP::Headers)
+      get_stub = ->(url : String, headers : HTTP::Headers) do
+        calls << {url, headers}
+        case url
+        when "https://api.github.com/repos/org/repo/pulls/40/comments"
+          HTTP::Client::Response.new(200, [
+            {"user" => {"login" => "reviewer"}, "body" => "inline", "path" => "src/main.cr", "created_at" => "t"},
+          ].to_json)
+        when "https://api.github.com/repos/org/repo/issues/40/comments"
+          HTTP::Client::Response.new(200, [
+            {"user" => {"login" => "commenter"}, "body" => "thread", "created_at" => "t2"},
+          ].to_json)
+        when "https://api.github.com/repos/org/repo/pulls/40/reviews"
+          HTTP::Client::Response.new(200, [
+            {"user" => {"login" => "approver"}, "body" => "LGTM", "state" => "APPROVED", "submitted_at" => "t3"},
+          ].to_json)
+        else
+          HTTP::Client::Response.new(404, {"error" => "unexpected url #{url}"}.to_json)
+        end
+      end
+
+      feedback = Bootstrap::CodexUtils.fetch_pull_request_feedback(
+        "org/repo",
+        40,
+        credentials_path: Path[file.path],
+        http_get: get_stub
+      )
+
+      feedback.review_comments.size.should eq 1
+      feedback.review_comments.first.author.should eq "reviewer"
+      feedback.review_comments.first.path.should eq "src/main.cr"
+
+      feedback.issue_comments.size.should eq 1
+      feedback.issue_comments.first.author.should eq "commenter"
+
+      feedback.reviews.size.should eq 1
+      feedback.reviews.first.state.should eq "APPROVED"
+
+      calls.size.should eq 3
+      calls.each do |(_url, headers)|
+        headers["Authorization"].should eq "token #{token}"
+      end
+    ensure
+      file.close
+    end
+  end
 end

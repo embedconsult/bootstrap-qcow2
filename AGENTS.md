@@ -76,6 +76,7 @@ See `codex/skills/bootstrap-qcow2-build-plan-iteration/SKILL.md` for Codex-orien
 - Ensure PR summaries cover all changes made on the branch, not just the latest commit.
 - For GitHub PR automation, prefer using the in-repo helper `Bootstrap::CodexUtils.create_pull_request(repo, title, head, base, body, credentials_path = "../.git-credentials")`. It reads the x-access-token from `.git-credentials` and POSTs to the GitHub REST API; inject a custom HTTP sender when testing. Avoid external CLI dependencies.
 - See `codex/skills/bootstrap-qcow2-create-pr/SKILL.md` for a Codex-oriented workflow that uses `create_pull_request` without `gh`.
+- See `codex/skills/bootstrap-qcow2-check-pr-feedback/SKILL.md` for a manual workflow to fetch PR review comments + thread comments.
 - Default PR base is `master` unless explicitly requested otherwise; set the head branch accordingly before calling `create_pull_request`.
 
 ## Rootless userns + pivot_root procedure
