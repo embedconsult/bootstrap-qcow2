@@ -25,6 +25,10 @@ module Bootstrap
         return {name, args}
       end
 
+      if args.includes?("-h") || args.includes?("--help")
+        return {"help", args}
+      end
+
       if !args.empty? && known.includes?(args.first)
         command = args.shift
         return {command, args}
