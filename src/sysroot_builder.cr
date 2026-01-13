@@ -376,19 +376,19 @@ module Bootstrap
       coordinator_support_files.each do |source|
         FileUtils.cp(source, coordinator_dir / File.basename(source))
       end
-      coordinator_dir / "sysroot_runner_main.cr"
-    end
-
-    # Primary coordinator entrypoint stored in-repo (and formatted/tested).
-    def coordinator_source_path : Path
-      Path.new(__DIR__).join("sysroot_runner_main.cr")
+      coordinator_dir / "main.cr"
     end
 
     # All coordinator artifacts that should be staged into the chroot.
     def coordinator_support_files : Array(Path)
       [
-        Path.new(__DIR__).join("sysroot_runner_main.cr"),
+        Path.new(__DIR__).join("bootstrap-qcow2.cr"),
+        Path.new(__DIR__).join("cli.cr"),
+        Path.new(__DIR__).join("main.cr"),
+        Path.new(__DIR__).join("sysroot_builder.cr"),
+        Path.new(__DIR__).join("sysroot_namespace.cr"),
         Path.new(__DIR__).join("sysroot_runner_lib.cr"),
+        Path.new(__DIR__).join("codex_namespace.cr"),
       ]
     end
 

@@ -43,30 +43,23 @@ The rootfs output includes:
 - Alpine minirootfs 3.23.2 (aarch64 by default)
 - Cached source archives for core packages (musl, busybox, clang/LLVM, etc.)
 - A serialized build plan consumed by the coordinator
-- Coordinator entrypoints at `/usr/local/bin/sysroot_runner_main.cr`
+- Coordinator entrypoint source at `/usr/local/bin/main.cr` (busybox-style CLI)
 
-### `src/sysroot_runner_main.cr`
+### Busybox-style CLI
 
-Perform the source build operations inside the new rootfs.
-
-```bash
-crystal run /usr/local/bin/sysroot_runner_main.cr
-```
-
-### `src/sysroot_namespace_main.cr`
-
-Enter the sysroot without sudo when the kernel allows unprivileged user namespaces
-(`/proc/sys/kernel/unprivileged_userns_clone=1`). The rootfs defaults to
-`data/sysroot/rootfs` unless overridden.
-
-Preflight host checks (reports missing kernel/sysctl/LSM prerequisites):
+The single executable (or `crystal run src/main.cr`) dispatches subcommands by
+argv[0] or the first argument. Symlinks in `bin/` mirror the subcommands.
 
 ```bash
-crystal run src/sysroot_namespace_check_main.cr --
-```
+# Build the sysroot tarball
+shards build
+./bin/sysroot-builder --output sysroot.tar.gz
 
-```bash
-crystal run src/sysroot_namespace_main.cr -- --rootfs data/sysroot/rootfs -- crystal run /usr/local/bin/sysroot_runner_main.cr
+# Enter the sysroot namespace
+./bin/sysroot-namespace --rootfs data/sysroot/rootfs -- /bin/sh
+
+# Run the build plan inside the chroot (from inside the rootfs)
+crystal run /usr/local/bin/main.cr -- sysroot-runner
 ```
 
 This is intended for clean, sudo-less development workflows, not as a security boundary. The

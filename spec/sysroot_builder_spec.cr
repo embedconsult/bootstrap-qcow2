@@ -177,7 +177,7 @@ describe Bootstrap::SysrootBuilder do
       builder.fake_tarball = tarball
       rootfs = builder.prepare_rootfs
       File.exists?(rootfs / "workspace").should be_true
-      File.exists?(rootfs / "usr/local/bin/sysroot_runner_main.cr").should be_true
+      File.exists?(rootfs / "usr/local/bin/main.cr").should be_true
     end
   end
 
@@ -278,7 +278,7 @@ describe Bootstrap::SysrootBuilder do
       builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
       builder.fake_tarball = tarball
       builder.prepare_rootfs
-      File.exists?(builder.rootfs_dir / "usr/local/bin/sysroot_runner_main.cr").should be_true
+      File.exists?(builder.rootfs_dir / "usr/local/bin/main.cr").should be_true
     end
   end
 end

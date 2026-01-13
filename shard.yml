@@ -6,7 +6,7 @@ authors:
 
 targets:
   bootstrap-qcow2:
-    main: src/bootstrap-qcow2.cr
+    main: src/main.cr
 
 crystal: '>= 1.18.2'
 
