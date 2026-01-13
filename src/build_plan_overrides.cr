@@ -60,12 +60,10 @@ module Bootstrap
 
     private def apply_phase_packages(steps : Array(BuildStep), packages : Array(String)?) : Array(BuildStep)
       return steps unless packages
-      steps_by_name = steps.to_h { |step| {step.name, step} }
-      packages.map do |name|
-        step = steps_by_name[name]?
-        raise "Unknown package #{name} in overrides allowlist" unless step
-        step
-      end
+      allow = packages.to_set
+      missing = packages.reject { |name| steps.any? { |step| step.name == name } }
+      raise "Unknown package(s) #{missing.join(", ")} in overrides allowlist" unless missing.empty?
+      steps.select { |step| allow.includes?(step.name) }
     end
 
     private def apply_step(phase_name : String, step : BuildStep, overrides : Hash(String, StepOverride)?) : BuildStep
