@@ -9,6 +9,30 @@ module Bootstrap
   module GitHubCLI
     DEFAULT_BASE = "master"
 
+    # Abstraction over GitHub operations to enable unit tests without network access.
+    module Client
+      abstract def fetch_feedback(repo : String, pr_number : Int32, credentials_path : Path, per_page : Int32) : CodexUtils::PullRequestFeedback
+      abstract def create_comment(repo : String, pr_number : Int32, body : String, credentials_path : Path) : String
+      abstract def create_pr(repo : String, title : String, head : String, base : String, body : String, credentials_path : Path) : String
+    end
+
+    # Default GitHub client implemented via `CodexUtils`.
+    struct DefaultClient
+      include Client
+
+      def fetch_feedback(repo : String, pr_number : Int32, credentials_path : Path, per_page : Int32) : CodexUtils::PullRequestFeedback
+        CodexUtils.fetch_pull_request_feedback(repo, pr_number, credentials_path: credentials_path, per_page: per_page)
+      end
+
+      def create_comment(repo : String, pr_number : Int32, body : String, credentials_path : Path) : String
+        CodexUtils.create_issue_comment(repo, pr_number, body, credentials_path: credentials_path)
+      end
+
+      def create_pr(repo : String, title : String, head : String, base : String, body : String, credentials_path : Path) : String
+        CodexUtils.create_pull_request(repo, title, head, base, body, credentials_path: credentials_path)
+      end
+    end
+
     # Returns `owner/repo` when *url* is a GitHub remote URL.
     def self.repo_from_url?(url : String) : String?
       if match = url.match(/github\.com[:\/]([^\/]+)\/([^\/]+?)(?:\.git)?$/)
@@ -33,9 +57,7 @@ module Bootstrap
     end
 
     # Fetch PR feedback and print as JSON.
-    def self.run_pr_feedback(args : Array(String),
-                             io : IO = STDOUT,
-                             http_get : Proc(String, HTTP::Headers, HTTP::Client::Response)? = nil) : Int32
+    def self.run_pr_feedback(args : Array(String), client : Client = DefaultClient.new, io : IO = STDOUT) : Int32
       repo = infer_repo
       pr_number : Int32? = nil
       pretty = false
@@ -43,7 +65,7 @@ module Bootstrap
       credentials_path = File.exists?("/work/.git-credentials") ? Path["/work/.git-credentials"] : Path["../.git-credentials"]
       per_page = 100
 
-      parser, _remaining, help = CLI.parse(args, "Usage: bq2 github-pr-feedback [options]") do |p|
+      parser, _remaining, help = CLI.parse(args, "Usage: bootstrap-qcow2 github-pr-feedback [options]") do |p|
         p.on("--repo REPO", "GitHub repo (owner/name). Defaults from repo/env when possible") { |val| repo = val }
         p.on("--pr NUM", "Pull request number") { |val| pr_number = val.to_i }
         p.on("--credentials PATH", "GitHub credentials file (default: #{credentials_path})") { |val| credentials_path = Path[val] }
@@ -57,13 +79,7 @@ module Bootstrap
       raise "--repo is required (could not infer it)" unless repo
       repo_name = repo.not_nil!
 
-      feedback = CodexUtils.fetch_pull_request_feedback(
-        repo_name,
-        pr_number.not_nil!,
-        credentials_path: credentials_path,
-        per_page: per_page,
-        http_get: http_get
-      )
+      feedback = client.fetch_feedback(repo_name, pr_number.not_nil!, credentials_path, per_page)
       json = pretty ? feedback.to_pretty_json : feedback.to_json
       if output_path = out_path
         File.write(output_path, json)
@@ -74,16 +90,14 @@ module Bootstrap
     end
 
     # Post a PR thread comment (issue comment).
-    def self.run_pr_comment(args : Array(String),
-                            io : IO = STDOUT,
-                            http_post : Proc(String, HTTP::Headers, String, HTTP::Client::Response)? = nil) : Int32
+    def self.run_pr_comment(args : Array(String), client : Client = DefaultClient.new, io : IO = STDOUT) : Int32
       repo = infer_repo
       pr_number : Int32? = nil
       body : String? = nil
       body_file : String? = nil
       credentials_path = File.exists?("/work/.git-credentials") ? Path["/work/.git-credentials"] : Path["../.git-credentials"]
 
-      parser, _remaining, help = CLI.parse(args, "Usage: bq2 github-pr-comment [options]") do |p|
+      parser, _remaining, help = CLI.parse(args, "Usage: bootstrap-qcow2 github-pr-comment [options]") do |p|
         p.on("--repo REPO", "GitHub repo (owner/name). Defaults from repo/env when possible") { |val| repo = val }
         p.on("--pr NUM", "Pull request number") { |val| pr_number = val.to_i }
         p.on("--body TEXT", "Comment body") { |val| body = val }
@@ -101,21 +115,13 @@ module Bootstrap
       end
       raise "Missing comment body (use --body or --body-file)" unless body
 
-      url = CodexUtils.create_issue_comment(
-        repo_name,
-        pr_number.not_nil!,
-        body.not_nil!,
-        credentials_path: credentials_path,
-        http_post: http_post
-      )
+      url = client.create_comment(repo_name, pr_number.not_nil!, body.not_nil!, credentials_path)
       io.puts url unless url.empty?
       0
     end
 
     # Create a pull request on GitHub.
-    def self.run_pr_create(args : Array(String),
-                           io : IO = STDOUT,
-                           http_post : Proc(String, HTTP::Headers, String, HTTP::Client::Response)? = nil) : Int32
+    def self.run_pr_create(args : Array(String), client : Client = DefaultClient.new, io : IO = STDOUT) : Int32
       repo = infer_repo
       title : String? = nil
       head : String? = nil
@@ -124,7 +130,7 @@ module Bootstrap
       body_file : String? = nil
       credentials_path = File.exists?("/work/.git-credentials") ? Path["/work/.git-credentials"] : Path["../.git-credentials"]
 
-      parser, _remaining, help = CLI.parse(args, "Usage: bq2 github-pr-create [options]") do |p|
+      parser, _remaining, help = CLI.parse(args, "Usage: bootstrap-qcow2 github-pr-create [options]") do |p|
         p.on("--repo REPO", "GitHub repo (owner/name). Defaults from repo/env when possible") { |val| repo = val }
         p.on("--title TITLE", "PR title") { |val| title = val }
         p.on("--head BRANCH", "Head branch (e.g. codex/my-branch)") { |val| head = val }
@@ -145,15 +151,7 @@ module Bootstrap
       end
       body ||= ""
 
-      url = CodexUtils.create_pull_request(
-        repo_name,
-        title.not_nil!,
-        head.not_nil!,
-        base,
-        body.not_nil!,
-        credentials_path: credentials_path,
-        http_post: http_post
-      )
+      url = client.create_pr(repo_name, title.not_nil!, head.not_nil!, base, body.not_nil!, credentials_path)
       io.puts url
       0
     end

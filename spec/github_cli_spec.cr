@@ -1,7 +1,28 @@
 require "./spec_helper"
 require "json"
 
+struct FakeGitHubClient
+  include Bootstrap::GitHubCLI::Client
+
+  def fetch_feedback(repo : String, pr_number : Int32, credentials_path : Path, per_page : Int32) : Bootstrap::CodexUtils::PullRequestFeedback
+    Bootstrap::CodexUtils::PullRequestFeedback.new(
+      review_comments: [Bootstrap::CodexUtils::Comment.new(author: repo, body: pr_number.to_s)],
+      issue_comments: [] of Bootstrap::CodexUtils::Comment,
+      reviews: [] of Bootstrap::CodexUtils::Comment,
+    )
+  end
+
+  def create_comment(repo : String, pr_number : Int32, body : String, credentials_path : Path) : String
+    "#{repo}/#{pr_number}:#{body}"
+  end
+
+  def create_pr(repo : String, title : String, head : String, base : String, body : String, credentials_path : Path) : String
+    "#{repo}/#{head}->#{base}:#{title}"
+  end
+end
+
 describe Bootstrap::GitHubCLI do
+  # Specs below
   it "parses repo from common git remote url formats" do
     Bootstrap::GitHubCLI.repo_from_url?("https://github.com/embedconsult/bootstrap-qcow2.git").should eq "embedconsult/bootstrap-qcow2"
     Bootstrap::GitHubCLI.repo_from_url?("git@github.com:embedconsult/bootstrap-qcow2.git").should eq "embedconsult/bootstrap-qcow2"
@@ -43,95 +64,50 @@ describe Bootstrap::GitHubCLI do
   end
 
   it "runs github-pr-feedback and prints JSON" do
-    token = "github_pat_TEST"
-    credentials = "https://x-access-token:#{token}@github.com"
-    file = File.tempfile("git-credentials")
+    previous = ENV["GITHUB_REPOSITORY"]?
     begin
-      file.print(credentials)
-      file.flush
-
-      get_stub = ->(url : String, headers : HTTP::Headers) do
-        case url
-        when "https://api.github.com/repos/org/repo/pulls/1/comments?per_page=100&page=1"
-          HTTP::Client::Response.new(200, [{"user" => {"login" => "reviewer"}, "body" => "inline", "path" => "src/main.cr"}].to_json)
-        when "https://api.github.com/repos/org/repo/issues/1/comments?per_page=100&page=1"
-          HTTP::Client::Response.new(200, [{"user" => {"login" => "commenter"}, "body" => "thread"}].to_json)
-        when "https://api.github.com/repos/org/repo/pulls/1/reviews?per_page=100&page=1"
-          HTTP::Client::Response.new(200, [{"user" => {"login" => "approver"}, "body" => "LGTM", "state" => "APPROVED"}].to_json)
-        else
-          HTTP::Client::Response.new(404, {"error" => "unexpected url #{url}"}.to_json)
-        end
-      end
-
+      ENV["GITHUB_REPOSITORY"] = "org/repo"
       output = IO::Memory.new
-      Bootstrap::GitHubCLI.run_pr_feedback(
-        ["--repo", "org/repo", "--pr", "1", "--credentials", file.path, "--pretty"],
-        io: output,
-        http_get: get_stub
-      ).should eq 0
-
-      parsed = JSON.parse(output.to_s)
-      parsed["review_comments"].as_a.first["author"].as_s.should eq "reviewer"
+      Bootstrap::GitHubCLI.run_pr_feedback(["--pr", "1"], client: FakeGitHubClient.new, io: output).should eq 0
+      JSON.parse(output.to_s)["review_comments"].as_a.first["author"].as_s.should eq "org/repo"
     ensure
-      file.close
+      if previous
+        ENV["GITHUB_REPOSITORY"] = previous
+      else
+        ENV.delete("GITHUB_REPOSITORY")
+      end
     end
   end
 
   it "runs github-pr-comment and prints the comment url" do
-    token = "github_pat_TEST"
-    credentials = "https://x-access-token:#{token}@github.com"
-    file = File.tempfile("git-credentials")
+    previous = ENV["GITHUB_REPOSITORY"]?
     begin
-      file.print(credentials)
-      file.flush
-
-      post_stub = ->(url : String, headers : HTTP::Headers, body : String) do
-        url.should eq "https://api.github.com/repos/org/repo/issues/2/comments"
-        headers["Authorization"].should eq "token #{token}"
-        JSON.parse(body)["body"].as_s.should eq "hi"
-        HTTP::Client::Response.new(201, {"html_url" => "https://example.com/comment"}.to_json)
-      end
-
+      ENV["GITHUB_REPOSITORY"] = "org/repo"
       output = IO::Memory.new
-      Bootstrap::GitHubCLI.run_pr_comment(
-        ["--repo", "org/repo", "--pr", "2", "--body", "hi", "--credentials", file.path],
-        io: output,
-        http_post: post_stub
-      ).should eq 0
-
-      output.to_s.lines.last?.try(&.chomp).should eq "https://example.com/comment"
+      Bootstrap::GitHubCLI.run_pr_comment(["--pr", "2", "--body", "hi"], client: FakeGitHubClient.new, io: output).should eq 0
+      output.to_s.lines.last?.try(&.chomp).should eq "org/repo/2:hi"
     ensure
-      file.close
+      if previous
+        ENV["GITHUB_REPOSITORY"] = previous
+      else
+        ENV.delete("GITHUB_REPOSITORY")
+      end
     end
   end
 
   it "runs github-pr-create and prints the pr url" do
-    token = "github_pat_TEST"
-    credentials = "https://x-access-token:#{token}@github.com"
-    file = File.tempfile("git-credentials")
+    previous = ENV["GITHUB_REPOSITORY"]?
     begin
-      file.print(credentials)
-      file.flush
-
-      post_stub = ->(url : String, headers : HTTP::Headers, body : String) do
-        url.should eq "https://api.github.com/repos/org/repo/pulls"
-        headers["Authorization"].should eq "token #{token}"
-        JSON.parse(body)["title"].as_s.should eq "t"
-        JSON.parse(body)["head"].as_s.should eq "h"
-        JSON.parse(body)["base"].as_s.should eq "master"
-        HTTP::Client::Response.new(201, {"html_url" => "https://example.com/pr"}.to_json)
-      end
-
+      ENV["GITHUB_REPOSITORY"] = "org/repo"
       output = IO::Memory.new
-      Bootstrap::GitHubCLI.run_pr_create(
-        ["--repo", "org/repo", "--title", "t", "--head", "h", "--credentials", file.path],
-        io: output,
-        http_post: post_stub
-      ).should eq 0
-
-      output.to_s.lines.last?.try(&.chomp).should eq "https://example.com/pr"
+      Bootstrap::GitHubCLI.run_pr_create(["--title", "t", "--head", "h"], client: FakeGitHubClient.new, io: output).should eq 0
+      output.to_s.lines.last?.try(&.chomp).should eq "org/repo/h->master:t"
     ensure
-      file.close
+      if previous
+        ENV["GITHUB_REPOSITORY"] = previous
+      else
+        ENV.delete("GITHUB_REPOSITORY")
+      end
     end
   end
 end
