@@ -31,8 +31,6 @@ jobs:
       - name: Build minimal chroot and exercise it
         run: |
           shards build
-          shards build
-          ./bin/bq2 --install
           ./bin/sysroot-builder --workspace /tmp/sysroot-ci --output /tmp/sysroot.tar.gz --arch x86_64 --branch v3.23 --base-version 3.23.2
           mkdir -p /tmp/sysroot
           tar -xzf /tmp/sysroot.tar.gz -C /tmp/sysroot
