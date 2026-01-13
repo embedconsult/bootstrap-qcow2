@@ -37,6 +37,16 @@ class StubBuilder < Bootstrap::SysrootBuilder
   end
 end
 
+def socket_blocked_reason
+  server = TCPServer.new("127.0.0.1", 0)
+  server.close
+  nil
+rescue ex : Socket::Error
+  "socket creation is blocked (#{ex.message})"
+end
+
+SOCKET_BLOCKED_REASON = socket_blocked_reason
+
 def with_http_server(body : String, &)
   server = HTTP::Server.new do |context|
     context.response.content_type = "application/octet-stream"
@@ -98,11 +108,16 @@ describe Bootstrap::SysrootBuilder do
     end
   end
 
-  it "fetches remote checksums" do
-    with_http_server("1234 demo.tar") do |url|
-      pkg = Bootstrap::SysrootBuilder::PackageSpec.new("demo", "1", URI.parse("https://example.com/demo.tar"), checksum_url: URI.parse(url))
-      builder = Bootstrap::SysrootBuilder.new(Path["/tmp/work"])
-      builder.fetch_remote_checksum(pkg).should eq "1234"
+  if reason = SOCKET_BLOCKED_REASON
+    pending "fetches remote checksums (#{reason})" do
+    end
+  else
+    it "fetches remote checksums" do
+      with_http_server("1234 demo.tar") do |url|
+        pkg = Bootstrap::SysrootBuilder::PackageSpec.new("demo", "1", URI.parse("https://example.com/demo.tar"), checksum_url: URI.parse(url))
+        builder = Bootstrap::SysrootBuilder.new(Path["/tmp/work"])
+        builder.fetch_remote_checksum(pkg).should eq "1234"
+      end
     end
   end
 
@@ -117,15 +132,20 @@ describe Bootstrap::SysrootBuilder do
     end
   end
 
-  it "downloads and verifies using HTTP" do
-    with_tempdir do |dir|
-      with_http_server("payload") do |url|
-        sha = Digest::SHA256.hexdigest("payload")
-        pkg = Bootstrap::SysrootBuilder::PackageSpec.new("demo", "1", URI.parse(url), sha256: sha)
-        builder = StubBuilder.new(dir)
-        builder.override_packages = [pkg]
-        downloaded = builder.download_and_verify(pkg)
-        File.exists?(downloaded).should be_true
+  if reason = SOCKET_BLOCKED_REASON
+    pending "downloads and verifies using HTTP (#{reason})" do
+    end
+  else
+    it "downloads and verifies using HTTP" do
+      with_tempdir do |dir|
+        with_http_server("payload") do |url|
+          sha = Digest::SHA256.hexdigest("payload")
+          pkg = Bootstrap::SysrootBuilder::PackageSpec.new("demo", "1", URI.parse(url), sha256: sha)
+          builder = StubBuilder.new(dir)
+          builder.override_packages = [pkg]
+          downloaded = builder.download_and_verify(pkg)
+          File.exists?(downloaded).should be_true
+        end
       end
     end
   end
