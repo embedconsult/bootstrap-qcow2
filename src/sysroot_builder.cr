@@ -381,7 +381,9 @@ module Bootstrap
     def build_plan : Array(BuildStep)
       sysroot_prefix = "/opt/sysroot"
       workdir = "/workspace"
-      packages.map do |pkg|
+      # The bootstrap-qcow2 source is staged for offline rebuilds but should not
+      # be built as part of the sysroot plan.
+      packages.reject(&.name.==("bootstrap-qcow2")).map do |pkg|
         build_directory = pkg.build_directory || strip_archive_extension(pkg.filename)
         build_root = File.join(workdir, build_directory)
         BuildStep.new(pkg.name, pkg.strategy, build_root, pkg.configure_flags, pkg.patches, sysroot_prefix)
