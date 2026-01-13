@@ -43,6 +43,7 @@ These instructions apply to the entire repository unless overridden by a nested 
 - PR summaries should call out: target architectures, EFI/boot impacts, new dependencies (if any), and how the change advances self-hosting or Crystal-only tooling.
 - Ensure PR summaries cover all changes made on the branch, not just the latest commit.
 - For GitHub PR automation, prefer using the in-repo helper `Bootstrap::CodexUtils.create_pull_request(repo, title, head, base, body, credentials_path = "../.git-credentials")`. It reads the x-access-token from `.git-credentials` and POSTs to the GitHub REST API; inject a custom HTTP sender when testing. Avoid external CLI dependencies.
+- Default PR base is `master` unless explicitly requested otherwise; set the head branch accordingly before calling `create_pull_request`.
 
 ## Rootless userns + pivot_root procedure
 

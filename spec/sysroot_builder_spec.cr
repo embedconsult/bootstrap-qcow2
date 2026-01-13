@@ -93,6 +93,11 @@ describe Bootstrap::SysrootBuilder do
     names.should contain("llvm-project")
   end
 
+  it "lists build phase names" do
+    phases = Bootstrap::SysrootBuilder.new.phase_specs.map(&.name)
+    phases.should eq ["sysroot-from-alpine", "rootfs-from-sysroot"]
+  end
+
   it "computes hashes" do
     with_tempdir do |dir|
       path = dir / "data.txt"
@@ -157,14 +162,36 @@ describe Bootstrap::SysrootBuilder do
   it "builds a plan for each package" do
     with_tempdir do |dir|
       pkg = Bootstrap::SysrootBuilder::PackageSpec.new("pkg", "1.0", URI.parse("https://example.com/pkg-1.0.tar.gz"), configure_flags: ["--foo"])
+      musl = Bootstrap::SysrootBuilder::PackageSpec.new("musl", "1.0", URI.parse("https://example.com/musl-1.0.tar.gz"))
+      busybox = Bootstrap::SysrootBuilder::PackageSpec.new("busybox", "1.0", URI.parse("https://example.com/busybox-1.0.tar.gz"), strategy: "busybox")
       builder = StubBuilder.new(dir)
-      builder.override_packages = [pkg]
+      builder.override_packages = [pkg, musl, busybox]
       plan = builder.build_plan
-      plan.size.should eq 1
-      step = plan.first
-      step.name.should eq "pkg"
-      step.configure_flags.should eq ["--foo"]
-      step.sysroot_prefix.should eq "/opt/sysroot"
+      plan.phases.map(&.name).should eq ["sysroot-from-alpine", "rootfs-from-sysroot"]
+      sysroot_phase = plan.phases.first
+      sysroot_phase.install_prefix.should eq "/opt/sysroot"
+      sysroot_phase.destdir.should be_nil
+      sysroot_phase.steps.size.should eq 3
+      sysroot_phase.steps.find(&.name.==("pkg")).not_nil!.configure_flags.should eq ["--foo"]
+
+      rootfs_phase = plan.phases.last
+      rootfs_phase.install_prefix.should eq "/usr"
+      rootfs_phase.destdir.should eq "/workspace/rootfs"
+      rootfs_phase.steps.map(&.name).should eq ["musl", "busybox"]
+    end
+  end
+
+  it "writes a phased build plan into the chroot var/lib directory" do
+    with_tempdir do |dir|
+      builder = StubBuilder.new(dir)
+      builder.override_packages = [
+        Bootstrap::SysrootBuilder::PackageSpec.new("musl", "1.0", URI.parse("https://example.com/musl.tar.gz")),
+        Bootstrap::SysrootBuilder::PackageSpec.new("busybox", "1.0", URI.parse("https://example.com/busybox.tar.gz"), strategy: "busybox"),
+      ]
+      plan_path = builder.write_plan
+      File.exists?(plan_path).should be_true
+      plan = Bootstrap::BuildPlan.from_json(File.read(plan_path))
+      plan.phases.map(&.name).should eq ["sysroot-from-alpine", "rootfs-from-sysroot"]
     end
   end
 
