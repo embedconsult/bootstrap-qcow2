@@ -30,6 +30,7 @@ These instructions apply to the entire repository unless overridden by a nested 
 
 ## Testing and quality
 - Run `crystal tool format` on modified Crystal files.
+- Run `shards build` to ensure `bq2` builds and symlink postinstall completes before commits/PRs.
 - Always run `crystal spec` to verify no test failures.
 - Tests that cannot pass in the current environment should utilize `pending`, but this is never an excuse for not writing tests that should pass when the environment allows.
 - Add or update automated checks (Crystal specs or integration exercises) for all public methods and evaluate any changes in build logic, boot flow, or image layout.

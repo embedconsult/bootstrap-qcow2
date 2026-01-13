@@ -21,52 +21,48 @@ During the interim, reliance on externally-authored and compiled tools (for exam
 
 ## Usage
 
-### `src/sysroot_builder_main.cr`
+### Build the CLI and sysroot tarball
 
-Utilize an existing rootfs tarball (download if necessary) and add sources to be utilized in building a new rootfs.
+```bash
+shards build                         # builds bin/bq2 and subcommand symlinks
+./bin/sysroot-builder --output sysroot.tar.gz
+```
 
-The default workspace is: `data/sysroot`
-
-The workspace is made up of:
+Pass `--skip-sources` to omit cached source archives when you only need the base rootfs and coordinator. The default workspace is `data/sysroot`:
 * rootfs - the output rootfs
 * cache - checksums for the various downloads
 * sources - downloaded tarballs
-
-Run the helper entrypoint (use `--no-tarball` to skip creating the tarball):
-
-```bash
-crystal run src/sysroot_builder_main.cr -- --output sysroot.tar.gz
-```
-Pass `--skip-sources` to omit cached source archives when you only need the base rootfs and coordinator.
 
 The rootfs output includes:
 - Alpine minirootfs 3.23.2 (aarch64 by default)
 - Cached source archives for core packages (musl, busybox, clang/LLVM, etc.)
 - A serialized build plan consumed by the coordinator
-- Coordinator entrypoints at `/usr/local/bin/sysroot_runner_main.cr`
+- bootstrap-qcow2 source staged to `/workspace/bootstrap-qcow2` (downloaded as a source package)
 
-### `src/sysroot_runner_main.cr`
+### Busybox-style CLI (`bq2`)
 
-Perform the source build operations inside the new rootfs.
-
-```bash
-crystal run /usr/local/bin/sysroot_runner_main.cr
-```
-
-### `src/sysroot_namespace_main.cr`
-
-Enter the sysroot without sudo when the kernel allows unprivileged user namespaces
-(`/proc/sys/kernel/unprivileged_userns_clone=1`). The rootfs defaults to
-`data/sysroot/rootfs` unless overridden.
-
-Preflight host checks (reports missing kernel/sysctl/LSM prerequisites):
+The single executable (`bin/bq2`) dispatches subcommands by argv[0] or the first argument. Symlinks in `bin/` mirror the subcommands.
 
 ```bash
-crystal run src/sysroot_namespace_check_main.cr --
-```
+shards build
 
-```bash
-crystal run src/sysroot_namespace_main.cr -- --rootfs data/sysroot/rootfs -- crystal run /usr/local/bin/sysroot_runner_main.cr
+# Build the sysroot tarball
+./bin/sysroot-builder --output sysroot.tar.gz
+# Or via the main binary:
+./bin/bq2 sysroot-builder --output sysroot.tar.gz
+
+# Enter the sysroot namespace
+./bin/sysroot-namespace --rootfs data/sysroot/rootfs -- /bin/sh
+# Or:
+./bin/bq2 sysroot-namespace --rootfs data/sysroot/rootfs -- /bin/sh
+
+# Inside the sysroot, build the CLI from staged source and run the plan
+cd /workspace/bootstrap-qcow2
+crystal build src/main.cr -o /usr/local/bin/bq2
+/usr/local/bin/bq2 sysroot-runner
+
+# Default (no args): build the sysroot, set up DNS, enter with /bin/sh
+./bin/bq2
 ```
 
 This is intended for clean, sudo-less development workflows, not as a security boundary. The
