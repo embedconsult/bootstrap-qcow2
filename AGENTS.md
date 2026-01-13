@@ -42,6 +42,7 @@ These instructions apply to the entire repository unless overridden by a nested 
 
 Goal: iterate on sysroot/rootfs build issues inside the running container, then back-port working changes into `src/sysroot_builder.cr` so builds remain reproducible.
 
+- Start from a login shell (`bash --login`) when possible; if Crystal cache permissions fail, prefer `CRYSTAL_CACHE_DIR=/tmp/crystal_cache`.
 - Host build: `shards build` then `./bin/bq2 --install`.
 - Generate a bootstrap rootfs (includes `/var/lib/sysroot-build-plan.json`): `./bin/sysroot-builder --no-tarball`.
 - Enter rootfs for iteration: `./bin/sysroot-namespace --rootfs data/sysroot/rootfs -- /bin/sh`.
