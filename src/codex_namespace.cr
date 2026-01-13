@@ -15,10 +15,15 @@ module Bootstrap
       raise "Empty command" if command.empty?
 
       extra_binds = [] of Tuple(Path, Path)
-      extra_binds << {Path["codex/work"].expand, Path["work"]} if bind_codex_work
+      if bind_codex_work
+        host_work = Path["codex/work"].expand
+        FileUtils.mkdir_p(host_work)
+        extra_binds << {host_work, Path["work"]}
+      end
 
       SysrootNamespace.enter_rootfs(rootfs.to_s, extra_binds: extra_binds)
-      Dir.cd("/work")
+      workdir = bind_codex_work ? Path["/work"] : Path["/"]
+      Dir.cd(Dir.exists?(workdir) ? workdir : Path["/"])
 
       if alpine_setup
         status = Process.run("apk", ["add", "nodejs-lts", "npm", "bash"], output: STDOUT, error: STDERR)
