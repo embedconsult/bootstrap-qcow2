@@ -1,6 +1,6 @@
 /docs/
 /lib/
-/bin/bootstrap-qcow2
+/bin/bq2
 /bin/*.dwarf
 /.shards/
 *.dwarf

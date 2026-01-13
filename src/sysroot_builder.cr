@@ -355,7 +355,7 @@ module Bootstrap
       FileUtils.mkdir_p(rootfs_dir / "workspace")
       FileUtils.mkdir_p(rootfs_dir / "var/lib")
       stage_sources if include_sources
-      install_coordinator_source
+      stage_bootstrap_source
       rootfs_dir
     end
 
@@ -368,28 +368,47 @@ module Bootstrap
       end
     end
 
-    # Copy the coordinator source files into the chroot so they can be executed
-    # with `crystal run` during a rebuild.
-    def install_coordinator_source : Path
-      coordinator_dir = rootfs_dir / "usr/local/bin"
-      FileUtils.mkdir_p(coordinator_dir)
-      coordinator_support_files.each do |source|
-        FileUtils.cp(source, coordinator_dir / File.basename(source))
+    # Stage the bootstrap-qcow2 source into /workspace/bootstrap-qcow2 so it can
+    # be built inside the namespace. Use the host checkout when available,
+    # otherwise download from GitHub similar to other source packages.
+    def stage_bootstrap_source : Path
+      workspace_path = rootfs_dir / "workspace"
+      dest = workspace_path / "bootstrap-qcow2"
+      FileUtils.rm_rf(dest)
+      FileUtils.mkdir_p(workspace_path)
+
+      host_checkout = Path["/work/bootstrap-qcow2"]
+      if Dir.exists?(host_checkout)
+        Log.info { "Staging bootstrap-qcow2 from host checkout at #{host_checkout}" }
+        copy_bootstrap_checkout(host_checkout, dest)
+        return dest
       end
-      coordinator_dir / "main.cr"
+
+      pkg = bootstrap_source_spec
+      tarball = download_and_verify(pkg)
+      temp_extract = workspace_path / ".bootstrap-src"
+      FileUtils.rm_rf(temp_extract)
+      FileUtils.mkdir_p(temp_extract)
+      extract_tarball(tarball, temp_extract, @preserve_ownership_for_sources, force_system_tar: @use_system_tar_for_sources)
+      extracted = Dir.children(temp_extract).map { |entry| temp_extract / entry }.find { |p| Dir.exists?(p) } || temp_extract
+      FileUtils.mv(extracted, dest)
+      FileUtils.rm_rf(temp_extract) unless extracted == temp_extract
+      dest
     end
 
-    # All coordinator artifacts that should be staged into the chroot.
-    def coordinator_support_files : Array(Path)
-      [
-        Path.new(__DIR__).join("bootstrap-qcow2.cr"),
-        Path.new(__DIR__).join("cli.cr"),
-        Path.new(__DIR__).join("main.cr"),
-        Path.new(__DIR__).join("sysroot_builder.cr"),
-        Path.new(__DIR__).join("sysroot_namespace.cr"),
-        Path.new(__DIR__).join("sysroot_runner_lib.cr"),
-        Path.new(__DIR__).join("codex_namespace.cr"),
-      ]
+    private def copy_bootstrap_checkout(source : Path, dest : Path)
+      FileUtils.mkdir_p(dest)
+      skip = {".git", ".cache", ".crystal", "bin", "data", "lib"}
+      Dir.children(source).each do |entry|
+        next if skip.includes?(entry)
+        FileUtils.cp_r(source / entry, dest / entry)
+      end
+    end
+
+    private def bootstrap_source_spec : PackageSpec
+      branch = ENV["BQ2_SOURCE_BRANCH"]? || "master"
+      url = URI.parse("https://github.com/embedconsult/bootstrap-qcow2/archive/refs/heads/#{branch}.tar.gz")
+      PackageSpec.new("bootstrap-qcow2", branch, url)
     end
 
     # Construct a build plan that:
