@@ -212,6 +212,18 @@ describe Bootstrap::SysrootRunner do
     runner.calls.first[:name].should eq "b"
   end
 
+  it "raises when any requested package filter is missing" do
+    steps = [Bootstrap::BuildStep.new(name: "a", strategy: "autotools", workdir: "/a", configure_flags: [] of String, patches: [] of String)]
+    plan = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(name: "one", description: "a", workspace: "/workspace", environment: "test", install_prefix: "/opt/sysroot", steps: steps),
+    ])
+
+    runner = RecordingRunner.new
+    expect_raises(Exception, /not found/) do
+      Bootstrap::SysrootRunner.run_plan(plan, runner, packages: ["a", "missing"], report_dir: nil)
+    end
+  end
+
   it "applies overrides from a file when requested" do
     steps = [Bootstrap::BuildStep.new(name: "pkg", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
     plan = Bootstrap::BuildPlan.new([

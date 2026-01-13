@@ -2,6 +2,7 @@ require "json"
 require "log"
 require "file_utils"
 require "process"
+require "set"
 require "time"
 require "./build_plan"
 require "./build_plan_overrides"
@@ -264,6 +265,15 @@ module Bootstrap
     end
 
     private def self.filter_phases_by_packages(phases : Array(BuildPhase), packages : Array(String)) : Array(BuildPhase)
+      matched = Set(String).new
+      phases.each do |phase|
+        phase.steps.each do |step|
+          matched << step.name if packages.includes?(step.name)
+        end
+      end
+      missing = packages.uniq.reject { |name| matched.includes?(name) }
+      raise "Requested package(s) not found in selected phases: #{missing.join(", ")}" unless missing.empty?
+
       selected = phases.compact_map do |phase|
         steps = phase.steps.select { |step| packages.includes?(step.name) }
         next nil if steps.empty?
