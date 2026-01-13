@@ -60,6 +60,9 @@ shards build
 cd /workspace/bootstrap-qcow2
 crystal build src/main.cr -o /usr/local/bin/bq2
 /usr/local/bin/bq2 sysroot-runner
+
+# Default (no args): build the sysroot, set up DNS, enter with /bin/sh
+./bin/bq2
 ```
 
 This is intended for clean, sudo-less development workflows, not as a security boundary. The

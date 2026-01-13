@@ -11,6 +11,7 @@ module Bootstrap
   # or by providing the subcommand as the first argument.
   module Main
     COMMANDS = {
+      "default"                 => ->(args : Array(String)) { run_default(args) },
       "sysroot-builder"         => ->(args : Array(String)) { run_sysroot_builder(args) },
       "sysroot-namespace"       => ->(args : Array(String)) { run_sysroot_namespace(args) },
       "sysroot-namespace-check" => ->(args : Array(String)) { run_sysroot_namespace_check(args) },
@@ -20,7 +21,7 @@ module Bootstrap
     }
 
     def self.run(argv = ARGV)
-      command_name, args = CLI.dispatch(argv, COMMANDS.keys)
+      command_name, args = CLI.dispatch(argv, COMMANDS.keys, "default")
       handler = COMMANDS[command_name]?
       unless handler
         STDERR.puts "Unknown command #{command_name}"
@@ -33,6 +34,7 @@ module Bootstrap
     def self.run_help(_args, exit_code : Int32 = 0) : Int32
       puts "Usage:"
       puts "  bootstrap-qcow2 <command> [options] [-- command args]\n\nCommands:"
+      puts "  (default)               Build sysroot and enter shell inside it"
       puts "  sysroot-builder         Build sysroot tarball or directory"
       puts "  sysroot-namespace       Enter a namespaced rootfs and exec a command"
       puts "  sysroot-namespace-check Check host namespace prerequisites"
@@ -203,3 +205,26 @@ end
 
 Log.setup_from_env
 Bootstrap::Main.run
+
+private def self.run_default(_args : Array(String)) : Int32
+  workspace = Path["data/sysroot"]
+  architecture = SysrootBuilder::DEFAULT_ARCH
+  branch = SysrootBuilder::DEFAULT_BRANCH
+  base_version = SysrootBuilder::DEFAULT_BASE_VERSION
+
+  Log.info { "Preparing sysroot at #{workspace} (arch=#{architecture} branch=#{branch} base=#{base_version})" }
+  builder = SysrootBuilder.new(
+    workspace: workspace,
+    architecture: architecture,
+    branch: branch,
+    base_version: base_version
+  )
+  chroot_path = builder.generate_chroot(include_sources: true)
+  Log.info { "Prepared chroot directory at #{chroot_path}" }
+
+  resolv_conf = chroot_path / "etc/resolv.conf"
+  File.write(resolv_conf, "nameserver 8.8.8.8\n")
+
+  SysrootNamespace.enter_rootfs(chroot_path.to_s)
+  Process.exec("/bin/sh")
+end
