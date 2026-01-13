@@ -1,0 +1,33 @@
+{
+  "phases": {
+    "sysroot-from-alpine": {
+      "env": {
+        "CC": "/opt/sysroot/bin/clang"
+      },
+      "steps": {
+        "musl": {
+          "configure_flags_add": [
+            "--disable-static"
+          ],
+          "env": {
+            "CFLAGS": "-O2"
+          }
+        }
+      }
+    },
+    "rootfs-from-sysroot": {
+      "packages": [
+        "musl",
+        "busybox"
+      ],
+      "steps": {
+        "busybox": {
+          "env": {
+            "CONFIG_EXTRA_CFLAGS": "-O2"
+          }
+        }
+      }
+    }
+  }
+}
+

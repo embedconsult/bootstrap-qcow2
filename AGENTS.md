@@ -38,6 +38,9 @@ These instructions apply to the entire repository unless overridden by a nested 
 - Document all methods. Use the documentation style of the Crystal's standard library API.
 - Always document the source of magic numbers. Use authoritative sources.
 
+## Codex Skills
+- Local skill for iterative sysroot/rootfs debugging: `codex/skills/bootstrap-qcow2-build-plan-iteration` (install by copying into `$CODEX_HOME/skills/bootstrap-qcow2-build-plan-iteration`).
+
 ## PR/commit expectations
 - Commit messages should summarize the behavioral change and the architecture(s) affected.
 - PR summaries should call out: target architectures, EFI/boot impacts, new dependencies (if any), and how the change advances self-hosting or Crystal-only tooling.
