@@ -203,25 +203,30 @@ module Bootstrap
 
     private def self.run_default(_args : Array(String)) : Int32
       workspace = Path["data/sysroot"]
-      architecture = SysrootBuilder::DEFAULT_ARCH
-      branch = SysrootBuilder::DEFAULT_BRANCH
-      base_version = SysrootBuilder::DEFAULT_BASE_VERSION
-
-      Log.info { "Preparing sysroot at #{workspace} (arch=#{architecture} branch=#{branch} base=#{base_version})" }
+      puts "Sysroot builder log level=#{Log.for("").level} (env-configured)"
       builder = SysrootBuilder.new(
         workspace: workspace,
-        architecture: architecture,
-        branch: branch,
-        base_version: base_version
+        architecture: SysrootBuilder::DEFAULT_ARCH,
+        branch: SysrootBuilder::DEFAULT_BRANCH,
+        base_version: SysrootBuilder::DEFAULT_BASE_VERSION,
+        use_system_tar_for_sources: false,
+        use_system_tar_for_rootfs: false,
+        preserve_ownership_for_sources: false,
+        preserve_ownership_for_rootfs: false,
       )
       chroot_path = builder.generate_chroot(include_sources: true)
-      Log.info { "Prepared chroot directory at #{chroot_path}" }
+      puts "Prepared chroot directory at #{chroot_path}"
 
-      resolv_conf = chroot_path / "etc/resolv.conf"
-      File.write(resolv_conf, "nameserver 8.8.8.8\n")
-
+      File.write(chroot_path / "/etc/resolv.conf", "nameserver 8.8.8.8", perm = 0o644)
       SysrootNamespace.enter_rootfs(chroot_path.to_s)
-      Process.exec("/bin/sh")
+      status = Process.run(
+        "apk",
+        ["add", "crystal", "clang", "lld"],
+        input: STDIN,
+        output: STDOUT,
+        error: STDERR,
+      )
+      status.exit_code
     end
   end
 end
