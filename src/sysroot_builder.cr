@@ -94,7 +94,7 @@ module Bootstrap
                    @use_system_tar_for_sources : Bool = false,
                    @use_system_tar_for_rootfs : Bool = false,
                    @preserve_ownership_for_sources : Bool = false,
-                   @preserve_ownership_for_rootfs : Bool = true,
+                   @preserve_ownership_for_rootfs : Bool = false,
                    @owner_uid : Int32? = nil,
                    @owner_gid : Int32? = nil)
       FileUtils.mkdir_p(@workspace)
