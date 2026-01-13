@@ -178,8 +178,14 @@ module Bootstrap
       1
     end
 
-    private def self.run_sysroot_runner(_args : Array(String)) : Int32
-      SysrootRunner.run_plan
+    private def self.run_sysroot_runner(args : Array(String)) : Int32
+      phase : String? = nil
+      parser, _remaining, help = CLI.parse(args, "Usage: bootstrap-qcow2 sysroot-runner [options]") do |p|
+        p.on("--phase NAME", "Select build phase to run (default: first phase; use 'all' for every phase)") { |name| phase = name }
+      end
+      return CLI.print_help(parser) if help
+
+      SysrootRunner.run_plan(phase: phase)
       0
     end
 

@@ -7,6 +7,7 @@ require "json"
 require "log"
 require "path"
 require "uri"
+require "./build_plan"
 
 module Bootstrap
   # SysrootBuilder prepares a chroot-able environment that can rebuild
@@ -66,26 +67,23 @@ module Bootstrap
       end
     end
 
-    struct BuildStep
-      include JSON::Serializable
-
-      getter name : String
-      getter strategy : String
-      getter workdir : String
-      getter configure_flags : Array(String)
-      getter patches : Array(String)
-      getter sysroot_prefix : String
-
-      # Create a serialized build step for the sysroot runner.
-      def initialize(@name : String, @strategy : String, @workdir : String, @configure_flags : Array(String), @patches : Array(String), @sysroot_prefix : String)
-      end
-    end
-
     getter architecture : String
     getter branch : String
     getter workspace : Path
     getter base_version : String
     @resolved_base_version : String?
+
+    record PhaseSpec,
+      name : String,
+      description : String,
+      workspace : String,
+      environment : String,
+      install_prefix : String,
+      destdir : String? = nil,
+      env : Hash(String, String) = {} of String => String,
+      package_allowlist : Array(String)? = nil,
+      configure_overrides : Hash(String, Array(String)) = {} of String => Array(String),
+      patch_overrides : Hash(String, Array(String)) = {} of String => Array(String)
 
     # Create a sysroot builder rooted at the workspace directory.
     def initialize(@workspace : Path = Path["data/sysroot"],
@@ -145,6 +143,13 @@ module Bootstrap
     # directory name when upstream archives use non-standard layouts.
     def packages : Array(PackageSpec)
       [
+        PackageSpec.new(
+          "bootstrap-qcow2",
+          bootstrap_source_branch,
+          URI.parse("https://github.com/embedconsult/bootstrap-qcow2/archive/refs/heads/#{bootstrap_source_branch}.tar.gz"),
+          build_directory: "bootstrap-qcow2",
+          strategy: "crystal",
+        ),
         PackageSpec.new("m4", DEFAULT_M4, URI.parse("https://ftp.gnu.org/gnu/m4/m4-#{DEFAULT_M4}.tar.gz")),
         PackageSpec.new("musl", DEFAULT_MUSL, URI.parse("https://musl.libc.org/releases/musl-#{DEFAULT_MUSL}.tar.gz")),
         PackageSpec.new("cmake", DEFAULT_CMAKE, URI.parse("https://github.com/Kitware/CMake/releases/download/v#{DEFAULT_CMAKE}/cmake-#{DEFAULT_CMAKE}.tar.gz"), strategy: "cmake"),
@@ -161,7 +166,6 @@ module Bootstrap
         PackageSpec.new("libxml2", DEFAULT_LIBXML2, URI.parse("https://github.com/GNOME/libxml2/archive/refs/tags/v#{DEFAULT_LIBXML2}.tar.gz")),
         PackageSpec.new("libyaml", DEFAULT_LIBYAML, URI.parse("https://pyyaml.org/download/libyaml/yaml-#{DEFAULT_LIBYAML}.tar.gz")),
         PackageSpec.new("libffi", DEFAULT_LIBFFI, URI.parse("https://github.com/libffi/libffi/releases/download/v#{DEFAULT_LIBFFI}/libffi-#{DEFAULT_LIBFFI}.tar.gz")),
-        PackageSpec.new("bootstrap-qcow2", bootstrap_source_branch, URI.parse("https://github.com/embedconsult/bootstrap-qcow2/archive/refs/heads/#{bootstrap_source_branch}.tar.gz"), build_directory: "bootstrap-qcow2"),
       ]
     end
 
@@ -373,27 +377,111 @@ module Bootstrap
       ENV["BQ2_SOURCE_BRANCH"]? || DEFAULT_BQ2_BRANCH
     end
 
-    # Construct a build plan that:
-    # * assumes sources are already extracted into /workspace
-    # * runs a strategy-specific configure/bootstrap step
-    # * builds and installs into /opt/sysroot
-    # This plan is serialized for the coordinator to replay inside the chroot.
-    def build_plan : Array(BuildStep)
+    # Define the multi-phase build in an LFS-inspired style:
+    # 1. build a complete sysroot from sources using Alpine's seed environment
+    # 2. validate the sysroot by using it as the toolchain when assembling a rootfs
+    def phase_specs : Array(PhaseSpec)
       sysroot_prefix = "/opt/sysroot"
-      workdir = "/workspace"
-      packages.map do |pkg|
-        build_directory = pkg.build_directory || strip_archive_extension(pkg.filename)
-        build_root = File.join(workdir, build_directory)
-        BuildStep.new(pkg.name, pkg.strategy, build_root, pkg.configure_flags, pkg.patches, sysroot_prefix)
-      end
+      rootfs_destdir = "/workspace/rootfs"
+      [
+        PhaseSpec.new(
+          name: "sysroot-from-alpine",
+          description: "Build a self-contained sysroot using Alpine-hosted tools.",
+          workspace: "/workspace",
+          environment: "alpine-seed",
+          install_prefix: sysroot_prefix,
+          destdir: nil,
+          env: {} of String => String,
+          package_allowlist: nil,
+        ),
+        PhaseSpec.new(
+          name: "rootfs-from-sysroot",
+          description: "Build a minimal rootfs using the newly built sysroot toolchain.",
+          workspace: "/workspace",
+          environment: "sysroot-toolchain",
+          install_prefix: "/usr",
+          destdir: rootfs_destdir,
+          env: rootfs_phase_env(sysroot_prefix),
+          package_allowlist: ["musl", "busybox"],
+        ),
+      ]
+    end
+
+    # Return environment variables for the rootfs validation phase.
+    #
+    # The rootfs phase is intended to use tools from the newly built sysroot,
+    # but still execute in the bootstrap environment.
+    private def rootfs_phase_env(sysroot_prefix : String) : Hash(String, String)
+      {
+        "PATH" => "#{sysroot_prefix}/bin:#{sysroot_prefix}/sbin:/usr/bin:/bin",
+        "CC"   => "#{sysroot_prefix}/bin/clang",
+        "CXX"  => "#{sysroot_prefix}/bin/clang++",
+      }
+    end
+
+    # Construct a phased build plan. The plan is serialized into the chroot so
+    # it can be replayed by the coordinator runner.
+    def build_plan : BuildPlan
+      phases = phase_specs.map { |spec| build_phase(spec) }
+      BuildPlan.new(phases)
     end
 
     # Persist the build plan JSON into the chroot at /var/lib/sysroot-build-plan.json.
-    def write_plan(plan : Array(BuildStep) = build_plan) : Path
+    def write_plan(plan : BuildPlan = build_plan) : Path
       plan_path = rootfs_dir / "var/lib/sysroot-build-plan.json"
       FileUtils.mkdir_p(plan_path.parent)
       File.write(plan_path, plan.to_json)
       plan_path
+    end
+
+    # Convert a PhaseSpec into a concrete BuildPhase with computed workdirs and
+    # per-package build steps.
+    private def build_phase(spec : PhaseSpec) : BuildPhase
+      phase_packages = select_packages(spec.package_allowlist)
+      steps = phase_packages.map do |pkg|
+        build_directory = pkg.build_directory || strip_archive_extension(pkg.filename)
+        build_root = File.join(spec.workspace, build_directory)
+        BuildStep.new(
+          name: pkg.name,
+          strategy: pkg.strategy,
+          workdir: build_root,
+          configure_flags: configure_flags_for(pkg, spec),
+          patches: patches_for(pkg, spec),
+        )
+      end
+      BuildPhase.new(
+        name: spec.name,
+        description: spec.description,
+        workspace: spec.workspace,
+        environment: spec.environment,
+        install_prefix: spec.install_prefix,
+        destdir: spec.destdir,
+        env: spec.env,
+        steps: steps,
+      )
+    end
+
+    # Selects the packages to include in a phase.
+    #
+    # When *allowlist* is nil, includes all packages. Otherwise, it maps each
+    # requested name to its PackageSpec and raises if any are missing.
+    private def select_packages(allowlist : Array(String)?) : Array(PackageSpec)
+      return packages unless allowlist
+      allowlist.map do |name|
+        pkg = packages.find { |candidate| candidate.name == name }
+        raise "Unknown package #{name} in build phase allowlist" unless pkg
+        pkg
+      end
+    end
+
+    # Returns the build flags for a package after applying phase-level overrides.
+    private def configure_flags_for(pkg : PackageSpec, spec : PhaseSpec) : Array(String)
+      pkg.configure_flags + (spec.configure_overrides[pkg.name]? || [] of String)
+    end
+
+    # Returns the patch list for a package after applying phase-level overrides.
+    private def patches_for(pkg : PackageSpec, spec : PhaseSpec) : Array(String)
+      pkg.patches + (spec.patch_overrides[pkg.name]? || [] of String)
     end
 
     # Produce a gzipped tarball of the prepared rootfs so it can be consumed by

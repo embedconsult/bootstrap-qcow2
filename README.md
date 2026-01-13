@@ -60,6 +60,10 @@ shards build
 cd /workspace/bootstrap-qcow2
 crystal build src/main.cr -o /usr/local/bin/bq2
 /usr/local/bin/bq2 sysroot-runner
+# Run the rootfs validation phase (installs into /workspace/rootfs)
+/usr/local/bin/bq2 sysroot-runner --phase rootfs-from-sysroot
+# Or run every phase in order:
+/usr/local/bin/bq2 sysroot-runner --phase all
 
 # Default (no args): build the sysroot, set up DNS, enter with /bin/sh
 ./bin/bq2
