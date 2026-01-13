@@ -200,31 +200,31 @@ module Bootstrap
       STDERR.puts "Namespace setup failed: #{ex.message}"
       1
     end
+
+    private def self.run_default(_args : Array(String)) : Int32
+      workspace = Path["data/sysroot"]
+      architecture = SysrootBuilder::DEFAULT_ARCH
+      branch = SysrootBuilder::DEFAULT_BRANCH
+      base_version = SysrootBuilder::DEFAULT_BASE_VERSION
+
+      Log.info { "Preparing sysroot at #{workspace} (arch=#{architecture} branch=#{branch} base=#{base_version})" }
+      builder = SysrootBuilder.new(
+        workspace: workspace,
+        architecture: architecture,
+        branch: branch,
+        base_version: base_version
+      )
+      chroot_path = builder.generate_chroot(include_sources: true)
+      Log.info { "Prepared chroot directory at #{chroot_path}" }
+
+      resolv_conf = chroot_path / "etc/resolv.conf"
+      File.write(resolv_conf, "nameserver 8.8.8.8\n")
+
+      SysrootNamespace.enter_rootfs(chroot_path.to_s)
+      Process.exec("/bin/sh")
+    end
   end
 end
 
 Log.setup_from_env
 Bootstrap::Main.run
-
-private def self.run_default(_args : Array(String)) : Int32
-  workspace = Path["data/sysroot"]
-  architecture = SysrootBuilder::DEFAULT_ARCH
-  branch = SysrootBuilder::DEFAULT_BRANCH
-  base_version = SysrootBuilder::DEFAULT_BASE_VERSION
-
-  Log.info { "Preparing sysroot at #{workspace} (arch=#{architecture} branch=#{branch} base=#{base_version})" }
-  builder = SysrootBuilder.new(
-    workspace: workspace,
-    architecture: architecture,
-    branch: branch,
-    base_version: base_version
-  )
-  chroot_path = builder.generate_chroot(include_sources: true)
-  Log.info { "Prepared chroot directory at #{chroot_path}" }
-
-  resolv_conf = chroot_path / "etc/resolv.conf"
-  File.write(resolv_conf, "nameserver 8.8.8.8\n")
-
-  SysrootNamespace.enter_rootfs(chroot_path.to_s)
-  Process.exec("/bin/sh")
-end
