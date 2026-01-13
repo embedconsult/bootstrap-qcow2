@@ -36,6 +36,10 @@ Source trees:
    - Encode the next hypothesis in `/var/lib/sysroot-build-overrides.json`.
    - Re-run `./bin/bq2 sysroot-runner` (avoid changing the plan JSON).
 
+## Codex session continuity
+
+When launching Codex via `bq2 codex-namespace`, the wrapper stores the most recent Codex session id in `/work/.codex-session-id` and will auto-resume it on the next `bq2 codex-namespace` run.
+
 ## Back-annotate after a successful round
 
 When a full phase (or full end-to-end run) succeeds with the overrides in place:

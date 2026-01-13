@@ -55,7 +55,7 @@ See `codex/skills/bootstrap-qcow2-build-plan-iteration/SKILL.md` for Codex-orien
      - Iteration state/bookmark: `/var/lib/sysroot-build-state.json` (host path: `data/sysroot/rootfs/var/lib/sysroot-build-state.json`)
 4. Enter the rootfs:
    - Manual shell: `./bin/sysroot-namespace --rootfs data/sysroot/rootfs --bind=/work:/work -- /bin/sh`
-   - Codex-assisted iteration: `./bin/bq2 codex-namespace` (binds host `/work` into `/work` by default; add binds via `--bind=SRC:DST`).
+   - Codex-assisted iteration: `./bin/bq2 codex-namespace` (binds host `/work` into `/work` by default; saves/resumes the last Codex session via `/work/.codex-session-id`; add binds via `--bind=SRC:DST`).
 5. Confirm you are inside the intended rootfs before iterating:
    - `test -f /var/lib/sysroot-build-state.json && cat /var/lib/sysroot-build-state.json`
    - `test -f /var/lib/sysroot-build-plan.json`
@@ -75,6 +75,7 @@ See `codex/skills/bootstrap-qcow2-build-plan-iteration/SKILL.md` for Codex-orien
 - PR summaries should call out: target architectures, EFI/boot impacts, new dependencies (if any), and how the change advances self-hosting or Crystal-only tooling.
 - Ensure PR summaries cover all changes made on the branch, not just the latest commit.
 - For GitHub PR automation, prefer using the in-repo helper `Bootstrap::CodexUtils.create_pull_request(repo, title, head, base, body, credentials_path = "../.git-credentials")`. It reads the x-access-token from `.git-credentials` and POSTs to the GitHub REST API; inject a custom HTTP sender when testing. Avoid external CLI dependencies.
+- See `codex/skills/bootstrap-qcow2-create-pr/SKILL.md` for a Codex-oriented workflow that uses `create_pull_request` without `gh`.
 - Default PR base is `master` unless explicitly requested otherwise; set the head branch accordingly before calling `create_pull_request`.
 
 ## Rootless userns + pivot_root procedure

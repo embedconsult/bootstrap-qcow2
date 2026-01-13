@@ -1,5 +1,6 @@
 require "file_utils"
 require "./sysroot_namespace"
+require "./codex_session_bookmark"
 
 module Bootstrap
   module CodexNamespace
@@ -7,6 +8,10 @@ module Bootstrap
 
     # Runs a command inside a fresh namespace rooted at *rootfs*. Binds the host
     # work directory into `/work` when requested.
+    #
+    # When invoking Codex, the wrapper stores the most recent Codex session id in
+    # `/work/.codex-session-id` and will resume that session on the next run when
+    # the default command is used.
     # Optionally installs node/npm via apk when targeting Alpine rootfs.
     def self.run(command : Array(String) = ["npx", "codex"],
                  rootfs : Path = DEFAULT_ROOTFS,
@@ -31,6 +36,21 @@ module Bootstrap
       workdir = bind_work ? Path["/work"] : Path["/"]
       Dir.cd(Dir.exists?(workdir) ? workdir : Path["/"])
 
+      env = {} of String => String
+      uses_codex = command == ["codex"] || command == ["npx", "codex"] || command.first? == "codex" || (command.size > 1 && command.first == "npx" && command[1] == "codex")
+      if bind_work && uses_codex
+        env["HOME"] = "/work"
+        env["CODEX_HOME"] = "/work/.codex"
+        FileUtils.mkdir_p(Path["/work/.codex"])
+        if bookmark = CodexSessionBookmark.read(Path["/work"])
+          if command == ["npx", "codex"]
+            command = ["npx", "codex", "resume", bookmark]
+          elsif command == ["codex"]
+            command = ["codex", "resume", bookmark]
+          end
+        end
+      end
+
       if alpine_setup
         status = Process.run("apk", ["add", "nodejs-lts", "npm", "bash"], output: STDOUT, error: STDERR)
         raise "apk install failed" unless status.success?
@@ -38,7 +58,13 @@ module Bootstrap
         raise "npm install failed" unless status.success?
       end
 
-      Process.run(command.first, command[1..], input: STDIN, output: STDOUT, error: STDERR)
+      status = Process.run(command.first, command[1..], env: env, input: STDIN, output: STDOUT, error: STDERR)
+      if bind_work && uses_codex
+        if latest = CodexSessionBookmark.latest_from(Path["/work/.codex"])
+          CodexSessionBookmark.write(Path["/work"], latest)
+        end
+      end
+      status
     end
   end
 end
