@@ -1,7 +1,6 @@
 /docs/
 /lib/
-/bin/bq2
-/bin/*.dwarf
+/bin/
 /.shards/
 *.dwarf
 .crystal/
