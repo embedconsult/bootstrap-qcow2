@@ -16,8 +16,8 @@ jobs:
         with:
           crystal: 1.18.2
 
-      - name: Install shards
-        run: shards install --skip-postinstall
+      - name: Install shards (with postinstall)
+        run: shards install
 
       - name: Build binary
         run: shards build
