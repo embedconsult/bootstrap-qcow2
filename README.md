@@ -37,7 +37,7 @@ The rootfs output includes:
 - Alpine minirootfs 3.23.2 (aarch64 by default)
 - Cached source archives for core packages (musl, busybox, clang/LLVM, etc.)
 - A serialized build plan consumed by the coordinator
-- bootstrap-qcow2 source staged to `/workspace/bootstrap-qcow2` (copied from /work/bootstrap-qcow2 when present, otherwise fetched from GitHub)
+- bootstrap-qcow2 source staged to `/workspace/bootstrap-qcow2` (downloaded as a source package)
 
 ### Busybox-style CLI (`bq2`)
 
@@ -48,14 +48,21 @@ shards build
 
 # Build the sysroot tarball
 ./bin/sysroot-builder --output sysroot.tar.gz
+# Or via the main binary:
+./bin/bq2 sysroot-builder --output sysroot.tar.gz
 
 # Enter the sysroot namespace
 ./bin/sysroot-namespace --rootfs data/sysroot/rootfs -- /bin/sh
+# Or:
+./bin/bq2 sysroot-namespace --rootfs data/sysroot/rootfs -- /bin/sh
 
 # Inside the sysroot, build the CLI from staged source and run the plan
 cd /workspace/bootstrap-qcow2
 crystal build src/main.cr -o /usr/local/bin/bq2
 /usr/local/bin/bq2 sysroot-runner
+
+# Default (no args): build the sysroot, set up DNS, enter with /bin/sh
+./bin/bq2
 ```
 
 This is intended for clean, sudo-less development workflows, not as a security boundary. The

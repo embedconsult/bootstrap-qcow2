@@ -11,6 +11,8 @@ module Bootstrap
   # or by providing the subcommand as the first argument.
   module Main
     COMMANDS = {
+      "--install"               => ->(args : Array(String)) { run_install(args) },
+      "default"                 => ->(args : Array(String)) { run_default(args) },
       "sysroot-builder"         => ->(args : Array(String)) { run_sysroot_builder(args) },
       "sysroot-namespace"       => ->(args : Array(String)) { run_sysroot_namespace(args) },
       "sysroot-namespace-check" => ->(args : Array(String)) { run_sysroot_namespace_check(args) },
@@ -20,7 +22,7 @@ module Bootstrap
     }
 
     def self.run(argv = ARGV)
-      command_name, args = CLI.dispatch(argv, COMMANDS.keys)
+      command_name, args = CLI.dispatch(argv, COMMANDS.keys, "default")
       handler = COMMANDS[command_name]?
       unless handler
         STDERR.puts "Unknown command #{command_name}"
@@ -33,6 +35,8 @@ module Bootstrap
     def self.run_help(_args, exit_code : Int32 = 0) : Int32
       puts "Usage:"
       puts "  bootstrap-qcow2 <command> [options] [-- command args]\n\nCommands:"
+      puts "  --install               Create CLI symlinks in ./bin"
+      puts "  (default)               Build sysroot and enter shell inside it"
       puts "  sysroot-builder         Build sysroot tarball or directory"
       puts "  sysroot-namespace       Enter a namespaced rootfs and exec a command"
       puts "  sysroot-namespace-check Check host namespace prerequisites"
@@ -45,6 +49,7 @@ module Bootstrap
 
     private def self.run_sysroot_namespace(args : Array(String)) : Int32
       rootfs = "data/sysroot/rootfs"
+      command = [] of String
       parser, remaining, help = CLI.parse(args, "Usage: bootstrap-qcow2 sysroot-namespace [options] [-- command...]") do |p|
         p.on("--rootfs=PATH", "Path to the sysroot rootfs (default: #{rootfs})") { |val| rootfs = val }
       end
@@ -56,7 +61,8 @@ module Bootstrap
       SysrootNamespace.enter_rootfs(rootfs)
       Process.exec(command.first, command[1..])
     rescue ex : File::Error
-      Log.error { "Process exec failed for #{command.join(" ")}: #{ex.message}" }
+      cmd = command || [] of String
+      Log.error { "Process exec failed for #{cmd.join(" ")}: #{ex.message}" }
       raise ex
     end
 
@@ -70,7 +76,7 @@ module Bootstrap
       use_system_tar_for_sources = false
       use_system_tar_for_rootfs = false
       preserve_ownership_for_sources = false
-      preserve_ownership_for_rootfs = true
+      preserve_ownership_for_rootfs = false
       owner_uid = nil
       owner_gid = nil
       write_tarball = true
@@ -86,7 +92,7 @@ module Bootstrap
         p.on("--system-tar-rootfs", "Use system tar to extract the base rootfs") { use_system_tar_for_rootfs = true }
         p.on("--preserve-ownership-sources", "Apply ownership metadata when extracting source archives") { preserve_ownership_for_sources = true }
         p.on("--no-preserve-ownership-sources", "Skip applying ownership metadata for source archives") { preserve_ownership_for_sources = false }
-        p.on("--no-preserve-ownership-rootfs", "Skip applying ownership metadata for the base rootfs") { preserve_ownership_for_rootfs = false }
+        p.on("--preserve-ownership-rootfs", "Apply ownership metadata for the base rootfs") { preserve_ownership_for_rootfs = true }
         p.on("--owner-uid=UID", "Override extracted file owner uid (implies ownership preservation)") do |val|
           preserve_ownership_for_sources = true
           preserve_ownership_for_rootfs = true
@@ -198,8 +204,62 @@ module Bootstrap
       STDERR.puts "Namespace setup failed: #{ex.message}"
       1
     end
+
+    private def self.run_default(_args : Array(String)) : Int32
+      workspace = Path["data/sysroot"]
+      puts "Sysroot builder log level=#{Log.for("").level} (env-configured)"
+      builder = SysrootBuilder.new(
+        workspace: workspace,
+        architecture: SysrootBuilder::DEFAULT_ARCH,
+        branch: SysrootBuilder::DEFAULT_BRANCH,
+        base_version: SysrootBuilder::DEFAULT_BASE_VERSION,
+        use_system_tar_for_sources: false,
+        use_system_tar_for_rootfs: false,
+        preserve_ownership_for_sources: false,
+        preserve_ownership_for_rootfs: false,
+      )
+      chroot_path = builder.generate_chroot(include_sources: true)
+      puts "Prepared chroot directory at #{chroot_path}"
+
+      File.write(chroot_path / "/etc/resolv.conf", "nameserver 8.8.8.8", perm = 0o644)
+      SysrootNamespace.enter_rootfs(chroot_path.to_s)
+      status = Process.run(
+        "apk",
+        ["add", "crystal", "clang", "lld"],
+        input: STDIN,
+        output: STDOUT,
+        error: STDERR,
+      )
+      status.exit_code
+    end
   end
 end
 
 Log.setup_from_env
 Bootstrap::Main.run
+
+private def self.run_install(_args : Array(String)) : Int32
+  bin_dir = Path["bin"]
+  target = bin_dir / "bq2"
+  links = %w[
+    sysroot-builder
+    sysroot-namespace
+    sysroot-namespace-check
+    sysroot-runner
+    codex-namespace
+  ]
+
+  FileUtils.mkdir_p(bin_dir)
+  unless File.exists?(target)
+    STDERR.puts "warning: #{target} is missing; run `shards build` first"
+  end
+
+  links.each do |name|
+    link_path = bin_dir / name
+    File.delete(link_path) if File.symlink?(link_path) || File.exists?(link_path)
+    File.symlink("bq2", link_path)
+  end
+
+  puts "Created symlinks in #{bin_dir}: #{links.join(", ")}"
+  0
+end
