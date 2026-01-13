@@ -52,7 +52,7 @@ module Bootstrap
       end
       return CLI.print_help(parser) if help
 
-      command : Array(String) = remaining.empty? ? ["/bin/sh"] : remaining
+      command = remaining.empty? ? ["/bin/sh"] : remaining
       Log.debug { "Entering namespace with rootfs=#{rootfs} command=#{command.join(" ")}" }
 
       SysrootNamespace.enter_rootfs(rootfs)
