@@ -8,9 +8,6 @@ targets:
   bq2:
     main: src/main.cr
 
-scripts:
-  postinstall: crystal run scripts/postinstall.cr
-
 crystal: '>= 1.18.2'
 
 license: MIT

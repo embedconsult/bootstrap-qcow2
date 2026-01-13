@@ -16,8 +16,8 @@ jobs:
         with:
           crystal: 1.18.2
 
-      - name: Install shards (with postinstall)
-        run: shards install
+      - name: Install shards
+        run: shards install --skip-postinstall
 
       - name: Build binary
         run: shards build
@@ -31,6 +31,8 @@ jobs:
       - name: Build minimal chroot and exercise it
         run: |
           shards build
+          shards build
+          ./bin/bq2 --install
           ./bin/sysroot-builder --workspace /tmp/sysroot-ci --output /tmp/sysroot.tar.gz --arch x86_64 --branch v3.23 --base-version 3.23.2
           mkdir -p /tmp/sysroot
           tar -xzf /tmp/sysroot.tar.gz -C /tmp/sysroot

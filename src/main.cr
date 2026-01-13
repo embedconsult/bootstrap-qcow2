@@ -11,6 +11,7 @@ module Bootstrap
   # or by providing the subcommand as the first argument.
   module Main
     COMMANDS = {
+      "--install"               => ->(args : Array(String)) { run_install(args) },
       "default"                 => ->(args : Array(String)) { run_default(args) },
       "sysroot-builder"         => ->(args : Array(String)) { run_sysroot_builder(args) },
       "sysroot-namespace"       => ->(args : Array(String)) { run_sysroot_namespace(args) },
@@ -34,6 +35,7 @@ module Bootstrap
     def self.run_help(_args, exit_code : Int32 = 0) : Int32
       puts "Usage:"
       puts "  bootstrap-qcow2 <command> [options] [-- command args]\n\nCommands:"
+      puts "  --install               Create CLI symlinks in ./bin"
       puts "  (default)               Build sysroot and enter shell inside it"
       puts "  sysroot-builder         Build sysroot tarball or directory"
       puts "  sysroot-namespace       Enter a namespaced rootfs and exec a command"
@@ -235,3 +237,29 @@ end
 
 Log.setup_from_env
 Bootstrap::Main.run
+
+private def self.run_install(_args : Array(String)) : Int32
+  bin_dir = Path["bin"]
+  target = bin_dir / "bq2"
+  links = %w[
+    sysroot-builder
+    sysroot-namespace
+    sysroot-namespace-check
+    sysroot-runner
+    codex-namespace
+  ]
+
+  FileUtils.mkdir_p(bin_dir)
+  unless File.exists?(target)
+    STDERR.puts "warning: #{target} is missing; run `shards build` first"
+  end
+
+  links.each do |name|
+    link_path = bin_dir / name
+    File.delete(link_path) if File.symlink?(link_path) || File.exists?(link_path)
+    File.symlink("bq2", link_path)
+  end
+
+  puts "Created symlinks in #{bin_dir}: #{links.join(", ")}"
+  0
+end
