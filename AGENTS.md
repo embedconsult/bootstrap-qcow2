@@ -38,6 +38,22 @@ These instructions apply to the entire repository unless overridden by a nested 
 - Document all methods. Use the documentation style of the Crystal's standard library API.
 - Always document the source of magic numbers. Use authoritative sources.
 
+## Codex build-plan iteration (container workflow)
+
+Goal: iterate on sysroot/rootfs build issues with minimal manual intervention while keeping the build plan reproducible in-repo.
+
+- Start a login shell (`bash --login`) before running builds; if Crystal cache permissions fail, prefer `CRYSTAL_CACHE_DIR=/tmp/crystal_cache`.
+- Build host tools: `shards build` then `./bin/bq2 --install`.
+- Generate the bootstrap rootfs directory (plan is embedded at `data/sysroot/rootfs/var/lib/sysroot-build-plan.json`): `./bin/sysroot-builder --no-tarball`.
+- Preflight namespace requirements: `./bin/sysroot-namespace-check` (must pass to enter rootfs via userns/mntns).
+- Enter the bootstrap rootfs and run the plan:
+  - `./bin/sysroot-namespace --rootfs data/sysroot/rootfs -- /bin/sh`
+  - Inside: install runtime deps as needed (`apk add crystal clang lld make cmake patch` + any missing build deps).
+  - `cd /workspace/bootstrap-qcow2 && shards build && ./bin/bq2 sysroot-runner` (default: first phase only).
+  - Phase control: `./bin/bq2 sysroot-runner --phase rootfs-from-sysroot` or `./bin/bq2 sysroot-runner --phase all`.
+- Rootfs validation output is staged at `/workspace/rootfs` (via `DESTDIR`); enter it with `./bin/bq2 sysroot-namespace --rootfs /workspace/rootfs -- /bin/sh` when userns is available.
+- When a build fails, update the embedded plan in `src/sysroot_builder.cr` (phase allowlist/env/overrides) and add/adjust specs under `spec/` so the change is reproducible.
+
 ## PR/commit expectations
 - Commit messages should summarize the behavioral change and the architecture(s) affected.
 - PR summaries should call out: target architectures, EFI/boot impacts, new dependencies (if any), and how the change advances self-hosting or Crystal-only tooling.
