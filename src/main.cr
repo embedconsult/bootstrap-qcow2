@@ -47,6 +47,7 @@ module Bootstrap
 
     private def self.run_sysroot_namespace(args : Array(String)) : Int32
       rootfs = "data/sysroot/rootfs"
+      command = [] of String
       parser, remaining, help = CLI.parse(args, "Usage: bootstrap-qcow2 sysroot-namespace [options] [-- command...]") do |p|
         p.on("--rootfs=PATH", "Path to the sysroot rootfs (default: #{rootfs})") { |val| rootfs = val }
       end
@@ -58,7 +59,8 @@ module Bootstrap
       SysrootNamespace.enter_rootfs(rootfs)
       Process.exec(command.first, command[1..])
     rescue ex : File::Error
-      Log.error { "Process exec failed for #{command.join(" ")}: #{ex.message}" }
+      cmd = command || [] of String
+      Log.error { "Process exec failed for #{cmd.join(" ")}: #{ex.message}" }
       raise ex
     end
 
