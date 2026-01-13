@@ -80,14 +80,14 @@ describe Bootstrap::SysrootBuilder do
     end
   end
 
-  it "treats the serialized plan file as a rootfs readiness bookmark" do
+  it "treats the serialized state file as a rootfs readiness bookmark" do
     with_tempdir do |dir|
       builder = Bootstrap::SysrootBuilder.new(dir)
       builder.rootfs_ready?.should be_false
 
-      plan_path = builder.rootfs_dir / "var/lib/sysroot-build-plan.json"
-      FileUtils.mkdir_p(plan_path.parent)
-      File.write(plan_path, "[]")
+      FileUtils.mkdir_p(builder.plan_path.parent)
+      File.write(builder.plan_path, "[]")
+      File.write(builder.state_path, "{}")
       builder.rootfs_ready?.should be_true
     end
   end

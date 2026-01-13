@@ -49,16 +49,10 @@ module Bootstrap
 
     private def self.run_sysroot_namespace(args : Array(String)) : Int32
       rootfs = "data/sysroot/rootfs"
-      bind_repo = false
-      repo_root = Path[Dir.current].expand
-      repo_dest = Path["work/bootstrap-qcow2"]
       extra_binds = [] of Tuple(Path, Path)
       command = [] of String
       parser, remaining, help = CLI.parse(args, "Usage: bootstrap-qcow2 sysroot-namespace [options] [-- command...]") do |p|
         p.on("--rootfs=PATH", "Path to the sysroot rootfs (default: #{rootfs})") { |val| rootfs = val }
-        p.on("--bind-repo", "Bind-mount the current repo into /work/bootstrap-qcow2 inside the rootfs") { bind_repo = true }
-        p.on("--repo-root=PATH", "Override repo root for --bind-repo (default: #{repo_root})") { |val| repo_root = Path[val].expand }
-        p.on("--repo-dest=PATH", "Override repo destination inside the rootfs (default: /#{repo_dest})") { |val| repo_dest = normalize_bind_target(val) }
         p.on("--bind=SRC:DST", "Bind-mount SRC into DST inside the rootfs (repeatable; DST is inside rootfs)") do |val|
           parts = val.split(":", 2)
           raise "Expected --bind=SRC:DST" unless parts.size == 2
@@ -72,12 +66,7 @@ module Bootstrap
       command = remaining.empty? ? ["/bin/sh"] : remaining
       Log.debug { "Entering namespace with rootfs=#{rootfs} command=#{command.join(" ")}" }
 
-      binds = extra_binds
-      if bind_repo
-        binds << {repo_root, repo_dest}
-      end
-
-      SysrootNamespace.enter_rootfs(rootfs, extra_binds: binds)
+      SysrootNamespace.enter_rootfs(rootfs, extra_binds: extra_binds)
       Process.exec(command.first, command[1..])
     rescue ex : File::Error
       cmd = command || [] of String
@@ -152,7 +141,7 @@ module Bootstrap
 
       if reuse_rootfs && builder.rootfs_ready?
         puts "Reusing existing rootfs at #{builder.rootfs_dir}"
-        puts "Build plan bookmark found at #{builder.rootfs_dir / "var/lib/sysroot-build-plan.json"}"
+        puts "Build state bookmark found at #{builder.state_path}"
         return 0
       end
 
@@ -243,12 +232,20 @@ module Bootstrap
 
     private def self.run_codex_namespace(args : Array(String)) : Int32
       rootfs = Path["data/sysroot/rootfs"]
-      bind_codex_work = true
+      bind_work = true
+      extra_binds = [] of Tuple(Path, Path)
       alpine_setup = false
 
       parser, remaining, help = CLI.parse(args, "Usage: bootstrap-qcow2 codex-namespace [options] [-- cmd ...]") do |p|
         p.on("-C DIR", "Rootfs directory for the command (default: #{rootfs})") { |dir| rootfs = Path[dir].expand }
-        p.on("--no-bind-codex-work", "Do not bind host ./codex/work into /work") { bind_codex_work = false }
+        p.on("--no-bind-work", "Do not bind a host work directory into /work") { bind_work = false }
+        p.on("--bind=SRC:DST", "Bind-mount SRC into DST inside the rootfs (repeatable; DST is inside rootfs)") do |val|
+          parts = val.split(":", 2)
+          raise "Expected --bind=SRC:DST" unless parts.size == 2
+          src = Path[parts[0]].expand
+          dst = normalize_bind_target(parts[1])
+          extra_binds << {src, dst}
+        end
         p.on("--alpine", "Assume rootfs is Alpine and install runtime deps for npx codex (node/npm)") { alpine_setup = true }
       end
       return CLI.print_help(parser) if help
@@ -256,7 +253,7 @@ module Bootstrap
       command = remaining.dup
       command = ["npx", "codex"] if command.empty?
 
-      status = CodexNamespace.run(command, rootfs: rootfs, bind_codex_work: bind_codex_work, alpine_setup: alpine_setup)
+      status = CodexNamespace.run(command, rootfs: rootfs, bind_work: bind_work, extra_binds: extra_binds, alpine_setup: alpine_setup)
       status.exit_code
     rescue ex : SysrootNamespace::NamespaceError
       STDERR.puts "Namespace setup failed: #{ex.message}"

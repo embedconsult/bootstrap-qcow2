@@ -6,23 +6,29 @@ module Bootstrap
     DEFAULT_ROOTFS = Path["data/sysroot/rootfs"]
 
     # Runs a command inside a fresh namespace rooted at *rootfs*. Binds the host
-    # optionally binds ./codex/work into /work.
+    # work directory into `/work` when requested.
     # Optionally installs node/npm via apk when targeting Alpine rootfs.
     def self.run(command : Array(String) = ["npx", "codex"],
                  rootfs : Path = DEFAULT_ROOTFS,
-                 bind_codex_work : Bool = true,
+                 bind_work : Bool = true,
+                 extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path),
                  alpine_setup : Bool = false) : Process::Status
       raise "Empty command" if command.empty?
 
-      extra_binds = [] of Tuple(Path, Path)
-      if bind_codex_work
-        host_work = Path["codex/work"].expand
-        FileUtils.mkdir_p(host_work)
-        extra_binds << {host_work, Path["work"]}
+      binds = extra_binds.dup
+      if bind_work
+        host_work = Path["/work"]
+        if Dir.exists?(host_work)
+          binds << {host_work, Path["work"]}
+        else
+          host_work = Path["codex/work"].expand
+          FileUtils.mkdir_p(host_work)
+          binds << {host_work, Path["work"]}
+        end
       end
 
-      SysrootNamespace.enter_rootfs(rootfs.to_s, extra_binds: extra_binds)
-      workdir = bind_codex_work ? Path["/work"] : Path["/"]
+      SysrootNamespace.enter_rootfs(rootfs.to_s, extra_binds: binds)
+      workdir = bind_work ? Path["/work"] : Path["/"]
       Dir.cd(Dir.exists?(workdir) ? workdir : Path["/"])
 
       if alpine_setup

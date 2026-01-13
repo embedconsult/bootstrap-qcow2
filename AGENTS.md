@@ -20,7 +20,7 @@ These instructions apply to the entire repository unless overridden by a nested 
 - No synthetic device nodes: /dev/null, /dev/zero, /dev/random, /dev/urandom (and /dev/tty when present) must be bind-mountable and writable inside the user namespace; nodev must not block these binds. If running in a container, provide /dev as tmpfs with dev,nosuid,exec (e.g., Docker: `--tmpfs /dev:rw,exec,dev,nosuid` plus device passthrough or `--privileged --security-opt seccomp=unconfined` to drop nodev).
 - Single namespace strategy: we always bind host devices (no synthetic nodes, no tmpfs /dev fallback). If binds fail, preflight will pend specs and raise clear NamespaceErrors; fix the host/runtime rather than adding workarounds.
 - Ensure `/dev` inside the container is dev-enabled.
-- Namespace tooling binds `./codex/work` to `/work` for use by Codex; `/workspace` should come from the rootfs itself. For namespace setup we now follow the LFS kernfs pattern: bind-mount host `/dev` recursively, mount proc/sys inside the namespace, and keep a single path rather than synthesizing /dev.
+- Codex-assisted iteration uses `bq2 codex-namespace`, which bind-mounts host `/work` into `/work` by default (falling back to `./codex/work` when `/work` is unavailable); `/workspace` should come from the rootfs itself. For namespace setup we now follow the LFS kernfs pattern: bind-mount host `/dev` recursively, mount proc/sys inside the namespace, and keep a single path rather than synthesizing /dev.
 
 ## Contribution guidelines
 - Favor readable, declarative Crystal code; prefer small, focused modules over sprawling scripts.
@@ -42,28 +42,33 @@ These instructions apply to the entire repository unless overridden by a nested 
 
 Goal: iterate on sysroot/rootfs build issues inside the running container, then back-port working changes into `src/sysroot_builder.cr` so builds remain reproducible.
 
-- Start from a login shell (`bash --login`) when possible; if Crystal cache permissions fail, prefer `CRYSTAL_CACHE_DIR=/tmp/crystal_cache`.
-- Host build: `shards build` then `./bin/bq2 --install`.
-- Generate a bootstrap rootfs (bookmark at `/var/lib/sysroot-build-plan.json`): `./bin/sysroot-builder --no-tarball`.
-- Bookmark strategy: as long as `data/sysroot/rootfs/var/lib/sysroot-build-plan.json` exists, reuse it and avoid rerunning `sysroot-builder` until you're ready to test from scratch.
-  - Reuse explicitly: `./bin/sysroot-builder --no-tarball --reuse-rootfs`
-  - Reset: delete `data/sysroot/rootfs` (or pick a new `--workspace`).
-- Enter rootfs for iteration (bind live repo into `/work/bootstrap-qcow2` so edits take effect): `./bin/sysroot-namespace --rootfs data/sysroot/rootfs --bind-repo -- /bin/sh`.
-- Working directory guidance:
-  - `/work/bootstrap-qcow2`: live, mutable repo; use while debugging/updating builder/runner.
-  - `/workspace/bootstrap-qcow2`: staged snapshot inside the rootfs; treat as static for reproducible runs.
-- Inside rootfs, build the live repo when iterating: `cd /work/bootstrap-qcow2 && shards build`.
-- Run phases:
-  - Default (first phase only): `./bin/bq2 sysroot-runner`
-  - Select phase: `./bin/bq2 sysroot-runner --phase rootfs-from-sysroot`
-  - Narrow to a package: `./bin/bq2 sysroot-runner --phase sysroot-from-alpine --package musl`
-- Capture lessons-learned:
-  - On failure, the runner writes a JSON report under `/var/lib/sysroot-build-reports` (override with `--report-dir`, disable with `--no-report`).
-  - Use the report to decide the next tweak (flags/env/DESTDIR), then apply it via an overrides file.
-- Fast iteration with overrides (no rebuild required):
-  - Create/edit `/var/lib/sysroot-build-overrides.json` (or pass `--overrides PATH`).
-  - Re-run the affected phase/package until it works.
-  - Once stable, back-port the overrides into `SysrootBuilder.phase_specs` (or its helpers) and delete the overrides file so the clean build stays deterministic.
+See `codex/skills/bootstrap-qcow2-build-plan-iteration/SKILL.md` for Codex-oriented iteration guidance.
+
+1. Start from a login shell (`bash --login`) when possible; if Crystal cache permissions fail, prefer `CRYSTAL_CACHE_DIR=/tmp/crystal_cache`.
+2. Build and refresh local CLI entrypoints (host): `shards build && ./bin/bq2 --install`.
+3. Prepare (or reuse) the sysroot rootfs workspace:
+   - Prepare: `./bin/sysroot-builder --no-tarball`
+   - Reuse: `./bin/sysroot-builder --no-tarball --reuse-rootfs`
+   - Reset: delete `data/sysroot/rootfs` (or pick a new `--workspace`).
+   - Bookmarks/state (inside rootfs):
+     - Build plan (immutable during iterations): `/var/lib/sysroot-build-plan.json` (host path: `data/sysroot/rootfs/var/lib/sysroot-build-plan.json`)
+     - Iteration state/bookmark: `/var/lib/sysroot-build-state.json` (host path: `data/sysroot/rootfs/var/lib/sysroot-build-state.json`)
+4. Enter the rootfs:
+   - Manual shell: `./bin/sysroot-namespace --rootfs data/sysroot/rootfs --bind=/work:/work -- /bin/sh`
+   - Codex-assisted iteration: `./bin/bq2 codex-namespace` (binds host `/work` into `/work` by default; add binds via `--bind=SRC:DST`).
+5. Confirm you are inside the intended rootfs before iterating:
+   - `test -f /var/lib/sysroot-build-state.json && cat /var/lib/sysroot-build-state.json`
+   - `test -f /var/lib/sysroot-build-plan.json`
+6. Choose the source tree mode:
+   - Live, mutable repo: `cd /work/bootstrap-qcow2` (preferred while updating builder/runner)
+   - Staged snapshot (static): `cd /workspace/bootstrap-qcow2-master`
+7. Iterate builds without touching the plan:
+   - Update tooling: `shards build && ./bin/bq2 --install`
+   - Re-run the plan runner: `./bin/bq2 sysroot-runner` (auto-resumes based on `/var/lib/sysroot-build-state.json`)
+8. Capture lessons-learned and back-annotate:
+   - On failure, read the JSON report in `/var/lib/sysroot-build-reports`.
+   - Encode fixes in `/var/lib/sysroot-build-overrides.json` and rerun.
+   - After a full successful round, back-port the overrides into `SysrootBuilder.phase_specs` (or helpers) in the live repo, then delete the overrides and state files and retry from scratch for reproducibility.
 
 ## PR/commit expectations
 - Commit messages should summarize the behavioral change and the architecture(s) affected.

@@ -5,6 +5,7 @@ require "process"
 require "time"
 require "./build_plan"
 require "./build_plan_overrides"
+require "./sysroot_build_state"
 
 module Bootstrap
   # SysrootRunner houses the logic that replays build steps inside the chroot.
@@ -15,6 +16,7 @@ module Bootstrap
     DEFAULT_PLAN_PATH      = "/var/lib/sysroot-build-plan.json"
     DEFAULT_OVERRIDES_PATH = "/var/lib/sysroot-build-overrides.json"
     DEFAULT_REPORT_DIR     = "/var/lib/sysroot-build-reports"
+    DEFAULT_STATE_PATH     = SysrootBuildState::DEFAULT_PATH
 
     # Abstraction for running build strategies; enables fast unit tests by
     # supplying a fake runner instead of invoking processes.
@@ -123,20 +125,38 @@ module Bootstrap
     end
 
     # Load a JSON build plan from disk and replay it using the provided runner.
+    #
     # By default only the first phase is executed; pass `phase: "all"` or a
     # specific phase name to override.
+    #
+    # When running inside the sysroot (default plan path), the runner uses the
+    # state bookmark at `/var/lib/sysroot-build-state.json` to skip previously
+    # completed steps and to persist progress for fast, iterative retries.
     def self.run_plan(path : String = DEFAULT_PLAN_PATH,
                       runner : CommandRunner = SystemRunner.new,
                       phase : String? = nil,
                       packages : Array(String)? = nil,
                       overrides_path : String? = DEFAULT_OVERRIDES_PATH,
                       report_dir : String? = DEFAULT_REPORT_DIR,
-                      dry_run : Bool = false)
+                      dry_run : Bool = false,
+                      state_path : String? = nil,
+                      resume : Bool = true)
       raise "Missing build plan #{path}" unless File.exists?(path)
       Log.info { "Loading build plan from #{path}" }
       plan = BuildPlan.from_json(File.read(path))
       plan = apply_overrides(plan, overrides_path) if overrides_path
-      run_plan(plan, runner, phase: phase, packages: packages, report_dir: report_dir, dry_run: dry_run)
+      effective_state_path = state_path || (path == DEFAULT_PLAN_PATH ? DEFAULT_STATE_PATH : nil)
+      state = effective_state_path ? SysrootBuildState.load_or_init(effective_state_path, plan_path: path, overrides_path: overrides_path, report_dir: report_dir) : nil
+      state.try(&.save(effective_state_path.not_nil!)) if effective_state_path
+      run_plan(plan,
+        runner,
+        phase: phase,
+        packages: packages,
+        report_dir: report_dir,
+        dry_run: dry_run,
+        state: state,
+        state_path: effective_state_path,
+        resume: resume)
     end
 
     # Execute an in-memory plan without requiring it to be read from disk.
@@ -147,41 +167,83 @@ module Bootstrap
                       phase : String? = nil,
                       packages : Array(String)? = nil,
                       report_dir : String? = DEFAULT_REPORT_DIR,
-                      dry_run : Bool = false)
+                      dry_run : Bool = false,
+                      state : SysrootBuildState? = nil,
+                      state_path : String? = nil,
+                      resume : Bool = true)
       phases = selected_phases(plan, phase)
       phases = filter_phases_by_packages(phases, packages) if packages
+      phases = filter_phases_by_state(phases, state) if resume && state
       if dry_run
         Log.info { describe_phases(phases) }
         return
       end
       phases.each do |phase_plan|
-        run_phase(phase_plan, runner, report_dir: report_dir)
+        run_phase(phase_plan, runner, report_dir: report_dir, state: state, state_path: state_path)
       end
     end
 
     # Run a single phase from the plan.
-    def self.run_phase(phase : BuildPhase, runner : CommandRunner = SystemRunner.new, report_dir : String? = DEFAULT_REPORT_DIR)
+    def self.run_phase(phase : BuildPhase,
+                       runner : CommandRunner = SystemRunner.new,
+                       report_dir : String? = DEFAULT_REPORT_DIR,
+                       state : SysrootBuildState? = nil,
+                       state_path : String? = nil)
       Log.info { "Executing phase #{phase.name} (env=#{phase.environment}, workspace=#{phase.workspace})" }
       if destdir = phase.destdir
         prepare_destdir(destdir)
       end
-      run_steps(phase, phase.steps, runner, report_dir: report_dir)
+      run_steps(phase, phase.steps, runner, report_dir: report_dir, state: state, state_path: state_path)
       Log.info { "Completed phase #{phase.name}" }
     end
 
     # Execute a list of BuildStep entries, stopping immediately on failure.
-    def self.run_steps(phase : BuildPhase, steps : Array(BuildStep), runner : CommandRunner = SystemRunner.new, report_dir : String? = DEFAULT_REPORT_DIR)
+    def self.run_steps(phase : BuildPhase,
+                       steps : Array(BuildStep),
+                       runner : CommandRunner = SystemRunner.new,
+                       report_dir : String? = DEFAULT_REPORT_DIR,
+                       state : SysrootBuildState? = nil,
+                       state_path : String? = nil)
       Log.info { "Executing #{steps.size} build steps" }
       steps.each do |step|
+        if state && state.completed?(phase.name, step.name)
+          Log.info { "Skipping previously completed #{phase.name}/#{step.name}" }
+          next
+        end
         Log.info { "Building #{step.name} in #{step.workdir}" }
         begin
           runner.run(phase, step)
+          if state
+            state.mark_success(phase.name, step.name)
+            state.save(state_path.not_nil!) if state_path
+          end
         rescue ex
-          write_failure_report(report_dir, phase, step, ex) if report_dir
+          report_path = report_dir ? write_failure_report(report_dir, phase, step, ex) : nil
+          if state
+            state.mark_failure(phase.name, step.name, ex.message, report_path)
+            state.save(state_path.not_nil!) if state_path
+          end
           raise ex
         end
       end
       Log.info { "All build steps completed" }
+    end
+
+    private def self.filter_phases_by_state(phases : Array(BuildPhase), state : SysrootBuildState) : Array(BuildPhase)
+      phases.compact_map do |phase|
+        remaining = phase.steps.reject { |step| state.completed?(phase.name, step.name) }
+        next nil if remaining.empty?
+        BuildPhase.new(
+          name: phase.name,
+          description: phase.description,
+          workspace: phase.workspace,
+          environment: phase.environment,
+          install_prefix: phase.install_prefix,
+          destdir: phase.destdir,
+          env: phase.env,
+          steps: remaining,
+        )
+      end
     end
 
     # Select phases for execution based on the optional phase selector.
@@ -241,7 +303,7 @@ module Bootstrap
       FileUtils.mkdir_p(File.join(destdir, "var/lib"))
     end
 
-    private def self.write_failure_report(report_dir : String, phase : BuildPhase, step : BuildStep, ex : Exception)
+    private def self.write_failure_report(report_dir : String, phase : BuildPhase, step : BuildStep, ex : Exception) : String?
       FileUtils.mkdir_p(report_dir)
       timestamp = Time.utc.to_s("%Y%m%dT%H%M%SZ")
       phase_slug = slugify(phase.name)
@@ -283,8 +345,10 @@ module Bootstrap
 
       File.write(report_path, report)
       Log.error { "Wrote build failure report to #{report_path}" }
+      report_path
     rescue report_ex
       Log.warn { "Failed to write build failure report: #{report_ex.message}" }
+      nil
     end
 
     private def self.slugify(value : String) : String
