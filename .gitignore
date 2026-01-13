@@ -1,6 +1,7 @@
 /docs/
 /lib/
-/bin/
+/bin/bootstrap-qcow2
+/bin/*.dwarf
 /.shards/
 *.dwarf
 .crystal/

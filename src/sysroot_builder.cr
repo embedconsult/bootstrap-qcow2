@@ -41,7 +41,6 @@ module Bootstrap
     DEFAULT_LIBYAML       = "0.2.5"
     DEFAULT_LIBFFI        = "3.4.6"
     DEFAULT_BDWGC         = "8.2.6"
-    DEFAULT_BQ2_BRANCH    = "master"
 
     record PackageSpec,
       name : String,
@@ -95,7 +94,7 @@ module Bootstrap
                    @use_system_tar_for_sources : Bool = false,
                    @use_system_tar_for_rootfs : Bool = false,
                    @preserve_ownership_for_sources : Bool = false,
-                   @preserve_ownership_for_rootfs : Bool = false,
+                   @preserve_ownership_for_rootfs : Bool = true,
                    @owner_uid : Int32? = nil,
                    @owner_gid : Int32? = nil)
       FileUtils.mkdir_p(@workspace)
@@ -145,13 +144,6 @@ module Bootstrap
     # directory name when upstream archives use non-standard layouts.
     def packages : Array(PackageSpec)
       [
-        PackageSpec.new(
-          "bootstrap-qcow2",
-          bootstrap_source_branch,
-          URI.parse("https://github.com/embedconsult/bootstrap-qcow2/archive/refs/heads/#{bootstrap_source_branch}.tar.gz"),
-          build_directory: "bootstrap-qcow2",
-          strategy: "crystal",
-        ),
         PackageSpec.new("m4", DEFAULT_M4, URI.parse("https://ftp.gnu.org/gnu/m4/m4-#{DEFAULT_M4}.tar.gz")),
         PackageSpec.new("musl", DEFAULT_MUSL, URI.parse("https://musl.libc.org/releases/musl-#{DEFAULT_MUSL}.tar.gz")),
         PackageSpec.new("cmake", DEFAULT_CMAKE, URI.parse("https://github.com/Kitware/CMake/releases/download/v#{DEFAULT_CMAKE}/cmake-#{DEFAULT_CMAKE}.tar.gz"), strategy: "cmake"),
@@ -363,6 +355,7 @@ module Bootstrap
       FileUtils.mkdir_p(rootfs_dir / "workspace")
       FileUtils.mkdir_p(rootfs_dir / "var/lib")
       stage_sources if include_sources
+      install_coordinator_source
       rootfs_dir
     end
 
@@ -375,8 +368,28 @@ module Bootstrap
       end
     end
 
-    private def bootstrap_source_branch : String
-      ENV["BQ2_SOURCE_BRANCH"]? || DEFAULT_BQ2_BRANCH
+    # Copy the coordinator source files into the chroot so they can be executed
+    # with `crystal run` during a rebuild.
+    def install_coordinator_source : Path
+      coordinator_dir = rootfs_dir / "usr/local/bin"
+      FileUtils.mkdir_p(coordinator_dir)
+      coordinator_support_files.each do |source|
+        FileUtils.cp(source, coordinator_dir / File.basename(source))
+      end
+      coordinator_dir / "main.cr"
+    end
+
+    # All coordinator artifacts that should be staged into the chroot.
+    def coordinator_support_files : Array(Path)
+      [
+        Path.new(__DIR__).join("bootstrap-qcow2.cr"),
+        Path.new(__DIR__).join("cli.cr"),
+        Path.new(__DIR__).join("main.cr"),
+        Path.new(__DIR__).join("sysroot_builder.cr"),
+        Path.new(__DIR__).join("sysroot_namespace.cr"),
+        Path.new(__DIR__).join("sysroot_runner_lib.cr"),
+        Path.new(__DIR__).join("codex_namespace.cr"),
+      ]
     end
 
     # Construct a build plan that:

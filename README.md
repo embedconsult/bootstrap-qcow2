@@ -21,48 +21,45 @@ During the interim, reliance on externally-authored and compiled tools (for exam
 
 ## Usage
 
-### Build the CLI and sysroot tarball
+### `src/sysroot_builder_main.cr`
 
-```bash
-shards build                         # builds bin/bq2 and subcommand symlinks
-./bin/sysroot-builder --output sysroot.tar.gz
-```
+Utilize an existing rootfs tarball (download if necessary) and add sources to be utilized in building a new rootfs.
 
-Pass `--skip-sources` to omit cached source archives when you only need the base rootfs and coordinator. The default workspace is `data/sysroot`:
+The default workspace is: `data/sysroot`
+
+The workspace is made up of:
 * rootfs - the output rootfs
 * cache - checksums for the various downloads
 * sources - downloaded tarballs
+
+Run the helper entrypoint (use `--no-tarball` to skip creating the tarball):
+
+```bash
+crystal run src/sysroot_builder_main.cr -- --output sysroot.tar.gz
+```
+Pass `--skip-sources` to omit cached source archives when you only need the base rootfs and coordinator.
 
 The rootfs output includes:
 - Alpine minirootfs 3.23.2 (aarch64 by default)
 - Cached source archives for core packages (musl, busybox, clang/LLVM, etc.)
 - A serialized build plan consumed by the coordinator
-- bootstrap-qcow2 source staged to `/workspace/bootstrap-qcow2` (downloaded as a source package)
+- Coordinator entrypoint source at `/usr/local/bin/main.cr` (busybox-style CLI)
 
-### Busybox-style CLI (`bq2`)
+### Busybox-style CLI
 
-The single executable (`bin/bq2`) dispatches subcommands by argv[0] or the first argument. Symlinks in `bin/` mirror the subcommands.
+The single executable (or `crystal run src/main.cr`) dispatches subcommands by
+argv[0] or the first argument. Symlinks in `bin/` mirror the subcommands.
 
 ```bash
-shards build
-
 # Build the sysroot tarball
+shards build
 ./bin/sysroot-builder --output sysroot.tar.gz
-# Or via the main binary:
-./bin/bq2 sysroot-builder --output sysroot.tar.gz
 
 # Enter the sysroot namespace
 ./bin/sysroot-namespace --rootfs data/sysroot/rootfs -- /bin/sh
-# Or:
-./bin/bq2 sysroot-namespace --rootfs data/sysroot/rootfs -- /bin/sh
 
-# Inside the sysroot, build the CLI from staged source and run the plan
-cd /workspace/bootstrap-qcow2
-crystal build src/main.cr -o /usr/local/bin/bq2
-/usr/local/bin/bq2 sysroot-runner
-
-# Default (no args): build the sysroot, set up DNS, enter with /bin/sh
-./bin/bq2
+# Run the build plan inside the chroot (from inside the rootfs)
+crystal run /usr/local/bin/main.cr -- sysroot-runner
 ```
 
 This is intended for clean, sudo-less development workflows, not as a security boundary. The

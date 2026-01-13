@@ -20,17 +20,13 @@ class StubBuilder < Bootstrap::SysrootBuilder
   property override_packages : Array(Bootstrap::SysrootBuilder::PackageSpec) = [] of Bootstrap::SysrootBuilder::PackageSpec
   property skip_stage_sources : Bool = false
   property stage_sources_calls : Int32 = 0
-  property package_tarballs : Hash(String, Path) = {} of String => Path
 
   def packages : Array(Bootstrap::SysrootBuilder::PackageSpec)
     override_packages.empty? ? super : override_packages
   end
 
   def download_and_verify(pkg : Bootstrap::SysrootBuilder::PackageSpec) : Path
-    return fake_tarball.not_nil! if fake_tarball && pkg.name == "bootstrap-rootfs"
-    if tarball = package_tarballs[pkg.name]?
-      return tarball
-    end
+    return fake_tarball.not_nil! if fake_tarball
     super
   end
 
@@ -177,24 +173,11 @@ describe Bootstrap::SysrootBuilder do
       Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
 
       builder = StubBuilder.new(dir)
-      source_tar = dir / "bootstrap.tar"
-      source_dir = dir / "bootstrap-qcow2"
-      FileUtils.mkdir_p(source_dir / "src")
-      File.write(source_dir / "src/main.cr", "puts \"hello\"")
-      Process.run("tar", ["-cf", source_tar.to_s, "-C", dir.to_s, "bootstrap-qcow2"])
-      builder.override_packages = [
-        Bootstrap::SysrootBuilder::PackageSpec.new(
-          "bootstrap-qcow2",
-          "test",
-          URI.parse("https://example.com/bootstrap-qcow2.tar"),
-          build_directory: "bootstrap-qcow2"
-        ),
-      ]
-      builder.package_tarballs["bootstrap-qcow2"] = source_tar
+      builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
       builder.fake_tarball = tarball
       rootfs = builder.prepare_rootfs
       File.exists?(rootfs / "workspace").should be_true
-      File.exists?(rootfs / "workspace/bootstrap-qcow2/src/main.cr").should be_true
+      File.exists?(rootfs / "usr/local/bin/main.cr").should be_true
     end
   end
 
@@ -207,7 +190,7 @@ describe Bootstrap::SysrootBuilder do
       Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
 
       builder = StubBuilder.new(dir)
-      builder.override_packages = builder.packages
+      builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
       builder.fake_tarball = tarball
       builder.prepare_rootfs(include_sources: false)
       builder.stage_sources_calls.should eq 0
@@ -225,12 +208,6 @@ describe Bootstrap::SysrootBuilder do
       pkg = Bootstrap::SysrootBuilder::PackageSpec.new("pkg", "1.0", URI.parse("https://example.com/pkg.tar"))
       builder = StubBuilder.new(dir)
       builder.override_packages = [pkg]
-      pkg_tar = dir / "pkg.tar"
-      pkg_dir = dir / "pkg"
-      FileUtils.mkdir_p(pkg_dir)
-      File.write(pkg_dir / "readme.txt", "pkg")
-      Process.run("tar", ["-cf", pkg_tar.to_s, "-C", dir.to_s, "pkg"])
-      builder.package_tarballs["pkg"] = pkg_tar
       builder.fake_tarball = tarball
       builder.prepare_rootfs(include_sources: true)
       builder.stage_sources_calls.should eq 1
@@ -248,7 +225,6 @@ describe Bootstrap::SysrootBuilder do
 
       builder = StubBuilder.new(dir)
       builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
-      builder.skip_stage_sources = true
       builder.fake_tarball = tarball
       output = dir / "chroot.tar.gz"
       builder.generate_chroot_tarball(output)
@@ -266,7 +242,6 @@ describe Bootstrap::SysrootBuilder do
 
       builder = StubBuilder.new(dir)
       builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
-      builder.skip_stage_sources = true
       builder.fake_tarball = tarball
       output = builder.generate_chroot_tarball
       output.should eq dir / "sysroot.tar.gz"
@@ -284,7 +259,6 @@ describe Bootstrap::SysrootBuilder do
 
       builder = StubBuilder.new(dir)
       builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
-      builder.skip_stage_sources = true
       builder.fake_tarball = tarball
       rootfs = builder.generate_chroot
       rootfs.should eq builder.rootfs_dir
@@ -301,23 +275,10 @@ describe Bootstrap::SysrootBuilder do
       Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
 
       builder = StubBuilder.new(dir)
-      source_tar = dir / "bootstrap.tar"
-      source_dir = dir / "bootstrap-qcow2"
-      FileUtils.mkdir_p(source_dir / "src")
-      File.write(source_dir / "src/main.cr", "puts \"hello\"")
-      Process.run("tar", ["-cf", source_tar.to_s, "-C", dir.to_s, "bootstrap-qcow2"])
-      builder.override_packages = [
-        Bootstrap::SysrootBuilder::PackageSpec.new(
-          "bootstrap-qcow2",
-          "test",
-          URI.parse("https://example.com/bootstrap-qcow2.tar"),
-          build_directory: "bootstrap-qcow2"
-        ),
-      ]
-      builder.package_tarballs["bootstrap-qcow2"] = source_tar
+      builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
       builder.fake_tarball = tarball
       builder.prepare_rootfs
-      File.exists?(builder.rootfs_dir / "workspace/bootstrap-qcow2/src/main.cr").should be_true
+      File.exists?(builder.rootfs_dir / "usr/local/bin/main.cr").should be_true
     end
   end
 end

@@ -6,12 +6,15 @@ module Bootstrap
   module CLI
     # Returns the basename of the invoked executable, falling back to a default
     # when it cannot be resolved (e.g., when Process.executable_path is nil).
-    def self.invoked_name(default : String = "bq2") : String
-      return File.basename(PROGRAM_NAME) unless PROGRAM_NAME.empty?
+    def self.invoked_name(default : String = "bootstrap-qcow2") : String
       if exe = Process.executable_path
         return File.basename(exe)
       end
-      default
+      begin
+        return File.basename(PROGRAM_NAME)
+      rescue
+        return default
+      end
     end
 
     # Selects a command name based on the executable name or the first argument
@@ -23,10 +26,6 @@ module Bootstrap
       name = invoked_name
       if known.includes?(name)
         return {name, args}
-      end
-
-      if args.includes?("-h") || args.includes?("--help")
-        return {"help", args}
       end
 
       if !args.empty? && known.includes?(args.first)
