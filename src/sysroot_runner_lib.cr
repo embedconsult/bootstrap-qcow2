@@ -54,6 +54,10 @@ module Bootstrap
             run_cmd(["cmake", "-S", ".", "-B", "build", "-DCMAKE_INSTALL_PREFIX=#{step.sysroot_prefix}"] + step.configure_flags)
             run_cmd(["cmake", "--build", "build", "-j#{cpus}"])
             run_cmd(["cmake", "--install", "build"])
+          when "crystal"
+            run_cmd(["shards", "build"])
+            run_cmd(["install", "-d", "#{step.sysroot_prefix}/bin"])
+            run_cmd(["install", "-m", "0755", "bin/bq2", "#{step.sysroot_prefix}/bin/bq2"])
           else # autotools/default
             run_cmd(["./configure", "--prefix=#{step.sysroot_prefix}"] + step.configure_flags)
             run_cmd(["make", "-j#{cpus}"])

@@ -161,7 +161,13 @@ module Bootstrap
         PackageSpec.new("libxml2", DEFAULT_LIBXML2, URI.parse("https://github.com/GNOME/libxml2/archive/refs/tags/v#{DEFAULT_LIBXML2}.tar.gz")),
         PackageSpec.new("libyaml", DEFAULT_LIBYAML, URI.parse("https://pyyaml.org/download/libyaml/yaml-#{DEFAULT_LIBYAML}.tar.gz")),
         PackageSpec.new("libffi", DEFAULT_LIBFFI, URI.parse("https://github.com/libffi/libffi/releases/download/v#{DEFAULT_LIBFFI}/libffi-#{DEFAULT_LIBFFI}.tar.gz")),
-        PackageSpec.new("bootstrap-qcow2", bootstrap_source_branch, URI.parse("https://github.com/embedconsult/bootstrap-qcow2/archive/refs/heads/#{bootstrap_source_branch}.tar.gz"), build_directory: "bootstrap-qcow2"),
+        PackageSpec.new(
+          "bootstrap-qcow2",
+          bootstrap_source_branch,
+          URI.parse("https://github.com/embedconsult/bootstrap-qcow2/archive/refs/heads/#{bootstrap_source_branch}.tar.gz"),
+          build_directory: "bootstrap-qcow2",
+          strategy: "crystal",
+        ),
       ]
     end
 
@@ -381,9 +387,7 @@ module Bootstrap
     def build_plan : Array(BuildStep)
       sysroot_prefix = "/opt/sysroot"
       workdir = "/workspace"
-      # The bootstrap-qcow2 source is staged for offline rebuilds but should not
-      # be built as part of the sysroot plan.
-      packages.reject(&.name.==("bootstrap-qcow2")).map do |pkg|
+      packages.map do |pkg|
         build_directory = pkg.build_directory || strip_archive_extension(pkg.filename)
         build_root = File.join(workdir, build_directory)
         BuildStep.new(pkg.name, pkg.strategy, build_root, pkg.configure_flags, pkg.patches, sysroot_prefix)
