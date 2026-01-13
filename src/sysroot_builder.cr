@@ -8,7 +8,6 @@ require "log"
 require "path"
 require "uri"
 require "./build_plan"
-require "./sysroot_build_state"
 
 module Bootstrap
   # SysrootBuilder prepares a chroot-able environment that can rebuild
@@ -128,15 +127,11 @@ module Bootstrap
       rootfs_dir / "var/lib/sysroot-build-plan.json"
     end
 
-    # Absolute path to the persistent build state inside the rootfs.
-    def state_path : Path
-      rootfs_dir / "var/lib/sysroot-build-state.json"
-    end
-
-    # Returns true when the workspace contains a prepared rootfs with both a
-    # serialized build plan and an explicit state bookmark.
+    # Returns true when the workspace contains a prepared rootfs with a
+    # serialized build plan. Iteration state is created by `SysrootRunner` and
+    # is not part of a clean sysroot build output.
     def rootfs_ready? : Bool
-      File.exists?(plan_path) && File.exists?(state_path)
+      File.exists?(plan_path)
     end
 
     # Directory containing the staged sysroot install prefix.
@@ -164,7 +159,6 @@ module Bootstrap
           "bootstrap-qcow2",
           bootstrap_source_branch,
           URI.parse("https://github.com/embedconsult/bootstrap-qcow2/archive/refs/heads/#{bootstrap_source_branch}.tar.gz"),
-          build_directory: bootstrap_source_directory,
           strategy: "crystal",
         ),
         PackageSpec.new("m4", DEFAULT_M4, URI.parse("https://ftp.gnu.org/gnu/m4/m4-#{DEFAULT_M4}.tar.gz")),
@@ -394,10 +388,6 @@ module Bootstrap
       ENV["BQ2_SOURCE_BRANCH"]? || DEFAULT_BQ2_BRANCH
     end
 
-    private def bootstrap_source_directory : String
-      "bootstrap-qcow2-#{bootstrap_source_branch}"
-    end
-
     # Define the multi-phase build in an LFS-inspired style:
     # 1. build a complete sysroot from sources using Alpine's seed environment
     # 2. validate the sysroot by using it as the toolchain when assembling a rootfs
@@ -454,14 +444,6 @@ module Bootstrap
       self.plan_path
     end
 
-    # Persist the build state JSON into the chroot at /var/lib/sysroot-build-state.json.
-    def write_state(plan_path : Path = self.plan_path) : Path
-      state = SysrootBuildState.new(plan_path: plan_path.to_s)
-      FileUtils.mkdir_p(state_path.parent)
-      File.write(state_path, state.to_json)
-      state_path
-    end
-
     # Convert a PhaseSpec into a concrete BuildPhase with computed workdirs and
     # per-package build steps.
     private def build_phase(spec : PhaseSpec) : BuildPhase
@@ -516,8 +498,7 @@ module Bootstrap
     # tooling that expects a chroot-able environment.
     def generate_chroot(include_sources : Bool = true) : Path
       prepare_rootfs(include_sources: include_sources)
-      plan = write_plan
-      write_state(plan)
+      write_plan
       rootfs_dir
     end
 

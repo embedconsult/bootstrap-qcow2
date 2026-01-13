@@ -56,15 +56,15 @@ shards build
 # Or:
 ./bin/bq2 sysroot-namespace --rootfs data/sysroot/rootfs -- /bin/sh
 
-# Inside the sysroot, build the CLI from staged source and run the plan
-cd /workspace/bootstrap-qcow2-master
-shards build
-./bin/bq2 --install
-./bin/bq2 sysroot-runner
-# Run the rootfs validation phase (installs into /workspace/rootfs)
-./bin/bq2 sysroot-runner --phase rootfs-from-sysroot
-# Or run every phase in order:
-./bin/bq2 sysroot-runner --phase all
+	# Inside the sysroot, build the CLI from staged source and run the plan
+	cd /workspace/bootstrap-qcow2-master
+	shards build
+	./bin/bq2 --install
+	./bin/bq2 sysroot-runner
+	# Run the rootfs validation phase (installs into /workspace/rootfs as a staging DESTDIR)
+	./bin/bq2 sysroot-runner --phase rootfs-from-sysroot
+	# Or run every phase in order:
+	./bin/bq2 sysroot-runner --phase all
 
 # Default (no args): build the sysroot, set up DNS, enter with /bin/sh
 ./bin/bq2
@@ -76,6 +76,8 @@ During iterative, in-container debugging, treat the plan JSON (`/var/lib/sysroot
 - `/var/lib/sysroot-build-overrides.json` for runtime-only tweaks to flags/env/install paths
 - `/var/lib/sysroot-build-state.json` for bookmark/progress tracking (auto-updated by `sysroot-runner`)
 - `/var/lib/sysroot-build-reports/*.json` for failure reports
+
+The `rootfs-from-sysroot` phase uses `DESTDIR=/workspace/rootfs` to assemble a candidate rootfs tree without changing the running sysroot; that staged tree is what later gets validated (and eventually entered via `pivot_root`) once the sysroot toolchain is stable.
 
 After a full successful round, back-port overrides into `src/sysroot_builder.cr`, delete overrides/state, and retry from scratch to validate reproducibility.
 

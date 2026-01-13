@@ -12,20 +12,13 @@ Use this after a reviewer finishes leaving comments to pull the latest feedback 
 From the repo root:
 
 ```sh
-CRYSTAL_CACHE_DIR=/tmp/crystal_cache crystal eval '
-  require "./src/codex_utils"
-  feedback = Bootstrap::CodexUtils.fetch_pull_request_feedback(
-    "embedconsult/bootstrap-qcow2",
-    42,
-    credentials_path: Path["../.git-credentials"],
-  )
-  puts feedback.to_pretty_json
-'
+./bin/bq2 github-pr-feedback --pr 42 --pretty
 ```
 
 ## Notes
 
-- Requires GitHub API access; the helper reads the token from `/work/.git-credentials` by default.
+- Requires GitHub API access; defaults to `/work/.git-credentials` when present (override with `--credentials`).
+- Pass `--repo owner/name` when running outside a git checkout (e.g., staged snapshots) and inference fails.
 - Endpoints queried:
   - `/pulls/:number/comments` (review comments on diffs)
   - `/issues/:number/comments` (PR conversation thread)

@@ -20,7 +20,7 @@ These instructions apply to the entire repository unless overridden by a nested 
 - No synthetic device nodes: /dev/null, /dev/zero, /dev/random, /dev/urandom (and /dev/tty when present) must be bind-mountable and writable inside the user namespace; nodev must not block these binds. If running in a container, provide /dev as tmpfs with dev,nosuid,exec (e.g., Docker: `--tmpfs /dev:rw,exec,dev,nosuid` plus device passthrough or `--privileged --security-opt seccomp=unconfined` to drop nodev).
 - Single namespace strategy: we always bind host devices (no synthetic nodes, no tmpfs /dev fallback). If binds fail, preflight will pend specs and raise clear NamespaceErrors; fix the host/runtime rather than adding workarounds.
 - Ensure `/dev` inside the container is dev-enabled.
-- Codex-assisted iteration uses `bq2 codex-namespace`, which bind-mounts host `/work` into `/work` by default (falling back to `./codex/work` when `/work` is unavailable); `/workspace` should come from the rootfs itself. For namespace setup we now follow the LFS kernfs pattern: bind-mount host `/dev` recursively, mount proc/sys inside the namespace, and keep a single path rather than synthesizing /dev.
+- Codex-assisted iteration uses `bq2 codex-namespace`, which bind-mounts host `./codex/work` into `/work` by default; `/workspace` should come from the rootfs itself. For namespace setup we now follow the LFS kernfs pattern: bind-mount host `/dev` recursively, mount proc/sys inside the namespace, and keep a single path rather than synthesizing /dev.
 
 ## Contribution guidelines
 - Favor readable, declarative Crystal code; prefer small, focused modules over sprawling scripts.
@@ -52,10 +52,11 @@ See `codex/skills/bootstrap-qcow2-build-plan-iteration/SKILL.md` for Codex-orien
    - Reset: delete `data/sysroot/rootfs` (or pick a new `--workspace`).
    - Bookmarks/state (inside rootfs):
      - Build plan (immutable during iterations): `/var/lib/sysroot-build-plan.json` (host path: `data/sysroot/rootfs/var/lib/sysroot-build-plan.json`)
-     - Iteration state/bookmark: `/var/lib/sysroot-build-state.json` (host path: `data/sysroot/rootfs/var/lib/sysroot-build-state.json`)
+     - Iteration state/bookmark (created/updated by `sysroot-runner`): `/var/lib/sysroot-build-state.json` (host path: `data/sysroot/rootfs/var/lib/sysroot-build-state.json`)
 4. Enter the rootfs:
-   - Manual shell: `./bin/sysroot-namespace --rootfs data/sysroot/rootfs --bind=/work:/work -- /bin/sh`
-   - Codex-assisted iteration: `./bin/bq2 codex-namespace` (binds host `/work` into `/work` by default; saves/resumes the last Codex session via `/work/.codex-session-id`; add binds via `--bind=SRC:DST`).
+   - Manual shell: `./bin/sysroot-namespace --rootfs data/sysroot/rootfs --bind=codex/work:/work -- /bin/sh`
+   - Codex-assisted iteration: `./bin/bq2 codex-namespace` (binds host `./codex/work` into `/work` by default; saves/resumes the last Codex session via `/work/.codex-session-id`).
+   - Note: steps 1–4 are typically performed manually to launch the iteration environment; Codex iteration usually begins at step 5 or step 7 depending on the prompt.
 5. Confirm you are inside the intended rootfs before iterating:
    - `test -f /var/lib/sysroot-build-state.json && cat /var/lib/sysroot-build-state.json`
    - `test -f /var/lib/sysroot-build-plan.json`
@@ -77,6 +78,7 @@ See `codex/skills/bootstrap-qcow2-build-plan-iteration/SKILL.md` for Codex-orien
 - For GitHub PR automation, prefer using the in-repo helper `Bootstrap::CodexUtils.create_pull_request(repo, title, head, base, body, credentials_path = "../.git-credentials")`. It reads the x-access-token from `.git-credentials` and POSTs to the GitHub REST API; inject a custom HTTP sender when testing. Avoid external CLI dependencies.
 - See `codex/skills/bootstrap-qcow2-create-pr/SKILL.md` for a Codex-oriented workflow that uses `create_pull_request` without `gh`.
 - See `codex/skills/bootstrap-qcow2-check-pr-feedback/SKILL.md` for a manual workflow to fetch PR review comments + thread comments.
+- Preferred interface is the `bq2` CLI subcommands (`github-pr-create`, `github-pr-feedback`, `github-pr-comment`) so automation remains testable/reviewable.
 - Default PR base is `master` unless explicitly requested otherwise; set the head branch accordingly before calling `create_pull_request`.
 
 ## Rootless userns + pivot_root procedure

@@ -17,20 +17,12 @@ Use the in-repo helper to create PRs via the GitHub REST API without relying on 
 From the repo root (`/work/bootstrap-qcow2` when live-bound):
 
 ```sh
-CRYSTAL_CACHE_DIR=/tmp/crystal_cache crystal eval '
-  require "./src/codex_utils"
-  puts Bootstrap::CodexUtils.create_pull_request(
-    "embedconsult/bootstrap-qcow2",
-    "PR title",
-    "codex/my-branch",
-    "master",
-    "PR body text",
-    Path["../.git-credentials"]
-  )
-'
+./bin/bq2 github-pr-create --title "PR title" --head codex/my-branch --body-file pr-body.md
 ```
 
 ## Notes
 
 - If the API call fails, the helper raises with the HTTP status/body to copy into debugging output.
 - Updating an existing PR body/title requires a PATCH request; reuse the same token/headers pattern (see `src/codex_utils.cr`).
+- Pass `--repo owner/name` when running outside a git checkout (e.g., staged snapshots) and inference fails.
+- Defaults to `/work/.git-credentials` when present (override with `--credentials`).

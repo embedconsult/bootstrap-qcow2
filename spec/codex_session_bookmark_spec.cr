@@ -3,7 +3,9 @@ require "../src/codex_session_bookmark"
 
 describe Bootstrap::CodexSessionBookmark do
   it "builds the bookmark path under work directory" do
-    Bootstrap::CodexSessionBookmark.path(Path["/work"]).to_s.should eq "/work/.codex-session-id"
+    with_tempdir do |dir|
+      Bootstrap::CodexSessionBookmark.path(dir).to_s.should eq (dir / ".codex-session-id").to_s
+    end
   end
 
   it "extracts a uuid from a session filename" do

@@ -75,6 +75,7 @@ describe Bootstrap::CodexNamespace do
 
             host_work, target = captured.not_nil!.first
             exit 1 unless target == Path["work"]
+            exit 1 unless host_work.to_s.ends_with?("/codex/work")
             exit 1 unless Dir.exists?(host_work)
           end
         CR

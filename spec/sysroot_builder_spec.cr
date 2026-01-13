@@ -5,16 +5,6 @@ require "file_utils"
 require "digest"
 require "random/secure"
 
-def with_tempdir(&)
-  path = Path[Dir.tempdir] / "sysroot-spec-#{Random::Secure.hex(8)}"
-  FileUtils.mkdir_p(path)
-  begin
-    yield path
-  ensure
-    FileUtils.rm_rf(path)
-  end
-end
-
 class StubBuilder < Bootstrap::SysrootBuilder
   property fake_tarball : Path?
   property override_packages : Array(Bootstrap::SysrootBuilder::PackageSpec) = [] of Bootstrap::SysrootBuilder::PackageSpec
@@ -80,14 +70,13 @@ describe Bootstrap::SysrootBuilder do
     end
   end
 
-  it "treats the serialized state file as a rootfs readiness bookmark" do
+  it "treats the serialized plan file as rootfs readiness" do
     with_tempdir do |dir|
       builder = Bootstrap::SysrootBuilder.new(dir)
       builder.rootfs_ready?.should be_false
 
       FileUtils.mkdir_p(builder.plan_path.parent)
       File.write(builder.plan_path, "[]")
-      File.write(builder.state_path, "{}")
       builder.rootfs_ready?.should be_true
     end
   end

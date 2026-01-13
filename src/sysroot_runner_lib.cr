@@ -2,6 +2,7 @@ require "json"
 require "log"
 require "file_utils"
 require "process"
+require "random/secure"
 require "set"
 require "time"
 require "./build_plan"
@@ -315,10 +316,11 @@ module Bootstrap
 
     private def self.write_failure_report(report_dir : String, phase : BuildPhase, step : BuildStep, ex : Exception) : String?
       FileUtils.mkdir_p(report_dir)
-      timestamp = Time.utc.to_s("%Y%m%dT%H%M%SZ")
+      timestamp = Time.utc.to_s("%Y%m%dT%H%M%S.%LZ")
       phase_slug = slugify(phase.name)
       step_slug = slugify(step.name)
-      report_path = File.join(report_dir, "#{timestamp}-#{phase_slug}-#{step_slug}.json")
+      disambiguator = Random::Secure.hex(4)
+      report_path = File.join(report_dir, "#{timestamp}-#{phase_slug}-#{step_slug}-#{disambiguator}.json")
 
       argv = nil
       exit_code = nil

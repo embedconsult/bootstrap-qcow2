@@ -5,6 +5,7 @@ require "./sysroot_builder"
 require "./sysroot_namespace"
 require "./sysroot_runner_lib"
 require "./codex_namespace"
+require "./github_cli"
 
 module Bootstrap
   # Busybox-style dispatcher: one binary, many entrypoints selected by argv[0]
@@ -18,6 +19,9 @@ module Bootstrap
       "sysroot-namespace-check" => ->(args : Array(String)) { run_sysroot_namespace_check(args) },
       "sysroot-runner"          => ->(args : Array(String)) { run_sysroot_runner(args) },
       "codex-namespace"         => ->(args : Array(String)) { run_codex_namespace(args) },
+      "github-pr-feedback"      => ->(args : Array(String)) { run_github_pr_feedback(args) },
+      "github-pr-comment"       => ->(args : Array(String)) { run_github_pr_comment(args) },
+      "github-pr-create"        => ->(args : Array(String)) { run_github_pr_create(args) },
       "help"                    => ->(args : Array(String)) { run_help(args) },
     }
 
@@ -42,6 +46,9 @@ module Bootstrap
       puts "  sysroot-namespace-check Check host namespace prerequisites"
       puts "  sysroot-runner          Replay build plan inside the sysroot"
       puts "  codex-namespace         Run Codex inside a namespaced rootfs"
+      puts "  github-pr-feedback      Fetch PR feedback as JSON"
+      puts "  github-pr-comment       Post a PR conversation comment"
+      puts "  github-pr-create        Create a GitHub pull request"
       puts "  help                    Show this message"
       puts "\nInvoke via symlink (e.g., bin/sysroot-builder) or as the first argument."
       exit_code
@@ -141,7 +148,7 @@ module Bootstrap
 
       if reuse_rootfs && builder.rootfs_ready?
         puts "Reusing existing rootfs at #{builder.rootfs_dir}"
-        puts "Build state bookmark found at #{builder.state_path}"
+        puts "Build plan found at #{builder.plan_path} (iteration state is maintained by sysroot-runner)"
         return 0
       end
 
@@ -260,6 +267,18 @@ module Bootstrap
       1
     end
 
+    private def self.run_github_pr_feedback(args : Array(String)) : Int32
+      GitHubCLI.run_pr_feedback(args)
+    end
+
+    private def self.run_github_pr_comment(args : Array(String)) : Int32
+      GitHubCLI.run_pr_comment(args)
+    end
+
+    private def self.run_github_pr_create(args : Array(String)) : Int32
+      GitHubCLI.run_pr_create(args)
+    end
+
     private def self.run_default(_args : Array(String)) : Int32
       workspace = Path["data/sysroot"]
       puts "Sysroot builder log level=#{Log.for("").level} (env-configured)"
@@ -302,6 +321,9 @@ private def self.run_install(_args : Array(String)) : Int32
     sysroot-namespace-check
     sysroot-runner
     codex-namespace
+    github-pr-feedback
+    github-pr-comment
+    github-pr-create
   ]
 
   FileUtils.mkdir_p(bin_dir)

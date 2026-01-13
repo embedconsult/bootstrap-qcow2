@@ -22,14 +22,9 @@ module Bootstrap
 
       binds = extra_binds.dup
       if bind_work
-        host_work = Path["/work"]
-        if Dir.exists?(host_work)
-          binds << {host_work, Path["work"]}
-        else
-          host_work = Path["codex/work"].expand
-          FileUtils.mkdir_p(host_work)
-          binds << {host_work, Path["work"]}
-        end
+        host_work = Path["codex/work"].expand
+        FileUtils.mkdir_p(host_work)
+        binds << {host_work, Path["work"]}
       end
 
       SysrootNamespace.enter_rootfs(rootfs.to_s, extra_binds: binds)
