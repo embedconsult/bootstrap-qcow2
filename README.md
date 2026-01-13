@@ -48,9 +48,13 @@ shards build
 
 # Build the sysroot tarball
 ./bin/sysroot-builder --output sysroot.tar.gz
+# Or via the main binary:
+./bin/bq2 sysroot-builder --output sysroot.tar.gz
 
 # Enter the sysroot namespace
 ./bin/sysroot-namespace --rootfs data/sysroot/rootfs -- /bin/sh
+# Or:
+./bin/bq2 sysroot-namespace --rootfs data/sysroot/rootfs -- /bin/sh
 
 # Inside the sysroot, build the CLI from staged source and run the plan
 cd /workspace/bootstrap-qcow2
