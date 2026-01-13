@@ -2,6 +2,16 @@ require "./spec_helper"
 require "../src/codex_session_bookmark"
 
 describe Bootstrap::CodexSessionBookmark do
+  it "builds the bookmark path under work directory" do
+    Bootstrap::CodexSessionBookmark.path(Path["/work"]).to_s.should eq "/work/.codex-session-id"
+  end
+
+  it "extracts a uuid from a session filename" do
+    id = "019bb5a2-d388-7f01-b44a-2c35e74d0d53"
+    Bootstrap::CodexSessionBookmark.extract_id("/tmp/rollout-#{id}.jsonl").should eq id
+    Bootstrap::CodexSessionBookmark.extract_id("/tmp/nope.txt").should be_nil
+  end
+
   it "reads and writes a session bookmark" do
     with_tempdir do |dir|
       work = dir / "work"
