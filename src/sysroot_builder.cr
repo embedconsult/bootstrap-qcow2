@@ -41,6 +41,7 @@ module Bootstrap
     DEFAULT_LIBYAML       = "0.2.5"
     DEFAULT_LIBFFI        = "3.4.6"
     DEFAULT_BDWGC         = "8.2.6"
+    DEFAULT_BQ2_BRANCH    = "master"
 
     record PackageSpec,
       name : String,
@@ -160,6 +161,7 @@ module Bootstrap
         PackageSpec.new("libxml2", DEFAULT_LIBXML2, URI.parse("https://github.com/GNOME/libxml2/archive/refs/tags/v#{DEFAULT_LIBXML2}.tar.gz")),
         PackageSpec.new("libyaml", DEFAULT_LIBYAML, URI.parse("https://pyyaml.org/download/libyaml/yaml-#{DEFAULT_LIBYAML}.tar.gz")),
         PackageSpec.new("libffi", DEFAULT_LIBFFI, URI.parse("https://github.com/libffi/libffi/releases/download/v#{DEFAULT_LIBFFI}/libffi-#{DEFAULT_LIBFFI}.tar.gz")),
+        PackageSpec.new("bootstrap-qcow2", bootstrap_source_branch, URI.parse("https://github.com/embedconsult/bootstrap-qcow2/archive/refs/heads/#{bootstrap_source_branch}.tar.gz"), build_directory: "bootstrap-qcow2"),
       ]
     end
 
@@ -355,7 +357,6 @@ module Bootstrap
       FileUtils.mkdir_p(rootfs_dir / "workspace")
       FileUtils.mkdir_p(rootfs_dir / "var/lib")
       stage_sources if include_sources
-      stage_bootstrap_source
       rootfs_dir
     end
 
@@ -368,47 +369,8 @@ module Bootstrap
       end
     end
 
-    # Stage the bootstrap-qcow2 source into /workspace/bootstrap-qcow2 so it can
-    # be built inside the namespace. Use the host checkout when available,
-    # otherwise download from GitHub similar to other source packages.
-    def stage_bootstrap_source : Path
-      workspace_path = rootfs_dir / "workspace"
-      dest = workspace_path / "bootstrap-qcow2"
-      FileUtils.rm_rf(dest)
-      FileUtils.mkdir_p(workspace_path)
-
-      host_checkout = Path["/work/bootstrap-qcow2"]
-      if Dir.exists?(host_checkout)
-        Log.info { "Staging bootstrap-qcow2 from host checkout at #{host_checkout}" }
-        copy_bootstrap_checkout(host_checkout, dest)
-        return dest
-      end
-
-      pkg = bootstrap_source_spec
-      tarball = download_and_verify(pkg)
-      temp_extract = workspace_path / ".bootstrap-src"
-      FileUtils.rm_rf(temp_extract)
-      FileUtils.mkdir_p(temp_extract)
-      extract_tarball(tarball, temp_extract, @preserve_ownership_for_sources, force_system_tar: @use_system_tar_for_sources)
-      extracted = Dir.children(temp_extract).map { |entry| temp_extract / entry }.find { |p| Dir.exists?(p) } || temp_extract
-      FileUtils.mv(extracted, dest)
-      FileUtils.rm_rf(temp_extract) unless extracted == temp_extract
-      dest
-    end
-
-    private def copy_bootstrap_checkout(source : Path, dest : Path)
-      FileUtils.mkdir_p(dest)
-      skip = {".git", ".cache", ".crystal", "bin", "data", "lib"}
-      Dir.children(source).each do |entry|
-        next if skip.includes?(entry)
-        FileUtils.cp_r(source / entry, dest / entry)
-      end
-    end
-
-    private def bootstrap_source_spec : PackageSpec
-      branch = ENV["BQ2_SOURCE_BRANCH"]? || "master"
-      url = URI.parse("https://github.com/embedconsult/bootstrap-qcow2/archive/refs/heads/#{branch}.tar.gz")
-      PackageSpec.new("bootstrap-qcow2", branch, url)
+    private def bootstrap_source_branch : String
+      ENV["BQ2_SOURCE_BRANCH"]? || DEFAULT_BQ2_BRANCH
     end
 
     # Construct a build plan that:
