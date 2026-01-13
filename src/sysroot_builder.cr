@@ -122,6 +122,13 @@ module Bootstrap
       @workspace / "rootfs"
     end
 
+    # Returns true when the workspace contains a prepared rootfs with a serialized
+    # build plan. This serves as a lightweight bookmark so iterative sessions can
+    # reuse an existing rootfs instead of re-extracting everything.
+    def rootfs_ready? : Bool
+      File.exists?(rootfs_dir / "var/lib/sysroot-build-plan.json")
+    end
+
     # Directory containing the staged sysroot install prefix.
     def sysroot_dir : Path
       @workspace / "sysroot"

@@ -49,21 +49,45 @@ module Bootstrap
 
     private def self.run_sysroot_namespace(args : Array(String)) : Int32
       rootfs = "data/sysroot/rootfs"
+      bind_repo = false
+      repo_root = Path[Dir.current].expand
+      repo_dest = Path["work/bootstrap-qcow2"]
+      extra_binds = [] of Tuple(Path, Path)
       command = [] of String
       parser, remaining, help = CLI.parse(args, "Usage: bootstrap-qcow2 sysroot-namespace [options] [-- command...]") do |p|
         p.on("--rootfs=PATH", "Path to the sysroot rootfs (default: #{rootfs})") { |val| rootfs = val }
+        p.on("--bind-repo", "Bind-mount the current repo into /work/bootstrap-qcow2 inside the rootfs") { bind_repo = true }
+        p.on("--repo-root=PATH", "Override repo root for --bind-repo (default: #{repo_root})") { |val| repo_root = Path[val].expand }
+        p.on("--repo-dest=PATH", "Override repo destination inside the rootfs (default: /#{repo_dest})") { |val| repo_dest = normalize_bind_target(val) }
+        p.on("--bind=SRC:DST", "Bind-mount SRC into DST inside the rootfs (repeatable; DST is inside rootfs)") do |val|
+          parts = val.split(":", 2)
+          raise "Expected --bind=SRC:DST" unless parts.size == 2
+          src = Path[parts[0]].expand
+          dst = normalize_bind_target(parts[1])
+          extra_binds << {src, dst}
+        end
       end
       return CLI.print_help(parser) if help
 
       command = remaining.empty? ? ["/bin/sh"] : remaining
       Log.debug { "Entering namespace with rootfs=#{rootfs} command=#{command.join(" ")}" }
 
-      SysrootNamespace.enter_rootfs(rootfs)
+      binds = extra_binds
+      if bind_repo
+        binds << {repo_root, repo_dest}
+      end
+
+      SysrootNamespace.enter_rootfs(rootfs, extra_binds: binds)
       Process.exec(command.first, command[1..])
     rescue ex : File::Error
       cmd = command || [] of String
       Log.error { "Process exec failed for #{cmd.join(" ")}: #{ex.message}" }
       raise ex
+    end
+
+    private def self.normalize_bind_target(value : String) : Path
+      cleaned = value.starts_with?("/") ? value[1..] : value
+      Path[cleaned]
     end
 
     private def self.run_sysroot_builder(args : Array(String)) : Int32
@@ -80,6 +104,7 @@ module Bootstrap
       owner_uid = nil
       owner_gid = nil
       write_tarball = true
+      reuse_rootfs = false
 
       parser, _remaining, help = CLI.parse(args, "Usage: bootstrap-qcow2 sysroot-builder [options]") do |p|
         p.on("-o OUTPUT", "--output=OUTPUT", "Target sysroot tarball (default: #{output})") { |val| output = Path[val] }
@@ -104,6 +129,7 @@ module Bootstrap
           owner_gid = val.to_i
         end
         p.on("--no-tarball", "Prepare the chroot tree without writing a tarball") { write_tarball = false }
+        p.on("--reuse-rootfs", "Reuse an existing prepared rootfs when present (requires --no-tarball)") { reuse_rootfs = true }
       end
       return CLI.print_help(parser) if help
 
@@ -120,6 +146,16 @@ module Bootstrap
         owner_uid: owner_uid,
         owner_gid: owner_gid
       )
+      if reuse_rootfs && write_tarball
+        raise "--reuse-rootfs requires --no-tarball"
+      end
+
+      if reuse_rootfs && builder.rootfs_ready?
+        puts "Reusing existing rootfs at #{builder.rootfs_dir}"
+        puts "Build plan bookmark found at #{builder.rootfs_dir / "var/lib/sysroot-build-plan.json"}"
+        return 0
+      end
+
       if write_tarball
         builder.generate_chroot_tarball(output, include_sources: include_sources)
         puts "Generated sysroot tarball at #{output}"

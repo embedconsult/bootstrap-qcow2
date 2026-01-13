@@ -80,6 +80,18 @@ describe Bootstrap::SysrootBuilder do
     end
   end
 
+  it "treats the serialized plan file as a rootfs readiness bookmark" do
+    with_tempdir do |dir|
+      builder = Bootstrap::SysrootBuilder.new(dir)
+      builder.rootfs_ready?.should be_false
+
+      plan_path = builder.rootfs_dir / "var/lib/sysroot-build-plan.json"
+      FileUtils.mkdir_p(plan_path.parent)
+      File.write(plan_path, "[]")
+      builder.rootfs_ready?.should be_true
+    end
+  end
+
   it "builds a base rootfs spec for the configured architecture" do
     builder = Bootstrap::SysrootBuilder.new(Path["/tmp/work"], "arm64", "edge", "edge")
     spec = builder.base_rootfs_spec

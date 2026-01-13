@@ -44,9 +44,15 @@ Goal: iterate on sysroot/rootfs build issues inside the running container, then 
 
 - Start from a login shell (`bash --login`) when possible; if Crystal cache permissions fail, prefer `CRYSTAL_CACHE_DIR=/tmp/crystal_cache`.
 - Host build: `shards build` then `./bin/bq2 --install`.
-- Generate a bootstrap rootfs (includes `/var/lib/sysroot-build-plan.json`): `./bin/sysroot-builder --no-tarball`.
-- Enter rootfs for iteration: `./bin/sysroot-namespace --rootfs data/sysroot/rootfs -- /bin/sh`.
-- Inside rootfs, build the CLI from staged source: `cd /workspace/bootstrap-qcow2 && shards build`.
+- Generate a bootstrap rootfs (bookmark at `/var/lib/sysroot-build-plan.json`): `./bin/sysroot-builder --no-tarball`.
+- Bookmark strategy: as long as `data/sysroot/rootfs/var/lib/sysroot-build-plan.json` exists, reuse it and avoid rerunning `sysroot-builder` until you're ready to test from scratch.
+  - Reuse explicitly: `./bin/sysroot-builder --no-tarball --reuse-rootfs`
+  - Reset: delete `data/sysroot/rootfs` (or pick a new `--workspace`).
+- Enter rootfs for iteration (bind live repo into `/work/bootstrap-qcow2` so edits take effect): `./bin/sysroot-namespace --rootfs data/sysroot/rootfs --bind-repo -- /bin/sh`.
+- Working directory guidance:
+  - `/work/bootstrap-qcow2`: live, mutable repo; use while debugging/updating builder/runner.
+  - `/workspace/bootstrap-qcow2`: staged snapshot inside the rootfs; treat as static for reproducible runs.
+- Inside rootfs, build the live repo when iterating: `cd /work/bootstrap-qcow2 && shards build`.
 - Run phases:
   - Default (first phase only): `./bin/bq2 sysroot-runner`
   - Select phase: `./bin/bq2 sysroot-runner --phase rootfs-from-sysroot`
