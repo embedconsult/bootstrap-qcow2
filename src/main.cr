@@ -70,7 +70,7 @@ module Bootstrap
       use_system_tar_for_sources = false
       use_system_tar_for_rootfs = false
       preserve_ownership_for_sources = false
-      preserve_ownership_for_rootfs = true
+      preserve_ownership_for_rootfs = false
       owner_uid = nil
       owner_gid = nil
       write_tarball = true
@@ -86,7 +86,7 @@ module Bootstrap
         p.on("--system-tar-rootfs", "Use system tar to extract the base rootfs") { use_system_tar_for_rootfs = true }
         p.on("--preserve-ownership-sources", "Apply ownership metadata when extracting source archives") { preserve_ownership_for_sources = true }
         p.on("--no-preserve-ownership-sources", "Skip applying ownership metadata for source archives") { preserve_ownership_for_sources = false }
-        p.on("--no-preserve-ownership-rootfs", "Skip applying ownership metadata for the base rootfs") { preserve_ownership_for_rootfs = false }
+        p.on("--preserve-ownership-rootfs", "Apply ownership metadata for the base rootfs") { preserve_ownership_for_rootfs = true }
         p.on("--owner-uid=UID", "Override extracted file owner uid (implies ownership preservation)") do |val|
           preserve_ownership_for_sources = true
           preserve_ownership_for_rootfs = true
