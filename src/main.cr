@@ -180,12 +180,28 @@ module Bootstrap
 
     private def self.run_sysroot_runner(args : Array(String)) : Int32
       phase : String? = nil
+      packages = [] of String
+      overrides_path : String? = SysrootRunner::DEFAULT_OVERRIDES_PATH
+      report_dir : String? = SysrootRunner::DEFAULT_REPORT_DIR
+      dry_run = false
       parser, _remaining, help = CLI.parse(args, "Usage: bootstrap-qcow2 sysroot-runner [options]") do |p|
         p.on("--phase NAME", "Select build phase to run (default: first phase; use 'all' for every phase)") { |name| phase = name }
+        p.on("--package NAME", "Only run the named package(s); repeatable") { |name| packages << name }
+        p.on("--overrides PATH", "Apply runtime overrides JSON (default: #{SysrootRunner::DEFAULT_OVERRIDES_PATH})") { |path| overrides_path = path }
+        p.on("--no-overrides", "Disable runtime overrides") { overrides_path = nil }
+        p.on("--report-dir PATH", "Write failure reports to PATH (default: #{SysrootRunner::DEFAULT_REPORT_DIR})") { |path| report_dir = path }
+        p.on("--no-report", "Disable failure report writing") { report_dir = nil }
+        p.on("--dry-run", "List selected phases/steps and exit") { dry_run = true }
       end
       return CLI.print_help(parser) if help
 
-      SysrootRunner.run_plan(phase: phase)
+      SysrootRunner.run_plan(
+        phase: phase,
+        packages: packages.empty? ? nil : packages,
+        overrides_path: overrides_path,
+        report_dir: report_dir,
+        dry_run: dry_run,
+      )
       0
     end
 

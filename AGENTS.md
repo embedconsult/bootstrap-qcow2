@@ -38,6 +38,26 @@ These instructions apply to the entire repository unless overridden by a nested 
 - Document all methods. Use the documentation style of the Crystal's standard library API.
 - Always document the source of magic numbers. Use authoritative sources.
 
+## Build Plan iteration (in-container)
+
+Goal: iterate on sysroot/rootfs build issues inside the running container, then back-port working changes into `src/sysroot_builder.cr` so builds remain reproducible.
+
+- Host build: `shards build` then `./bin/bq2 --install`.
+- Generate a bootstrap rootfs (includes `/var/lib/sysroot-build-plan.json`): `./bin/sysroot-builder --no-tarball`.
+- Enter rootfs for iteration: `./bin/sysroot-namespace --rootfs data/sysroot/rootfs -- /bin/sh`.
+- Inside rootfs, build the CLI from staged source: `cd /workspace/bootstrap-qcow2 && shards build`.
+- Run phases:
+  - Default (first phase only): `./bin/bq2 sysroot-runner`
+  - Select phase: `./bin/bq2 sysroot-runner --phase rootfs-from-sysroot`
+  - Narrow to a package: `./bin/bq2 sysroot-runner --phase sysroot-from-alpine --package musl`
+- Capture lessons-learned:
+  - On failure, the runner writes a JSON report under `/var/lib/sysroot-build-reports` (override with `--report-dir`, disable with `--no-report`).
+  - Use the report to decide the next tweak (flags/env/DESTDIR), then apply it via an overrides file.
+- Fast iteration with overrides (no rebuild required):
+  - Create/edit `/var/lib/sysroot-build-overrides.json` (or pass `--overrides PATH`).
+  - Re-run the affected phase/package until it works.
+  - Once stable, back-port the overrides into `SysrootBuilder.phase_specs` (or its helpers) and delete the overrides file so the clean build stays deterministic.
+
 ## PR/commit expectations
 - Commit messages should summarize the behavioral change and the architecture(s) affected.
 - PR summaries should call out: target architectures, EFI/boot impacts, new dependencies (if any), and how the change advances self-hosting or Crystal-only tooling.
