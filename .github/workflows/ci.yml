@@ -19,6 +19,9 @@ jobs:
       - name: Install shards
         run: shards install --skip-postinstall
 
+      - name: Build binary
+        run: shards build
+
       - name: Check formatting
         run: crystal tool format --check
 
@@ -27,7 +30,8 @@ jobs:
 
       - name: Build minimal chroot and exercise it
         run: |
-          crystal run src/sysroot_builder_main.cr -- --workspace /tmp/sysroot-ci --output /tmp/sysroot.tar.gz --arch x86_64 --branch v3.23 --base-version 3.23.2
+          shards build
+          ./bin/sysroot-builder --workspace /tmp/sysroot-ci --output /tmp/sysroot.tar.gz --arch x86_64 --branch v3.23 --base-version 3.23.2
           mkdir -p /tmp/sysroot
           tar -xzf /tmp/sysroot.tar.gz -C /tmp/sysroot
           sudo "$(command -v crystal)" eval 'Process.chroot("/tmp/sysroot"); Dir.cd("/"); File.write("/workspace/hello.txt", "ok")'
