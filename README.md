@@ -37,7 +37,7 @@ The rootfs output includes:
 - Alpine minirootfs 3.23.2 (aarch64 by default)
 - Cached source archives for core packages (musl, busybox, clang/LLVM, etc.)
 - A serialized build plan consumed by the coordinator
-- bootstrap-qcow2 source staged to `/workspace/bootstrap-qcow2` (copied from /work/bootstrap-qcow2 when present, otherwise fetched from GitHub)
+- bootstrap-qcow2 source staged to `/workspace/bootstrap-qcow2` (downloaded as a source package)
 
 ### Busybox-style CLI (`bq2`)
 
