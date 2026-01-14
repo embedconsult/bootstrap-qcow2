@@ -20,9 +20,9 @@ module Bootstrap
       bash
       binutils
       clang
+      libgcc
+      libstdc++-dev
       crystal
-      gcc
-      g++
       lld
       linux-headers
       make
