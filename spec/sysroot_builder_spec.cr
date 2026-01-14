@@ -178,7 +178,7 @@ describe Bootstrap::SysrootBuilder do
       rootfs_phase = plan.phases.last
       rootfs_phase.install_prefix.should eq "/usr"
       rootfs_phase.destdir.should eq "/workspace/rootfs"
-      rootfs_phase.steps.map(&.name).should eq ["musl", "busybox"]
+      rootfs_phase.steps.map(&.name).should eq ["musl", "busybox", "musl-ld-path", "sysroot"]
     end
   end
 

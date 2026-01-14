@@ -51,7 +51,16 @@ module Bootstrap
           destdir = step.destdir || phase.destdir
           case step.strategy
           when "cmake"
-            run_cmd(["./bootstrap", "--prefix=#{install_prefix}"], env: env)
+            had_build_files = File.exists?("CMakeCache.txt") || File.exists?("Makefile") || Dir.exists?("CMakeFiles")
+            bootstrap_argv = ["./bootstrap", "--prefix=#{install_prefix}"]
+            if step.configure_flags.size > 0
+              bootstrap_argv << "--"
+              bootstrap_argv.concat(step.configure_flags)
+            end
+            run_cmd(bootstrap_argv, env: env)
+            if had_build_files && File.exists?("Makefile")
+              run_cmd(["make", "clean"], env: env)
+            end
             run_cmd(["make", "-j#{cpus}"], env: env)
             run_make_install(destdir, env)
           when "busybox"
@@ -59,11 +68,24 @@ module Bootstrap
             run_cmd(["make", "-j#{cpus}"], env: env)
             install_root = destdir || install_prefix
             run_cmd(["make", "CONFIG_PREFIX=#{install_root}", "install"], env: env)
+          when "copy-tree"
+            raise "copy-tree requires step.install_prefix (destination path)" unless step.install_prefix
+            install_root = destdir ? "#{destdir}#{install_prefix}" : install_prefix
+            FileUtils.mkdir_p(install_root)
+            run_cmd(["cp", "-a", ".", install_root], env: env)
+          when "write-file"
+            raise "write-file requires step.install_prefix (file path)" unless step.install_prefix
+            content = step.env["CONTENT"]?
+            raise "write-file requires env CONTENT" unless content
+            target = destdir ? "#{destdir}#{install_prefix}" : install_prefix
+            FileUtils.mkdir_p(File.dirname(target))
+            File.write(target, content)
           when "llvm"
             source_dir = "."
             unless File.exists?("CMakeLists.txt")
               source_dir = "llvm" if File.exists?(File.join("llvm", "CMakeLists.txt"))
             end
+            FileUtils.rm_rf("build") if Dir.exists?("build")
             run_cmd(["cmake", "-S", source_dir, "-B", "build", "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + step.configure_flags, env: env)
             run_cmd(["cmake", "--build", "build", "-j#{cpus}"], env: env)
             install_env = destdir ? env.merge({"DESTDIR" => destdir}) : env
@@ -82,6 +104,7 @@ module Bootstrap
               run_cmd(["make", "-j#{cpus}"], env: env)
               run_make_install(destdir, env)
             elsif File.exists?("CMakeLists.txt")
+              FileUtils.rm_rf("build") if Dir.exists?("build")
               run_cmd(["cmake", "-S", ".", "-B", "build", "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + step.configure_flags, env: env)
               run_cmd(["cmake", "--build", "build", "-j#{cpus}"], env: env)
               install_env = destdir ? env.merge({"DESTDIR" => destdir}) : env
@@ -364,7 +387,7 @@ module Bootstrap
     # failing when the destdir tree is initially empty.
     private def self.prepare_destdir(destdir : String)
       FileUtils.mkdir_p(destdir)
-      %w[bin dev etc lib proc sys tmp usr var].each do |subdir|
+      %w[bin dev etc lib opt proc sys tmp usr var workspace].each do |subdir|
         FileUtils.mkdir_p(File.join(destdir, subdir))
       end
       FileUtils.mkdir_p(File.join(destdir, "usr/bin"))

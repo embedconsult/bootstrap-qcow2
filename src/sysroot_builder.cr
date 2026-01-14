@@ -82,6 +82,8 @@ module Bootstrap
       destdir : String? = nil,
       env : Hash(String, String) = {} of String => String,
       package_allowlist : Array(String)? = nil,
+      extra_steps : Array(BuildStep) = [] of BuildStep,
+      env_overrides : Hash(String, Hash(String, String)) = {} of String => Hash(String, String),
       configure_overrides : Hash(String, Array(String)) = {} of String => Array(String),
       patch_overrides : Hash(String, Array(String)) = {} of String => Array(String)
 
@@ -165,13 +167,6 @@ module Bootstrap
         PackageSpec.new("m4", DEFAULT_M4, URI.parse("https://ftp.gnu.org/gnu/m4/m4-#{DEFAULT_M4}.tar.gz")),
         PackageSpec.new("musl", DEFAULT_MUSL, URI.parse("https://musl.libc.org/releases/musl-#{DEFAULT_MUSL}.tar.gz")),
         PackageSpec.new(
-          "cmake",
-          DEFAULT_CMAKE,
-          URI.parse("https://github.com/Kitware/CMake/releases/download/v#{DEFAULT_CMAKE}/cmake-#{DEFAULT_CMAKE}.tar.gz"),
-          strategy: "cmake",
-          patches: ["#{bootstrap_repo_dir}/patches/cmake-#{DEFAULT_CMAKE}/cmcppdap-include-cstdint.patch"],
-        ),
-        PackageSpec.new(
           "busybox",
           DEFAULT_BUSYBOX,
           URI.parse("https://github.com/mirror/busybox/archive/refs/tags/#{DEFAULT_BUSYBOX.tr(".", "_")}.tar.gz"),
@@ -181,6 +176,24 @@ module Bootstrap
         PackageSpec.new("make", DEFAULT_GNU_MAKE, URI.parse("https://ftp.gnu.org/gnu/make/make-#{DEFAULT_GNU_MAKE}.tar.gz")),
         PackageSpec.new("zlib", DEFAULT_ZLIB, URI.parse("https://zlib.net/zlib-#{DEFAULT_ZLIB}.tar.gz")),
         PackageSpec.new("libressl", DEFAULT_LIBRESSL, URI.parse("https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-#{DEFAULT_LIBRESSL}.tar.gz")),
+        PackageSpec.new(
+          "cmake",
+          DEFAULT_CMAKE,
+          URI.parse("https://github.com/Kitware/CMake/releases/download/v#{DEFAULT_CMAKE}/cmake-#{DEFAULT_CMAKE}.tar.gz"),
+          strategy: "cmake",
+          configure_flags: [
+            "-DCMAKE_CXX_FLAGS=-static-libstdc++ -static-libgcc",
+            "-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ -static-libgcc",
+            "-DCMake_HAVE_CXX_MAKE_UNIQUE=ON",
+            "-DCMake_HAVE_CXX_UNIQUE_PTR=ON",
+            "-DCMake_HAVE_CXX_FILESYSTEM=ON",
+            "-DOPENSSL_ROOT_DIR=/opt/sysroot",
+            "-DOPENSSL_INCLUDE_DIR=/opt/sysroot/include",
+            "-DOPENSSL_SSL_LIBRARY=/opt/sysroot/lib/libssl.so",
+            "-DOPENSSL_CRYPTO_LIBRARY=/opt/sysroot/lib/libcrypto.so",
+          ],
+          patches: ["#{bootstrap_repo_dir}/patches/cmake-#{DEFAULT_CMAKE}/cmcppdap-include-cstdint.patch"],
+        ),
         PackageSpec.new("libatomic_ops", DEFAULT_LIBATOMIC_OPS, URI.parse("https://github.com/ivmai/libatomic_ops/releases/download/v#{DEFAULT_LIBATOMIC_OPS}/libatomic_ops-#{DEFAULT_LIBATOMIC_OPS}.tar.gz")),
         PackageSpec.new(
           "llvm-project",
@@ -189,11 +202,15 @@ module Bootstrap
           strategy: "llvm",
           configure_flags: [
             "-DCMAKE_BUILD_TYPE=Release",
+            "-DCMAKE_CXX_FLAGS=-static-libstdc++ -static-libgcc",
+            "-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ -static-libgcc",
             "-DLLVM_TARGETS_TO_BUILD=AArch64",
             "-DLLVM_ENABLE_PROJECTS=clang;lld",
             "-DLLVM_INCLUDE_TESTS=OFF",
             "-DLLVM_INCLUDE_EXAMPLES=OFF",
             "-DLLVM_INCLUDE_BENCHMARKS=OFF",
+            "-DLLVM_ENABLE_TERMINFO=OFF",
+            "-DLLVM_ENABLE_PIC=OFF",
           ],
           patches: ["#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/smallvector-include-cstdint.patch"],
         ),
@@ -431,6 +448,7 @@ module Bootstrap
     def phase_specs : Array(PhaseSpec)
       sysroot_prefix = "/opt/sysroot"
       rootfs_destdir = "/workspace/rootfs"
+      musl_ld_path = "/etc/ld-musl-#{@architecture}.path"
       [
         PhaseSpec.new(
           name: "sysroot-from-alpine",
@@ -441,6 +459,12 @@ module Bootstrap
           destdir: nil,
           env: sysroot_phase_env(sysroot_prefix),
           package_allowlist: nil,
+          env_overrides: {
+            "cmake" => {
+              "CPPFLAGS" => "-I#{sysroot_prefix}/include",
+              "LDFLAGS"  => "-L#{sysroot_prefix}/lib -static-libstdc++ -static-libgcc",
+            },
+          },
         ),
         PhaseSpec.new(
           name: "rootfs-from-sysroot",
@@ -451,6 +475,27 @@ module Bootstrap
           destdir: rootfs_destdir,
           env: rootfs_phase_env(sysroot_prefix),
           package_allowlist: ["musl", "busybox"],
+          extra_steps: [
+            BuildStep.new(
+              name: "musl-ld-path",
+              strategy: "write-file",
+              workdir: "/",
+              configure_flags: [] of String,
+              patches: [] of String,
+              install_prefix: musl_ld_path,
+              env: {
+                "CONTENT" => "/lib:/usr/lib:/opt/sysroot/lib:/opt/sysroot/usr/lib\n",
+              },
+            ),
+            BuildStep.new(
+              name: "sysroot",
+              strategy: "copy-tree",
+              workdir: sysroot_prefix,
+              configure_flags: [] of String,
+              patches: [] of String,
+              install_prefix: sysroot_prefix,
+            ),
+          ],
         ),
       ]
     end
@@ -474,9 +519,11 @@ module Bootstrap
     # the seed rootfs uses Clang for all C/C++ compilation.
     private def sysroot_phase_env(sysroot_prefix : String) : Hash(String, String)
       {
-        "PATH" => "#{sysroot_prefix}/bin:#{sysroot_prefix}/sbin:/usr/bin:/bin",
-        "CC"   => "/usr/bin/clang",
-        "CXX"  => "/usr/bin/clang++",
+        "PATH"     => "#{sysroot_prefix}/bin:#{sysroot_prefix}/sbin:/usr/bin:/bin",
+        "CC"       => "/usr/bin/clang",
+        "CXX"      => "/usr/bin/clang++",
+        "CXXFLAGS" => "-static-libstdc++ -static-libgcc",
+        "LDFLAGS"  => "-static-libstdc++ -static-libgcc",
       }
     end
 
@@ -507,8 +554,10 @@ module Bootstrap
           workdir: build_root,
           configure_flags: configure_flags_for(pkg, spec),
           patches: patches_for(pkg, spec),
+          env: spec.env_overrides[pkg.name]? || ({} of String => String),
         )
       end
+      steps.concat(spec.extra_steps) unless spec.extra_steps.empty?
       BuildPhase.new(
         name: spec.name,
         description: spec.description,
