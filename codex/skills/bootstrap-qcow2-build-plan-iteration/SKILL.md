@@ -24,13 +24,14 @@ Source trees:
 1. Confirm you are inside the expected rootfs:
    - `test -f /var/lib/sysroot-build-state.json && cat /var/lib/sysroot-build-state.json`
    - `test -f /var/lib/sysroot-build-plan.json`
+   - `test -d /workspace && ls /workspace | head`
 2. If you are iterating on the tooling itself, build it from the live repo:
    - `cd /work/bootstrap-qcow2`
    - If Crystal cache permissions fail: `CRYSTAL_CACHE_DIR=/tmp/crystal_cache shards build`
    - Refresh entrypoints: `./bin/bq2 --install`
 3. Run the plan:
    - `./bin/bq2 sysroot-runner`
-   - The runner auto-resumes by skipping steps listed as completed in `/var/lib/sysroot-build-state.json`.
+   - The runner auto-resumes by skipping steps listed as completed in `/var/lib/sysroot-build-state.json` and invalidates that state automatically when the overrides file changes.
 4. On failure:
    - Read the newest report in `/var/lib/sysroot-build-reports/`.
    - Encode the next hypothesis in `/var/lib/sysroot-build-overrides.json`.

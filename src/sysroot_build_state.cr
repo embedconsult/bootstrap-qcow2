@@ -1,4 +1,5 @@
 require "json"
+require "digest/sha256"
 require "file_utils"
 require "random/secure"
 require "time"
@@ -37,8 +38,26 @@ module Bootstrap
     # Absolute path to the runtime overrides JSON inside the rootfs, when used.
     property overrides_path : String?
 
+    # SHA256 digest (hex) of the build plan file used to produce this state.
+    #
+    # When this digest changes, the runner should treat the plan inputs as
+    # different and should avoid skipping completed steps from a prior run.
+    property plan_digest : String?
+
+    # SHA256 digest (hex) of the overrides file used to produce this state.
+    #
+    # When this digest changes, the runner should treat overrides as different
+    # and should avoid skipping completed steps from a prior run.
+    property overrides_digest : String?
+
     # Absolute path to the failure report directory inside the rootfs, when enabled.
     property report_dir : String?
+
+    # Timestamp (UTC, ISO8601) for the most recent state invalidation.
+    property invalidated_at : String?
+
+    # Human-readable reason for invalidating runner progress.
+    property invalidation_reason : String?
 
     # Runner progress tracked per phase/package.
     getter progress : Progress = Progress.new
@@ -48,7 +67,11 @@ module Bootstrap
                    @updated_at : String? = nil,
                    @plan_path : String = DEFAULT_PLAN,
                    @overrides_path : String? = DEFAULT_OVERRIDES,
+                   @plan_digest : String? = nil,
+                   @overrides_digest : String? = nil,
                    @report_dir : String? = DEFAULT_REPORTS,
+                   @invalidated_at : String? = nil,
+                   @invalidation_reason : String? = nil,
                    @progress : Progress = Progress.new,
                    @format_version : Int32 = FORMAT_VERSION)
     end
@@ -75,6 +98,7 @@ module Bootstrap
       state.plan_path = plan_path
       state.overrides_path = overrides_path
       state.report_dir = report_dir
+      state.reconcile_inputs!
       state.touch!
       state
     end
@@ -119,6 +143,46 @@ module Bootstrap
     # Update `updated_at` to the current UTC time.
     def touch! : Nil
       self.updated_at = Time.utc.to_s
+    end
+
+    # Ensure stored digests match the current plan/overrides files.
+    #
+    # When the plan or overrides inputs change, this clears completed steps so
+    # the runner does not incorrectly skip work based on stale state.
+    def reconcile_inputs! : Nil
+      previous_plan = plan_digest
+      previous_overrides = overrides_digest
+      current_plan = digest_for?(plan_path)
+      current_overrides = overrides_path ? digest_for?(overrides_path.not_nil!) : nil
+
+      self.plan_digest = current_plan
+      self.overrides_digest = current_overrides
+
+      return if progress.completed_steps.empty?
+
+      changed = false
+      changed ||= previous_plan != current_plan
+      changed ||= previous_overrides != current_overrides
+      return unless changed
+
+      progress.completed_steps.clear
+      progress.current_phase = nil
+      progress.last_success = nil
+      progress.last_failure = nil
+      self.invalidated_at = Time.utc.to_s
+      self.invalidation_reason = "Build plan/overrides changed; cleared completed steps"
+    end
+
+    private def digest_for?(path : String) : String?
+      return nil unless File.exists?(path)
+      digest = Digest::SHA256.new
+      File.open(path) do |file|
+        buffer = Bytes.new(8192)
+        while (read = file.read(buffer)) > 0
+          digest.update(buffer[0, read])
+        end
+      end
+      digest.final.hexstring
     end
 
     # Minimal step reference used for progress tracking.

@@ -12,7 +12,7 @@ Use this after a reviewer finishes leaving comments to pull the latest feedback 
 From the repo root:
 
 ```sh
-./bin/bq2 github-pr-feedback --pr 42 --pretty
+./bin/bq2 github-pr-feedback --pr <PR_NUMBER> --pretty
 ```
 
 ## Notes

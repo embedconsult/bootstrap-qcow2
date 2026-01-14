@@ -33,6 +33,8 @@ Pass `--skip-sources` to omit cached source archives when you only need the base
 * cache - checksums for the various downloads
 * sources - downloaded tarballs
 
+Use `--reuse-rootfs` to reuse an existing prepared `data/sysroot/rootfs` directory (and still emit a tarball unless `--no-tarball` is set).
+
 The rootfs output includes:
 - Alpine minirootfs 3.23.2 (aarch64 by default)
 - Cached source archives for core packages (musl, busybox, clang/LLVM, etc.)

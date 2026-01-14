@@ -48,18 +48,21 @@ See `codex/skills/bootstrap-qcow2-build-plan-iteration/SKILL.md` for Codex-orien
 2. Build and refresh local CLI entrypoints (host): `shards build && ./bin/bq2 --install`.
 3. Prepare (or reuse) the sysroot rootfs workspace:
    - Prepare: `./bin/sysroot-builder --no-tarball`
-   - Reuse: `./bin/sysroot-builder --no-tarball --reuse-rootfs`
+   - Reuse: `./bin/sysroot-builder --reuse-rootfs` (optionally add `--no-tarball` when you only need the directory)
    - Reset: delete `data/sysroot/rootfs` (or pick a new `--workspace`).
    - Bookmarks/state (inside rootfs):
      - Build plan (immutable during iterations): `/var/lib/sysroot-build-plan.json` (host path: `data/sysroot/rootfs/var/lib/sysroot-build-plan.json`)
+     - Overrides (mutable, back-annotate later): `/var/lib/sysroot-build-overrides.json` (host path: `data/sysroot/rootfs/var/lib/sysroot-build-overrides.json`)
      - Iteration state/bookmark (created/updated by `sysroot-runner`): `/var/lib/sysroot-build-state.json` (host path: `data/sysroot/rootfs/var/lib/sysroot-build-state.json`)
+     - Failure reports (append-only): `/var/lib/sysroot-build-reports/*.json` (host path: `data/sysroot/rootfs/var/lib/sysroot-build-reports/*.json`)
 4. Enter the rootfs:
-   - Manual shell: `./bin/sysroot-namespace --rootfs data/sysroot/rootfs --bind=codex/work:/work -- /bin/sh`
+   - Manual shell: `./bin/sysroot-namespace --rootfs data/sysroot/rootfs -- /bin/sh`
    - Codex-assisted iteration: `./bin/bq2 codex-namespace` (binds host `./codex/work` into `/work` by default; saves/resumes the last Codex session via `/work/.codex-session-id`).
    - Note: steps 1–4 are typically performed manually to launch the iteration environment; Codex iteration usually begins at step 5 or step 7 depending on the prompt.
 5. Confirm you are inside the intended rootfs before iterating:
    - `test -f /var/lib/sysroot-build-state.json && cat /var/lib/sysroot-build-state.json`
    - `test -f /var/lib/sysroot-build-plan.json`
+   - `test -d /workspace && ls /workspace | head`
 6. Choose the source tree mode:
    - Live, mutable repo: `cd /work/bootstrap-qcow2` (preferred while updating builder/runner)
    - Staged snapshot (static): `cd /workspace/bootstrap-qcow2-master`

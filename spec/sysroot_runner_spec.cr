@@ -4,8 +4,6 @@ require "file_utils"
 require "random/secure"
 
 class RecordingRunner
-  include Bootstrap::SysrootRunner::CommandRunner
-
   getter calls = [] of NamedTuple(phase: String, name: String, workdir: String, strategy: String, configure_flags: Array(String), env: Hash(String, String))
   property status : Bool = true
   property exit_code : Int32 = 0
@@ -296,7 +294,12 @@ describe Bootstrap::SysrootRunner do
     state_path : String? = nil
     state_path = File.tempname("bq2-state").not_nil!
     File.delete?(state_path)
-    state = Bootstrap::SysrootBuildState.new(plan_path: plan_path)
+    state = Bootstrap::SysrootBuildState.load_or_init(
+      state_path,
+      plan_path: plan_path,
+      overrides_path: Bootstrap::SysrootRunner::DEFAULT_OVERRIDES_PATH,
+      report_dir: nil
+    )
     state.mark_success("one", "a")
     state.save(state_path)
 
@@ -307,6 +310,46 @@ describe Bootstrap::SysrootRunner do
     updated = Bootstrap::SysrootBuildState.load(state_path)
     updated.completed?("one", "a").should be_true
     updated.completed?("one", "b").should be_true
+  ensure
+    File.delete?(state_path) if state_path
+  end
+
+  it "honors resume=false by running completed steps when a state file is present" do
+    plan = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "a",
+        workspace: "/workspace",
+        environment: "test",
+        install_prefix: "/opt/sysroot",
+        steps: [
+          Bootstrap::BuildStep.new(name: "a", strategy: "autotools", workdir: "/a", configure_flags: [] of String, patches: [] of String),
+          Bootstrap::BuildStep.new(name: "b", strategy: "autotools", workdir: "/b", configure_flags: [] of String, patches: [] of String),
+        ],
+      ),
+    ])
+
+    plan_file = File.tempfile("plan")
+    plan_file.print(plan.to_json)
+    plan_file.flush
+    plan_path = plan_file.path
+    plan_file.close
+
+    state_path : String? = nil
+    state_path = File.tempname("bq2-state").not_nil!
+    File.delete?(state_path)
+    state = Bootstrap::SysrootBuildState.load_or_init(
+      state_path,
+      plan_path: plan_path,
+      overrides_path: Bootstrap::SysrootRunner::DEFAULT_OVERRIDES_PATH,
+      report_dir: nil
+    )
+    state.mark_success("one", "a")
+    state.save(state_path)
+
+    runner = RecordingRunner.new
+    Bootstrap::SysrootRunner.run_plan(plan_path, runner, report_dir: nil, state_path: state_path, resume: false)
+    runner.calls.map { |call| call[:name] }.should eq ["a", "b"]
   ensure
     File.delete?(state_path) if state_path
   end

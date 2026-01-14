@@ -512,6 +512,20 @@ module Bootstrap
       output
     end
 
+    # Generate a chroot tarball from an already-prepared rootfs.
+    #
+    # This does not regenerate the rootfs or rewrite the build plan; it only
+    # packages the existing `rootfs_dir` into a tarball. Raises when the rootfs
+    # is missing the serialized build plan (i.e. `rootfs_ready?` is false).
+    def write_chroot_tarball(output : Path? = nil) : Path
+      raise "Rootfs is not prepared at #{rootfs_dir}" unless rootfs_ready?
+      output ||= rootfs_dir.parent / "sysroot.tar.gz"
+      FileUtils.mkdir_p(output.parent) if output.parent
+      write_tar_gz(rootfs_dir, output)
+      chown_tarball_to_sudo_user(output)
+      output
+    end
+
     # Remove known archive extensions to derive the directory name.
     private def strip_archive_extension(filename : String) : String
       archive_suffixes = %w[.tar.gz .tar.xz .tar.bz2 .tgz .tbz2 .zip .tar]

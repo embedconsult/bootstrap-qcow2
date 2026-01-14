@@ -20,13 +20,6 @@ module Bootstrap
     DEFAULT_REPORT_DIR     = "/var/lib/sysroot-build-reports"
     DEFAULT_STATE_PATH     = SysrootBuildState::DEFAULT_PATH
 
-    # Abstraction for running build strategies; enables fast unit tests by
-    # supplying a fake runner instead of invoking processes.
-    module CommandRunner
-      # Executes a single *step* within the context of its containing *phase*.
-      abstract def run(phase : BuildPhase, step : BuildStep)
-    end
-
     # Raised when a command fails during a SystemRunner invocation.
     class CommandFailedError < Exception
       getter argv : Array(String)
@@ -39,8 +32,6 @@ module Bootstrap
 
     # Default runner that shells out via Process.run using strategy metadata.
     struct SystemRunner
-      include CommandRunner
-
       # Run a build step using the selected strategy.
       #
       # The effective install destination is computed from the phase defaults
@@ -135,7 +126,7 @@ module Bootstrap
     # state bookmark at `/var/lib/sysroot-build-state.json` to skip previously
     # completed steps and to persist progress for fast, iterative retries.
     def self.run_plan(path : String = DEFAULT_PLAN_PATH,
-                      runner : CommandRunner = SystemRunner.new,
+                      runner = SystemRunner.new,
                       phase : String? = nil,
                       packages : Array(String)? = nil,
                       overrides_path : String? = DEFAULT_OVERRIDES_PATH,
@@ -165,7 +156,7 @@ module Bootstrap
     # By default only the first phase is executed; pass `phase: "all"` or a
     # specific phase name to override.
     def self.run_plan(plan : BuildPlan,
-                      runner : CommandRunner = SystemRunner.new,
+                      runner = SystemRunner.new,
                       phase : String? = nil,
                       packages : Array(String)? = nil,
                       report_dir : String? = DEFAULT_REPORT_DIR,
@@ -181,34 +172,36 @@ module Bootstrap
         return
       end
       phases.each do |phase_plan|
-        run_phase(phase_plan, runner, report_dir: report_dir, state: state, state_path: state_path)
+        run_phase(phase_plan, runner, report_dir: report_dir, state: state, state_path: state_path, resume: resume)
       end
     end
 
     # Run a single phase from the plan.
     def self.run_phase(phase : BuildPhase,
-                       runner : CommandRunner = SystemRunner.new,
+                       runner = SystemRunner.new,
                        report_dir : String? = DEFAULT_REPORT_DIR,
                        state : SysrootBuildState? = nil,
-                       state_path : String? = nil)
+                       state_path : String? = nil,
+                       resume : Bool = true)
       Log.info { "Executing phase #{phase.name} (env=#{phase.environment}, workspace=#{phase.workspace})" }
       if destdir = phase.destdir
         prepare_destdir(destdir)
       end
-      run_steps(phase, phase.steps, runner, report_dir: report_dir, state: state, state_path: state_path)
+      run_steps(phase, phase.steps, runner, report_dir: report_dir, state: state, state_path: state_path, resume: resume)
       Log.info { "Completed phase #{phase.name}" }
     end
 
     # Execute a list of BuildStep entries, stopping immediately on failure.
     def self.run_steps(phase : BuildPhase,
                        steps : Array(BuildStep),
-                       runner : CommandRunner = SystemRunner.new,
+                       runner = SystemRunner.new,
                        report_dir : String? = DEFAULT_REPORT_DIR,
                        state : SysrootBuildState? = nil,
-                       state_path : String? = nil)
+                       state_path : String? = nil,
+                       resume : Bool = true)
       Log.info { "Executing #{steps.size} build steps" }
       steps.each do |step|
-        if state && state.completed?(phase.name, step.name)
+        if resume && state && state.completed?(phase.name, step.name)
           Log.info { "Skipping previously completed #{phase.name}/#{step.name}" }
           next
         end

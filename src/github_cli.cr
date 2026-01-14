@@ -43,7 +43,7 @@ module Bootstrap
       credentials_path = File.exists?("/work/.git-credentials") ? Path["/work/.git-credentials"] : Path["../.git-credentials"]
       per_page = 100
 
-      parser, _remaining, help = CLI.parse(args, "Usage: bootstrap-qcow2 github-pr-feedback [options]") do |p|
+      parser, _remaining, help = CLI.parse(args, "Usage: bq2 github-pr-feedback [options]") do |p|
         p.on("--repo REPO", "GitHub repo (owner/name). Defaults from repo/env when possible") { |val| repo = val }
         p.on("--pr NUM", "Pull request number") { |val| pr_number = val.to_i }
         p.on("--credentials PATH", "GitHub credentials file (default: #{credentials_path})") { |val| credentials_path = Path[val] }
@@ -83,7 +83,7 @@ module Bootstrap
       body_file : String? = nil
       credentials_path = File.exists?("/work/.git-credentials") ? Path["/work/.git-credentials"] : Path["../.git-credentials"]
 
-      parser, _remaining, help = CLI.parse(args, "Usage: bootstrap-qcow2 github-pr-comment [options]") do |p|
+      parser, _remaining, help = CLI.parse(args, "Usage: bq2 github-pr-comment [options]") do |p|
         p.on("--repo REPO", "GitHub repo (owner/name). Defaults from repo/env when possible") { |val| repo = val }
         p.on("--pr NUM", "Pull request number") { |val| pr_number = val.to_i }
         p.on("--body TEXT", "Comment body") { |val| body = val }
@@ -124,7 +124,7 @@ module Bootstrap
       body_file : String? = nil
       credentials_path = File.exists?("/work/.git-credentials") ? Path["/work/.git-credentials"] : Path["../.git-credentials"]
 
-      parser, _remaining, help = CLI.parse(args, "Usage: bootstrap-qcow2 github-pr-create [options]") do |p|
+      parser, _remaining, help = CLI.parse(args, "Usage: bq2 github-pr-create [options]") do |p|
         p.on("--repo REPO", "GitHub repo (owner/name). Defaults from repo/env when possible") { |val| repo = val }
         p.on("--title TITLE", "PR title") { |val| title = val }
         p.on("--head BRANCH", "Head branch (e.g. codex/my-branch)") { |val| head = val }

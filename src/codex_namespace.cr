@@ -7,7 +7,7 @@ module Bootstrap
     DEFAULT_ROOTFS = Path["data/sysroot/rootfs"]
 
     # Runs a command inside a fresh namespace rooted at *rootfs*. Binds the host
-    # work directory into `/work` when requested.
+    # work directory (`./codex/work`) into `/work` when requested.
     #
     # When invoking Codex, the wrapper stores the most recent Codex session id in
     # `/work/.codex-session-id` and will resume that session on the next run when
@@ -16,11 +16,10 @@ module Bootstrap
     def self.run(command : Array(String) = ["npx", "codex"],
                  rootfs : Path = DEFAULT_ROOTFS,
                  bind_work : Bool = true,
-                 extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path),
                  alpine_setup : Bool = false) : Process::Status
       raise "Empty command" if command.empty?
 
-      binds = extra_binds.dup
+      binds = [] of Tuple(Path, Path)
       if bind_work
         host_work = Path["codex/work"].expand
         FileUtils.mkdir_p(host_work)
@@ -47,7 +46,7 @@ module Bootstrap
       end
 
       if alpine_setup
-        status = Process.run("apk", ["add", "nodejs-lts", "npm", "bash"], output: STDOUT, error: STDERR)
+        status = Process.run("apk", ["add", "nodejs-lts", "npm", "bash", "crystal", "openssl-dev"], output: STDOUT, error: STDERR)
         raise "apk install failed" unless status.success?
         status = Process.run("npm", ["i", "-g", "@openai/codex"], output: STDOUT, error: STDERR)
         raise "npm install failed" unless status.success?

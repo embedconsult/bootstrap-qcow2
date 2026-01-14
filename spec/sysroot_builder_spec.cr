@@ -302,6 +302,26 @@ describe Bootstrap::SysrootBuilder do
     end
   end
 
+  it "can write a tarball for an existing prepared rootfs" do
+    with_tempdir do |dir|
+      tar_dir = dir / "tarroot"
+      FileUtils.mkdir_p(tar_dir)
+      File.write(tar_dir / "etc.txt", "config")
+      tarball = dir / "miniroot.tar"
+      Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
+
+      builder = StubBuilder.new(dir)
+      builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
+      builder.skip_stage_sources = true
+      builder.fake_tarball = tarball
+      builder.generate_chroot(include_sources: false)
+
+      output = dir / "existing-rootfs.tar.gz"
+      builder.write_chroot_tarball(output)
+      File.exists?(output).should be_true
+    end
+  end
+
   it "can prepare a chroot directory without a tarball" do
     with_tempdir do |dir|
       tar_dir = dir / "tarroot"
