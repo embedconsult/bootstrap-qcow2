@@ -5,12 +5,7 @@ require "./codex_session_bookmark"
 
 module Bootstrap
   module CodexNamespace
-    DEFAULT_ROOTFS         = Path["data/sysroot/rootfs"]
-    DEFAULT_CODEX_ADD_DIRS = [
-      "/var",
-      "/opt",
-      "/workspace",
-    ]
+    DEFAULT_ROOTFS = Path["data/sysroot/rootfs"]
 
     # Runs a command inside a fresh namespace rooted at *rootfs*. Binds the host
     # work directory (`./codex/work`) into `/work` when requested.
@@ -22,8 +17,7 @@ module Bootstrap
     def self.run(command : Array(String) = ["npx", "codex"],
                  rootfs : Path = DEFAULT_ROOTFS,
                  bind_work : Bool = true,
-                 alpine_setup : Bool = false,
-                 codex_add_dirs : Array(String) = DEFAULT_CODEX_ADD_DIRS) : Process::Status
+                 alpine_setup : Bool = false) : Process::Status
       raise "Empty command" if command.empty?
 
       binds = [] of Tuple(Path, Path)
@@ -44,10 +38,11 @@ module Bootstrap
         env["HOME"] = "/work"
         env["CODEX_HOME"] = "/work/.codex"
         FileUtils.mkdir_p(Path["/work/.codex"])
-        if command == ["npx", "codex"] || command == ["codex"]
-          command = inject_codex_add_dirs(command, codex_add_dirs)
-          if bookmark = CodexSessionBookmark.read(Path["/work"])
-            command += ["resume", bookmark]
+        if bookmark = CodexSessionBookmark.read(Path["/work"])
+          if command == ["npx", "codex"]
+            command = ["npx", "codex", "resume", bookmark]
+          elsif command == ["codex"]
+            command = ["codex", "resume", bookmark]
           end
         end
       end
@@ -64,24 +59,6 @@ module Bootstrap
         end
       end
       status
-    end
-
-    private def self.inject_codex_add_dirs(command : Array(String), dirs : Array(String)) : Array(String)
-      insert_at =
-        if command.size >= 2 && command[0] == "npx" && command[1] == "codex"
-          2
-        elsif command[0] == "codex"
-          1
-        else
-          return command
-        end
-
-      updated = command.dup
-      dirs.reverse_each do |dir|
-        updated.insert(insert_at, dir)
-        updated.insert(insert_at, "--add-dir")
-      end
-      updated
     end
   end
 end
