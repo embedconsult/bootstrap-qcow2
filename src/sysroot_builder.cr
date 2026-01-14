@@ -122,6 +122,18 @@ module Bootstrap
       @workspace / "rootfs"
     end
 
+    # Absolute path to the serialized build plan inside the rootfs.
+    def plan_path : Path
+      rootfs_dir / "var/lib/sysroot-build-plan.json"
+    end
+
+    # Returns true when the workspace contains a prepared rootfs with a
+    # serialized build plan. Iteration state is created by `SysrootRunner` and
+    # is not part of a clean sysroot build output.
+    def rootfs_ready? : Bool
+      File.exists?(plan_path)
+    end
+
     # Directory containing the staged sysroot install prefix.
     def sysroot_dir : Path
       @workspace / "sysroot"
@@ -147,7 +159,6 @@ module Bootstrap
           "bootstrap-qcow2",
           bootstrap_source_branch,
           URI.parse("https://github.com/embedconsult/bootstrap-qcow2/archive/refs/heads/#{bootstrap_source_branch}.tar.gz"),
-          build_directory: "bootstrap-qcow2",
           strategy: "crystal",
         ),
         PackageSpec.new("m4", DEFAULT_M4, URI.parse("https://ftp.gnu.org/gnu/m4/m4-#{DEFAULT_M4}.tar.gz")),
@@ -428,10 +439,9 @@ module Bootstrap
 
     # Persist the build plan JSON into the chroot at /var/lib/sysroot-build-plan.json.
     def write_plan(plan : BuildPlan = build_plan) : Path
-      plan_path = rootfs_dir / "var/lib/sysroot-build-plan.json"
-      FileUtils.mkdir_p(plan_path.parent)
-      File.write(plan_path, plan.to_json)
-      plan_path
+      FileUtils.mkdir_p(self.plan_path.parent)
+      File.write(self.plan_path, plan.to_json)
+      self.plan_path
     end
 
     # Convert a PhaseSpec into a concrete BuildPhase with computed workdirs and
@@ -495,6 +505,20 @@ module Bootstrap
     # Generate a chroot tarball for the prepared rootfs.
     def generate_chroot_tarball(output : Path? = nil, include_sources : Bool = true) : Path
       generate_chroot(include_sources: include_sources)
+      output ||= rootfs_dir.parent / "sysroot.tar.gz"
+      FileUtils.mkdir_p(output.parent) if output.parent
+      write_tar_gz(rootfs_dir, output)
+      chown_tarball_to_sudo_user(output)
+      output
+    end
+
+    # Generate a chroot tarball from an already-prepared rootfs.
+    #
+    # This does not regenerate the rootfs or rewrite the build plan; it only
+    # packages the existing `rootfs_dir` into a tarball. Raises when the rootfs
+    # is missing the serialized build plan (i.e. `rootfs_ready?` is false).
+    def write_chroot_tarball(output : Path? = nil) : Path
+      raise "Rootfs is not prepared at #{rootfs_dir}" unless rootfs_ready?
       output ||= rootfs_dir.parent / "sysroot.tar.gz"
       FileUtils.mkdir_p(output.parent) if output.parent
       write_tar_gz(rootfs_dir, output)
