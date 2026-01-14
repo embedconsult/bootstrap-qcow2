@@ -256,7 +256,8 @@ module Bootstrap
           "crystal",
           DEFAULT_CRYSTAL,
           URI.parse("https://github.com/crystal-lang/crystal/archive/refs/tags/#{DEFAULT_CRYSTAL}.tar.gz"),
-          phases: ["crystal-from-system"],
+          strategy: "crystal-compiler",
+          phases: ["crystal-from-sysroot", "crystal-from-system"],
         ),
       ]
     end
@@ -504,6 +505,23 @@ module Bootstrap
               "LDFLAGS"  => "-L#{sysroot_prefix}/lib -static-libstdc++ -static-libgcc",
             },
           },
+        ),
+        PhaseSpec.new(
+          name: "crystal-from-sysroot",
+          description: "Build Crystal into the sysroot prefix (requires an existing Crystal compiler).",
+          workspace: "/workspace",
+          environment: "sysroot-toolchain",
+          install_prefix: sysroot_prefix,
+          destdir: nil,
+          env: rootfs_phase_env(sysroot_prefix).merge({
+            "CRYSTAL"      => "/usr/bin/crystal",
+            "SHARDS"       => "/usr/bin/shards",
+            "LLVM_CONFIG"  => "#{sysroot_prefix}/bin/llvm-config",
+            "CPPFLAGS"     => "-I#{sysroot_prefix}/include",
+            "LDFLAGS"      => "-L#{sysroot_prefix}/lib",
+            "LIBRARY_PATH" => "#{sysroot_prefix}/lib",
+          }),
+          package_allowlist: nil,
         ),
         PhaseSpec.new(
           name: "rootfs-from-sysroot",
