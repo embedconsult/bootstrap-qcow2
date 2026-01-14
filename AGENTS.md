@@ -69,10 +69,16 @@ See `codex/skills/bootstrap-qcow2-build-plan-iteration/SKILL.md` for Codex-orien
 7. Iterate builds without touching the plan:
    - Update tooling: `shards build && ./bin/bq2 --install`
    - Re-run the plan runner: `./bin/bq2 sysroot-runner` (auto-resumes based on `/var/lib/sysroot-build-state.json`)
+   - To fully disable overrides (including the default `/var/lib/sysroot-build-overrides.json`), use: `./bin/bq2 sysroot-runner --no-overrides`
 8. Capture lessons-learned and back-annotate:
    - On failure, read the JSON report in `/var/lib/sysroot-build-reports`.
    - Encode fixes in `/var/lib/sysroot-build-overrides.json` and rerun.
    - After a full successful round, back-port the overrides into `SysrootBuilder.phase_specs` (or helpers) in the live repo, then delete the overrides and state files and retry from scratch for reproducibility.
+
+### Notes for reproducible replays
+
+- The generated plan may reference patch paths under `/workspace/bootstrap-qcow2-<branch>/patches/...`; that directory comes from the staged bootstrap-qcow2 source tarball extracted by `sysroot-builder`.
+- If you are iterating with a live repo in `/work/bootstrap-qcow2` but the staged `/workspace/bootstrap-qcow2-<branch>` tree is missing (e.g., older rootfs/workspace), prefer regenerating the workspace; as a temporary debug-only workaround you can bind or symlink the live repo into that expected `/workspace` path.
 
 ## PR/commit expectations
 - Commit messages should summarize the behavioral change and the architecture(s) affected.
