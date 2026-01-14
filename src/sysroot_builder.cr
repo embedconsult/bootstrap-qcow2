@@ -23,7 +23,13 @@ module Bootstrap
   # * Coordinator source is stored in the repository and copied into the chroot
   #   so it participates in formatting and specs.
   class SysrootBuilder
-    DEFAULT_ARCH          = "aarch64"
+    {% if flag?(:x86_64) %}
+      DEFAULT_ARCH = "x86_64"
+    {% elsif flag?(:aarch64) %}
+      DEFAULT_ARCH = "aarch64"
+    {% else %}
+      DEFAULT_ARCH = ""
+    {% end %}
     DEFAULT_BRANCH        = "v3.23"
     DEFAULT_BASE_VERSION  = "3.23.2"
     DEFAULT_LLVM_VER      = "18.1.7"
