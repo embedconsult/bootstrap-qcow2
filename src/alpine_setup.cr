@@ -29,7 +29,6 @@ module Bootstrap
       musl-dev
       patch
       perl
-      python3
       shards
     ]
 
