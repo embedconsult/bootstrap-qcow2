@@ -290,10 +290,13 @@ module Bootstrap
     private def self.run_codex_namespace(args : Array(String)) : Int32
       rootfs = Path["data/sysroot/rootfs"]
       alpine_setup = false
+      add_dirs = Bootstrap::CodexNamespace::DEFAULT_CODEX_ADD_DIRS.dup
 
       parser, remaining, help = CLI.parse(args, "Usage: bq2 codex-namespace [options]") do |p|
         p.on("-C DIR", "Rootfs directory for the command (default: #{rootfs})") { |dir| rootfs = Path[dir].expand }
         p.on("--alpine", "Assume rootfs is Alpine and install runtime deps for Codex (node/npm/crystal)") { alpine_setup = true }
+        p.on("--no-default-add-dirs", "Do not pass the default Codex sandbox writable dirs (/var,/opt,/workspace)") { add_dirs.clear }
+        p.on("--add-dir PATH", "Add an extra writable dir for the Codex sandbox (repeatable)") { |dir| add_dirs << dir }
       end
       return CLI.print_help(parser) if help
 
@@ -303,7 +306,7 @@ module Bootstrap
         return 1
       end
 
-      status = CodexNamespace.run(rootfs: rootfs, alpine_setup: alpine_setup)
+      status = CodexNamespace.run(rootfs: rootfs, alpine_setup: alpine_setup, add_dirs: add_dirs)
       status.exit_code
     rescue ex : SysrootNamespace::NamespaceError
       STDERR.puts "Namespace setup failed: #{ex.message}"
