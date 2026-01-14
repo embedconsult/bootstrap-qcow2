@@ -50,8 +50,8 @@ describe Bootstrap::CodexNamespace do
             rootfs = temp_root / "rootfs"
             FileUtils.mkdir_p(rootfs)
             work_dir = temp_root / "workdir"
-            ENV["PATH"] = temp_root.to_s + "/bin:" + ENV["PATH"]
-            status = Bootstrap::CodexNamespace.run(rootfs: rootfs, alpine_setup: false, work_dir: work_dir)
+            exec_path = (temp_root / "bin").to_s + ":/usr/bin:/bin"
+            status = Bootstrap::CodexNamespace.run(rootfs: rootfs, alpine_setup: false, exec_path: exec_path, work_dir: work_dir)
             exit 1 unless status.success?
 
             captured = Bootstrap::SysrootNamespace.captured_binds
@@ -112,8 +112,8 @@ describe Bootstrap::CodexNamespace do
             rootfs = temp_root / "rootfs"
             FileUtils.mkdir_p(rootfs)
             work_dir = temp_root / "workdir"
-            ENV["PATH"] = temp_root.to_s + "/bin:" + ENV["PATH"]
-            status = Bootstrap::CodexNamespace.run(rootfs: rootfs, alpine_setup: false, work_dir: work_dir)
+            exec_path = (temp_root / "bin").to_s + ":/usr/bin:/bin"
+            status = Bootstrap::CodexNamespace.run(rootfs: rootfs, alpine_setup: false, exec_path: exec_path, work_dir: work_dir)
             exit status.exit_code
           end
         CR
@@ -166,8 +166,8 @@ describe Bootstrap::CodexNamespace do
             rootfs = temp_root / "rootfs"
             FileUtils.mkdir_p(rootfs)
             work_dir = temp_root / "workdir"
-            ENV["PATH"] = temp_root.to_s + "/bin:" + ENV["PATH"]
-            status = Bootstrap::CodexNamespace.run(rootfs: rootfs, alpine_setup: false, add_dirs: ["/tmp/custom"], work_dir: work_dir)
+            exec_path = (temp_root / "bin").to_s + ":/usr/bin:/bin"
+            status = Bootstrap::CodexNamespace.run(rootfs: rootfs, alpine_setup: false, add_dirs: ["/tmp/custom"], exec_path: exec_path, work_dir: work_dir)
             exit status.exit_code
           end
         CR

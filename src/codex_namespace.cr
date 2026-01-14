@@ -13,6 +13,7 @@ module Bootstrap
     ]
     DEFAULT_WORK_MOUNT = Path["work"]
     DEFAULT_WORK_DIR   = Path["/work"]
+    DEFAULT_EXEC_PATH  = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
     # Runs a command inside a fresh namespace rooted at *rootfs*. Binds the host
     # work directory (`./codex/work`) into `/work`.
@@ -24,6 +25,7 @@ module Bootstrap
     def self.run(rootfs : Path = DEFAULT_ROOTFS,
                  alpine_setup : Bool = false,
                  add_dirs : Array(String) = DEFAULT_CODEX_ADD_DIRS,
+                 exec_path : String = DEFAULT_EXEC_PATH,
                  work_mount : Path = DEFAULT_WORK_MOUNT,
                  work_dir : Path = DEFAULT_WORK_DIR) : Process::Status
       host_work = Path["codex/work"].expand
@@ -39,8 +41,11 @@ module Bootstrap
       env = {
         "HOME"       => work_dir.to_s,
         "CODEX_HOME" => (work_dir / ".codex").to_s,
-        "PATH"       => ENV["PATH"]? || "",
+        "PATH"       => exec_path,
       }
+      if api_key = ENV["OPENAI_API_KEY"]?
+        env["OPENAI_API_KEY"] = api_key
+      end
       FileUtils.mkdir_p(work_dir / ".codex")
 
       if alpine_setup
@@ -59,7 +64,7 @@ module Bootstrap
                 else
                   ["codex"] + codex_args
                 end
-      status = Process.run(command.first, command[1..], env: env, input: STDIN, output: STDOUT, error: STDERR)
+      status = Process.run(command.first, command[1..], env: env, clear_env: true, input: STDIN, output: STDOUT, error: STDERR)
       if latest = CodexSessionBookmark.latest_from(work_dir / ".codex")
         CodexSessionBookmark.write(work_dir, latest)
       end
