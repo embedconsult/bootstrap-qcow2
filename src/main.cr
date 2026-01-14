@@ -224,7 +224,8 @@ module Bootstrap
       plan_path = SysrootRunner::DEFAULT_PLAN_PATH
       phase : String? = nil
       packages = [] of String
-      overrides_path : String? = SysrootRunner::DEFAULT_OVERRIDES_PATH
+      overrides_path : String? = nil
+      use_default_overrides = true
       report_dir : String? = SysrootRunner::DEFAULT_REPORT_DIR
       state_path : String? = nil
       dry_run = false
@@ -233,8 +234,14 @@ module Bootstrap
         p.on("--plan PATH", "Read the build plan from PATH (default: #{SysrootRunner::DEFAULT_PLAN_PATH})") { |path| plan_path = path }
         p.on("--phase NAME", "Select build phase to run (default: first phase; use 'all' for every phase)") { |name| phase = name }
         p.on("--package NAME", "Only run the named package(s); repeatable") { |name| packages << name }
-        p.on("--overrides PATH", "Apply runtime overrides JSON (default: #{SysrootRunner::DEFAULT_OVERRIDES_PATH})") { |path| overrides_path = path }
-        p.on("--no-overrides", "Disable runtime overrides") { overrides_path = nil }
+        p.on("--overrides PATH", "Apply runtime overrides JSON (default: #{SysrootRunner::DEFAULT_OVERRIDES_PATH} when using the default plan path)") do |path|
+          overrides_path = path
+          use_default_overrides = false
+        end
+        p.on("--no-overrides", "Disable runtime overrides") do
+          overrides_path = nil
+          use_default_overrides = false
+        end
         p.on("--report-dir PATH", "Write failure reports to PATH (default: #{SysrootRunner::DEFAULT_REPORT_DIR})") { |path| report_dir = path }
         p.on("--no-report", "Disable failure report writing") { report_dir = nil }
         p.on("--state-path PATH", "Write runner state/bookmarks to PATH (default: #{SysrootRunner::DEFAULT_STATE_PATH} when using the default plan path)") { |path| state_path = path }
@@ -248,6 +255,7 @@ module Bootstrap
         phase: phase,
         packages: packages.empty? ? nil : packages,
         overrides_path: overrides_path,
+        use_default_overrides: use_default_overrides,
         report_dir: report_dir,
         dry_run: dry_run,
         state_path: state_path,

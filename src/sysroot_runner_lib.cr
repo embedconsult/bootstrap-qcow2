@@ -189,6 +189,7 @@ module Bootstrap
                       phase : String? = nil,
                       packages : Array(String)? = nil,
                       overrides_path : String? = nil,
+                      use_default_overrides : Bool = true,
                       report_dir : String? = DEFAULT_REPORT_DIR,
                       dry_run : Bool = false,
                       state_path : String? = nil,
@@ -196,7 +197,12 @@ module Bootstrap
       raise "Missing build plan #{path}" unless File.exists?(path)
       Log.info { "Loading build plan from #{path}" }
       plan = BuildPlanReader.load(path)
-      effective_overrides_path = overrides_path || (path == DEFAULT_PLAN_PATH ? DEFAULT_OVERRIDES_PATH : nil)
+      effective_overrides_path =
+        if overrides_path
+          overrides_path
+        elsif use_default_overrides && path == DEFAULT_PLAN_PATH
+          DEFAULT_OVERRIDES_PATH
+        end
       plan = apply_overrides(plan, effective_overrides_path) if effective_overrides_path
       effective_state_path = state_path || (resume && path == DEFAULT_PLAN_PATH ? DEFAULT_STATE_PATH : nil)
       state = effective_state_path ? SysrootBuildState.load_or_init(effective_state_path, plan_path: path, overrides_path: effective_overrides_path, report_dir: report_dir) : nil
