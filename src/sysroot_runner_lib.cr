@@ -2,7 +2,9 @@ require "json"
 require "log"
 require "file_utils"
 require "process"
+require "time"
 require "./build_plan"
+require "./build_plan_overrides"
 
 module Bootstrap
   # SysrootRunner houses the logic that replays build steps inside the chroot.
@@ -10,11 +12,25 @@ module Bootstrap
   # and specs. The small main entrypoint simply requires this library and calls
   # `run_plan`.
   class SysrootRunner
+    DEFAULT_PLAN_PATH      = "/var/lib/sysroot-build-plan.json"
+    DEFAULT_OVERRIDES_PATH = "/var/lib/sysroot-build-overrides.json"
+    DEFAULT_REPORT_DIR     = "/var/lib/sysroot-build-reports"
+
     # Abstraction for running build strategies; enables fast unit tests by
     # supplying a fake runner instead of invoking processes.
     module CommandRunner
       # Executes a single *step* within the context of its containing *phase*.
       abstract def run(phase : BuildPhase, step : BuildStep)
+    end
+
+    # Raised when a command fails during a SystemRunner invocation.
+    class CommandFailedError < Exception
+      getter argv : Array(String)
+      getter exit_code : Int32
+
+      def initialize(@argv : Array(String), @exit_code : Int32, message : String)
+        super(message)
+      end
     end
 
     # Default runner that shells out via Process.run using strategy metadata.
@@ -72,18 +88,19 @@ module Bootstrap
       private def apply_patches(patches : Array(String))
         patches.each do |patch|
           Log.info { "Applying patch #{patch}" }
-          status = Process.run("patch", ["-p1", "-i", patch])
-          raise "Patch failed (#{status.exit_code}): #{patch}" unless status.success?
+          argv = ["patch", "-p1", "-i", patch]
+          status = Process.run(argv[0], argv[1..], output: STDOUT, error: STDERR)
+          raise CommandFailedError.new(argv, status.exit_code, "Patch failed (#{status.exit_code}): #{patch}") unless status.success?
         end
       end
 
       # Run a command array and raise if it fails.
       private def run_cmd(argv : Array(String), env : Hash(String, String) = {} of String => String)
         Log.info { "Running in #{Dir.current}: #{argv.join(" ")}" }
-        status = Process.run(argv[0], argv[1..], env: env)
+        status = Process.run(argv[0], argv[1..], env: env, output: STDOUT, error: STDERR)
         unless status.success?
           Log.error { "Command failed (#{status.exit_code}): #{argv.join(" ")}" }
-          raise "Command failed (#{status.exit_code}): #{argv.join(" ")}"
+          raise CommandFailedError.new(argv, status.exit_code, "Command failed (#{status.exit_code}): #{argv.join(" ")}")
         end
         Log.debug { "Completed #{argv.first} with exit #{status.exit_code}" }
       end
@@ -108,39 +125,61 @@ module Bootstrap
     # Load a JSON build plan from disk and replay it using the provided runner.
     # By default only the first phase is executed; pass `phase: "all"` or a
     # specific phase name to override.
-    def self.run_plan(path : String = "/var/lib/sysroot-build-plan.json", runner : CommandRunner = SystemRunner.new, phase : String? = nil)
+    def self.run_plan(path : String = DEFAULT_PLAN_PATH,
+                      runner : CommandRunner = SystemRunner.new,
+                      phase : String? = nil,
+                      packages : Array(String)? = nil,
+                      overrides_path : String? = DEFAULT_OVERRIDES_PATH,
+                      report_dir : String? = DEFAULT_REPORT_DIR,
+                      dry_run : Bool = false)
       raise "Missing build plan #{path}" unless File.exists?(path)
       Log.info { "Loading build plan from #{path}" }
       plan = BuildPlan.from_json(File.read(path))
-      run_plan(plan, runner, phase)
+      plan = apply_overrides(plan, overrides_path) if overrides_path
+      run_plan(plan, runner, phase: phase, packages: packages, report_dir: report_dir, dry_run: dry_run)
     end
 
     # Execute an in-memory plan without requiring it to be read from disk.
     # By default only the first phase is executed; pass `phase: "all"` or a
     # specific phase name to override.
-    def self.run_plan(plan : BuildPlan, runner : CommandRunner = SystemRunner.new, phase : String? = nil)
+    def self.run_plan(plan : BuildPlan,
+                      runner : CommandRunner = SystemRunner.new,
+                      phase : String? = nil,
+                      packages : Array(String)? = nil,
+                      report_dir : String? = DEFAULT_REPORT_DIR,
+                      dry_run : Bool = false)
       phases = selected_phases(plan, phase)
+      phases = filter_phases_by_packages(phases, packages) if packages
+      if dry_run
+        Log.info { describe_phases(phases) }
+        return
+      end
       phases.each do |phase_plan|
-        run_phase(phase_plan, runner)
+        run_phase(phase_plan, runner, report_dir: report_dir)
       end
     end
 
     # Run a single phase from the plan.
-    def self.run_phase(phase : BuildPhase, runner : CommandRunner = SystemRunner.new)
+    def self.run_phase(phase : BuildPhase, runner : CommandRunner = SystemRunner.new, report_dir : String? = DEFAULT_REPORT_DIR)
       Log.info { "Executing phase #{phase.name} (env=#{phase.environment}, workspace=#{phase.workspace})" }
       if destdir = phase.destdir
         prepare_destdir(destdir)
       end
-      run_steps(phase, phase.steps, runner)
+      run_steps(phase, phase.steps, runner, report_dir: report_dir)
       Log.info { "Completed phase #{phase.name}" }
     end
 
     # Execute a list of BuildStep entries, stopping immediately on failure.
-    def self.run_steps(phase : BuildPhase, steps : Array(BuildStep), runner : CommandRunner = SystemRunner.new)
+    def self.run_steps(phase : BuildPhase, steps : Array(BuildStep), runner : CommandRunner = SystemRunner.new, report_dir : String? = DEFAULT_REPORT_DIR)
       Log.info { "Executing #{steps.size} build steps" }
       steps.each do |step|
         Log.info { "Building #{step.name} in #{step.workdir}" }
-        runner.run(phase, step)
+        begin
+          runner.run(phase, step)
+        rescue ex
+          write_failure_report(report_dir, phase, step, ex) if report_dir
+          raise ex
+        end
       end
       Log.info { "All build steps completed" }
     end
@@ -155,6 +194,39 @@ module Bootstrap
       matching
     end
 
+    private def self.apply_overrides(plan : BuildPlan, path : String) : BuildPlan
+      return plan unless File.exists?(path)
+      Log.info { "Applying build plan overrides from #{path}" }
+      overrides = BuildPlanOverrides.from_json(File.read(path))
+      overrides.apply(plan)
+    end
+
+    private def self.filter_phases_by_packages(phases : Array(BuildPhase), packages : Array(String)) : Array(BuildPhase)
+      selected = phases.compact_map do |phase|
+        steps = phase.steps.select { |step| packages.includes?(step.name) }
+        next nil if steps.empty?
+        BuildPhase.new(
+          name: phase.name,
+          description: phase.description,
+          workspace: phase.workspace,
+          environment: phase.environment,
+          install_prefix: phase.install_prefix,
+          destdir: phase.destdir,
+          env: phase.env,
+          steps: steps,
+        )
+      end
+      raise "No matching packages found in selected phases: #{packages.join(", ")}" if selected.empty?
+      selected
+    end
+
+    private def self.describe_phases(phases : Array(BuildPhase)) : String
+      phases.map do |phase|
+        steps = phase.steps.map(&.name).join(", ")
+        "#{phase.name} (#{phase.steps.size} steps): #{steps}"
+      end.join(" | ")
+    end
+
     # Creates a minimal directory skeleton for `DESTDIR` installs. The intent is
     # to keep packages with hard-coded expectations (e.g., `/usr/bin`) from
     # failing when the destdir tree is initially empty.
@@ -167,6 +239,56 @@ module Bootstrap
       FileUtils.mkdir_p(File.join(destdir, "usr/sbin"))
       FileUtils.mkdir_p(File.join(destdir, "usr/lib"))
       FileUtils.mkdir_p(File.join(destdir, "var/lib"))
+    end
+
+    private def self.write_failure_report(report_dir : String, phase : BuildPhase, step : BuildStep, ex : Exception)
+      FileUtils.mkdir_p(report_dir)
+      timestamp = Time.utc.to_s("%Y%m%dT%H%M%SZ")
+      phase_slug = slugify(phase.name)
+      step_slug = slugify(step.name)
+      report_path = File.join(report_dir, "#{timestamp}-#{phase_slug}-#{step_slug}.json")
+
+      argv = nil
+      exit_code = nil
+      if ex.is_a?(CommandFailedError)
+        argv = ex.argv
+        exit_code = ex.exit_code
+      end
+
+      report = {
+        "format_version" => 1,
+        "occurred_at"    => timestamp,
+        "phase"          => {
+          "name"           => phase.name,
+          "environment"    => phase.environment,
+          "workspace"      => phase.workspace,
+          "install_prefix" => phase.install_prefix,
+          "destdir"        => phase.destdir,
+          "env"            => phase.env,
+        },
+        "step" => {
+          "name"            => step.name,
+          "strategy"        => step.strategy,
+          "workdir"         => step.workdir,
+          "install_prefix"  => step.install_prefix,
+          "destdir"         => step.destdir,
+          "env"             => step.env,
+          "configure_flags" => step.configure_flags,
+          "patches"         => step.patches,
+        },
+        "command"   => argv,
+        "exit_code" => exit_code,
+        "error"     => ex.message,
+      }.to_json
+
+      File.write(report_path, report)
+      Log.error { "Wrote build failure report to #{report_path}" }
+    rescue report_ex
+      Log.warn { "Failed to write build failure report: #{report_ex.message}" }
+    end
+
+    private def self.slugify(value : String) : String
+      value.gsub(/[^A-Za-z0-9]+/, "_").gsub(/^_+|_+$/, "").downcase
     end
   end
 end
