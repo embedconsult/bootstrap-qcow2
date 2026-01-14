@@ -60,7 +60,11 @@ module Bootstrap
             install_root = destdir || install_prefix
             run_cmd(["make", "CONFIG_PREFIX=#{install_root}", "install"], env: env)
           when "llvm"
-            run_cmd(["cmake", "-S", ".", "-B", "build", "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + step.configure_flags, env: env)
+            source_dir = "."
+            unless File.exists?("CMakeLists.txt")
+              source_dir = "llvm" if File.exists?(File.join("llvm", "CMakeLists.txt"))
+            end
+            run_cmd(["cmake", "-S", source_dir, "-B", "build", "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + step.configure_flags, env: env)
             run_cmd(["cmake", "--build", "build", "-j#{cpus}"], env: env)
             install_env = destdir ? env.merge({"DESTDIR" => destdir}) : env
             run_cmd(["cmake", "--install", "build"], env: install_env)
@@ -72,10 +76,19 @@ module Bootstrap
               run_cmd(["install", "-m", "0755", artifact, "#{bin_prefix}/bin/"], env: env)
             end
           else # autotools/default
-            normalize_autotools_timestamps
-            run_cmd(["./configure", "--prefix=#{install_prefix}"] + step.configure_flags, env: env)
-            run_cmd(["make", "-j#{cpus}"], env: env)
-            run_make_install(destdir, env)
+            if File.exists?("configure")
+              normalize_autotools_timestamps
+              run_cmd(["./configure", "--prefix=#{install_prefix}"] + step.configure_flags, env: env)
+              run_cmd(["make", "-j#{cpus}"], env: env)
+              run_make_install(destdir, env)
+            elsif File.exists?("CMakeLists.txt")
+              run_cmd(["cmake", "-S", ".", "-B", "build", "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + step.configure_flags, env: env)
+              run_cmd(["cmake", "--build", "build", "-j#{cpus}"], env: env)
+              install_env = destdir ? env.merge({"DESTDIR" => destdir}) : env
+              run_cmd(["cmake", "--install", "build"], env: install_env)
+            else
+              raise "Unknown build strategy #{step.strategy} and missing ./configure in #{step.workdir}"
+            end
           end
           Log.info { "Finished #{step.name}" }
         end
@@ -90,7 +103,18 @@ module Bootstrap
         return unless File.exists?("configure.ac")
         reference = File.info("configure.ac").modification_time
         bump = reference + 1.second
-        %w[aclocal.m4 configure config.h.in config.hin Makefile.in lib/config.hin].each do |candidate|
+        %w[
+          aclocal.m4
+          configure
+          config.h.in
+          config.hin
+          Makefile.in
+          lib/config.hin
+          src/config.h.in
+          src/config.hin
+          include/config.h.in
+          include/config.hin
+        ].each do |candidate|
           next unless File.exists?(candidate)
           info = File.info(candidate, follow_symlinks: false)
           next if info.modification_time > reference
