@@ -5,16 +5,6 @@ require "file_utils"
 require "digest"
 require "random/secure"
 
-def with_tempdir(&)
-  path = Path[Dir.tempdir] / "sysroot-spec-#{Random::Secure.hex(8)}"
-  FileUtils.mkdir_p(path)
-  begin
-    yield path
-  ensure
-    FileUtils.rm_rf(path)
-  end
-end
-
 class StubBuilder < Bootstrap::SysrootBuilder
   property fake_tarball : Path?
   property override_packages : Array(Bootstrap::SysrootBuilder::PackageSpec) = [] of Bootstrap::SysrootBuilder::PackageSpec
@@ -80,14 +70,13 @@ describe Bootstrap::SysrootBuilder do
     end
   end
 
-  it "treats the serialized plan file as a rootfs readiness bookmark" do
+  it "treats the serialized plan file as rootfs readiness" do
     with_tempdir do |dir|
       builder = Bootstrap::SysrootBuilder.new(dir)
       builder.rootfs_ready?.should be_false
 
-      plan_path = builder.rootfs_dir / "var/lib/sysroot-build-plan.json"
-      FileUtils.mkdir_p(plan_path.parent)
-      File.write(plan_path, "[]")
+      FileUtils.mkdir_p(builder.plan_path.parent)
+      File.write(builder.plan_path, "[]")
       builder.rootfs_ready?.should be_true
     end
   end
@@ -309,6 +298,26 @@ describe Bootstrap::SysrootBuilder do
       builder.fake_tarball = tarball
       output = builder.generate_chroot_tarball
       output.should eq dir / "sysroot.tar.gz"
+      File.exists?(output).should be_true
+    end
+  end
+
+  it "can write a tarball for an existing prepared rootfs" do
+    with_tempdir do |dir|
+      tar_dir = dir / "tarroot"
+      FileUtils.mkdir_p(tar_dir)
+      File.write(tar_dir / "etc.txt", "config")
+      tarball = dir / "miniroot.tar"
+      Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
+
+      builder = StubBuilder.new(dir)
+      builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
+      builder.skip_stage_sources = true
+      builder.fake_tarball = tarball
+      builder.generate_chroot(include_sources: false)
+
+      output = dir / "existing-rootfs.tar.gz"
+      builder.write_chroot_tarball(output)
       File.exists?(output).should be_true
     end
   end

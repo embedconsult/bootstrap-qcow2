@@ -33,11 +33,13 @@ Pass `--skip-sources` to omit cached source archives when you only need the base
 * cache - checksums for the various downloads
 * sources - downloaded tarballs
 
+Use `--reuse-rootfs` to reuse an existing prepared `data/sysroot/rootfs` directory (and still emit a tarball unless `--no-tarball` is set).
+
 The rootfs output includes:
 - Alpine minirootfs 3.23.2 (aarch64 by default)
 - Cached source archives for core packages (musl, busybox, clang/LLVM, etc.)
 - A serialized build plan consumed by the coordinator
-- bootstrap-qcow2 source staged to `/workspace/bootstrap-qcow2` (downloaded as a source package)
+- bootstrap-qcow2 source staged to `/workspace/bootstrap-qcow2-master` (downloaded as a source package)
 
 ### Busybox-style CLI (`bq2`)
 
@@ -56,18 +58,30 @@ shards build
 # Or:
 ./bin/bq2 sysroot-namespace --rootfs data/sysroot/rootfs -- /bin/sh
 
-# Inside the sysroot, build the CLI from staged source and run the plan
-cd /workspace/bootstrap-qcow2
-crystal build src/main.cr -o /usr/local/bin/bq2
-/usr/local/bin/bq2 sysroot-runner
-# Run the rootfs validation phase (installs into /workspace/rootfs)
-/usr/local/bin/bq2 sysroot-runner --phase rootfs-from-sysroot
-# Or run every phase in order:
-/usr/local/bin/bq2 sysroot-runner --phase all
+	# Inside the sysroot, build the CLI from staged source and run the plan
+	cd /workspace/bootstrap-qcow2-master
+	shards build
+	./bin/bq2 --install
+	./bin/bq2 sysroot-runner
+	# Run the rootfs validation phase (installs into /workspace/rootfs as a staging DESTDIR)
+	./bin/bq2 sysroot-runner --phase rootfs-from-sysroot
+	# Or run every phase in order:
+	./bin/bq2 sysroot-runner --phase all
 
 # Default (no args): build the sysroot, set up DNS, enter with /bin/sh
 ./bin/bq2
 ```
+
+#### Iterating (overrides + state)
+
+During iterative, in-container debugging, treat the plan JSON (`/var/lib/sysroot-build-plan.json`) as immutable and apply changes via:
+- `/var/lib/sysroot-build-overrides.json` for runtime-only tweaks to flags/env/install paths
+- `/var/lib/sysroot-build-state.json` for bookmark/progress tracking (auto-updated by `sysroot-runner`)
+- `/var/lib/sysroot-build-reports/*.json` for failure reports
+
+The `rootfs-from-sysroot` phase uses `DESTDIR=/workspace/rootfs` to assemble a candidate rootfs tree without changing the running sysroot; that staged tree is what later gets validated (and eventually entered via `pivot_root`) once the sysroot toolchain is stable.
+
+After a full successful round, back-port overrides into `src/sysroot_builder.cr`, delete overrides/state, and retry from scratch to validate reproducibility.
 
 This is intended for clean, sudo-less development workflows, not as a security boundary. The
 namespace runner still has access to host files that are reachable from the sysroot rootfs,

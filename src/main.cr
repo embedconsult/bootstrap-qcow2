@@ -5,6 +5,7 @@ require "./sysroot_builder"
 require "./sysroot_namespace"
 require "./sysroot_runner_lib"
 require "./codex_namespace"
+require "./github_cli"
 
 module Bootstrap
   # Busybox-style dispatcher: one binary, many entrypoints selected by argv[0]
@@ -18,6 +19,9 @@ module Bootstrap
       "sysroot-namespace-check" => ->(args : Array(String)) { run_sysroot_namespace_check(args) },
       "sysroot-runner"          => ->(args : Array(String)) { run_sysroot_runner(args) },
       "codex-namespace"         => ->(args : Array(String)) { run_codex_namespace(args) },
+      "github-pr-feedback"      => ->(args : Array(String)) { run_github_pr_feedback(args) },
+      "github-pr-comment"       => ->(args : Array(String)) { run_github_pr_comment(args) },
+      "github-pr-create"        => ->(args : Array(String)) { run_github_pr_create(args) },
       "help"                    => ->(args : Array(String)) { run_help(args) },
     }
 
@@ -34,7 +38,7 @@ module Bootstrap
 
     def self.run_help(_args, exit_code : Int32 = 0) : Int32
       puts "Usage:"
-      puts "  bootstrap-qcow2 <command> [options] [-- command args]\n\nCommands:"
+      puts "  bq2 <command> [options] [-- command args]\n\nCommands:"
       puts "  --install               Create CLI symlinks in ./bin"
       puts "  (default)               Build sysroot and enter shell inside it"
       puts "  sysroot-builder         Build sysroot tarball or directory"
@@ -42,6 +46,9 @@ module Bootstrap
       puts "  sysroot-namespace-check Check host namespace prerequisites"
       puts "  sysroot-runner          Replay build plan inside the sysroot"
       puts "  codex-namespace         Run Codex inside a namespaced rootfs"
+      puts "  github-pr-feedback      Fetch PR feedback as JSON"
+      puts "  github-pr-comment       Post a PR conversation comment"
+      puts "  github-pr-create        Create a GitHub pull request"
       puts "  help                    Show this message"
       puts "\nInvoke via symlink (e.g., bin/sysroot-builder) or as the first argument."
       exit_code
@@ -49,16 +56,10 @@ module Bootstrap
 
     private def self.run_sysroot_namespace(args : Array(String)) : Int32
       rootfs = "data/sysroot/rootfs"
-      bind_repo = false
-      repo_root = Path[Dir.current].expand
-      repo_dest = Path["work/bootstrap-qcow2"]
       extra_binds = [] of Tuple(Path, Path)
       command = [] of String
-      parser, remaining, help = CLI.parse(args, "Usage: bootstrap-qcow2 sysroot-namespace [options] [-- command...]") do |p|
+      parser, remaining, help = CLI.parse(args, "Usage: bq2 sysroot-namespace [options] [-- command...]") do |p|
         p.on("--rootfs=PATH", "Path to the sysroot rootfs (default: #{rootfs})") { |val| rootfs = val }
-        p.on("--bind-repo", "Bind-mount the current repo into /work/bootstrap-qcow2 inside the rootfs") { bind_repo = true }
-        p.on("--repo-root=PATH", "Override repo root for --bind-repo (default: #{repo_root})") { |val| repo_root = Path[val].expand }
-        p.on("--repo-dest=PATH", "Override repo destination inside the rootfs (default: /#{repo_dest})") { |val| repo_dest = normalize_bind_target(val) }
         p.on("--bind=SRC:DST", "Bind-mount SRC into DST inside the rootfs (repeatable; DST is inside rootfs)") do |val|
           parts = val.split(":", 2)
           raise "Expected --bind=SRC:DST" unless parts.size == 2
@@ -72,12 +73,7 @@ module Bootstrap
       command = remaining.empty? ? ["/bin/sh"] : remaining
       Log.debug { "Entering namespace with rootfs=#{rootfs} command=#{command.join(" ")}" }
 
-      binds = extra_binds
-      if bind_repo
-        binds << {repo_root, repo_dest}
-      end
-
-      SysrootNamespace.enter_rootfs(rootfs, extra_binds: binds)
+      SysrootNamespace.enter_rootfs(rootfs, extra_binds: extra_binds)
       Process.exec(command.first, command[1..])
     rescue ex : File::Error
       cmd = command || [] of String
@@ -85,6 +81,11 @@ module Bootstrap
       raise ex
     end
 
+    # Normalize a bind-mount target path inside a rootfs.
+    #
+    # Bind targets are expressed as `SRC:DST`, where DST is a path inside the
+    # rootfs. This helper strips a leading slash to ensure DST is interpreted as
+    # relative to the rootfs directory instead of an absolute host path.
     private def self.normalize_bind_target(value : String) : Path
       cleaned = value.starts_with?("/") ? value[1..] : value
       Path[cleaned]
@@ -106,7 +107,7 @@ module Bootstrap
       write_tarball = true
       reuse_rootfs = false
 
-      parser, _remaining, help = CLI.parse(args, "Usage: bootstrap-qcow2 sysroot-builder [options]") do |p|
+      parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-builder [options]") do |p|
         p.on("-o OUTPUT", "--output=OUTPUT", "Target sysroot tarball (default: #{output})") { |val| output = Path[val] }
         p.on("-w DIR", "--workspace=DIR", "Workspace directory (default: #{workspace})") { |val| workspace = Path[val] }
         p.on("-a ARCH", "--arch=ARCH", "Target architecture (default: #{architecture})") { |val| architecture = val }
@@ -129,7 +130,7 @@ module Bootstrap
           owner_gid = val.to_i
         end
         p.on("--no-tarball", "Prepare the chroot tree without writing a tarball") { write_tarball = false }
-        p.on("--reuse-rootfs", "Reuse an existing prepared rootfs when present (requires --no-tarball)") { reuse_rootfs = true }
+        p.on("--reuse-rootfs", "Reuse an existing prepared rootfs when present") { reuse_rootfs = true }
       end
       return CLI.print_help(parser) if help
 
@@ -146,13 +147,14 @@ module Bootstrap
         owner_uid: owner_uid,
         owner_gid: owner_gid
       )
-      if reuse_rootfs && write_tarball
-        raise "--reuse-rootfs requires --no-tarball"
-      end
 
       if reuse_rootfs && builder.rootfs_ready?
         puts "Reusing existing rootfs at #{builder.rootfs_dir}"
-        puts "Build plan bookmark found at #{builder.rootfs_dir / "var/lib/sysroot-build-plan.json"}"
+        puts "Build plan found at #{builder.plan_path} (iteration state is maintained by sysroot-runner)"
+        if write_tarball
+          builder.write_chroot_tarball(output)
+          puts "Generated sysroot tarball at #{output}"
+        end
         return 0
       end
 
@@ -170,7 +172,7 @@ module Bootstrap
       proc_root = Path["/proc"]
       filesystems_path = Path["/proc/filesystems"]
 
-      parser, _remaining, help = CLI.parse(args, "Usage: bootstrap-qcow2 sysroot-namespace-check [options]") do |p|
+      parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-namespace-check [options]") do |p|
         p.on("--proc-root=PATH", "Override proc root (default: #{proc_root})") { |val| proc_root = Path[val] }
         p.on("--filesystems=PATH", "Override /proc/filesystems path (default: #{filesystems_path})") { |val| filesystems_path = Path[val] }
       end
@@ -220,7 +222,7 @@ module Bootstrap
       overrides_path : String? = SysrootRunner::DEFAULT_OVERRIDES_PATH
       report_dir : String? = SysrootRunner::DEFAULT_REPORT_DIR
       dry_run = false
-      parser, _remaining, help = CLI.parse(args, "Usage: bootstrap-qcow2 sysroot-runner [options]") do |p|
+      parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-runner [options]") do |p|
         p.on("--phase NAME", "Select build phase to run (default: first phase; use 'all' for every phase)") { |name| phase = name }
         p.on("--package NAME", "Only run the named package(s); repeatable") { |name| packages << name }
         p.on("--overrides PATH", "Apply runtime overrides JSON (default: #{SysrootRunner::DEFAULT_OVERRIDES_PATH})") { |path| overrides_path = path }
@@ -243,24 +245,36 @@ module Bootstrap
 
     private def self.run_codex_namespace(args : Array(String)) : Int32
       rootfs = Path["data/sysroot/rootfs"]
-      bind_codex_work = true
+      bind_work = true
       alpine_setup = false
 
-      parser, remaining, help = CLI.parse(args, "Usage: bootstrap-qcow2 codex-namespace [options] [-- cmd ...]") do |p|
+      parser, remaining, help = CLI.parse(args, "Usage: bq2 codex-namespace [options] [-- cmd ...]") do |p|
         p.on("-C DIR", "Rootfs directory for the command (default: #{rootfs})") { |dir| rootfs = Path[dir].expand }
-        p.on("--no-bind-codex-work", "Do not bind host ./codex/work into /work") { bind_codex_work = false }
-        p.on("--alpine", "Assume rootfs is Alpine and install runtime deps for npx codex (node/npm)") { alpine_setup = true }
+        p.on("--no-bind-work", "Do not bind a host work directory into /work") { bind_work = false }
+        p.on("--alpine", "Assume rootfs is Alpine and install runtime deps for npx codex (node/npm/crystal)") { alpine_setup = true }
       end
       return CLI.print_help(parser) if help
 
       command = remaining.dup
       command = ["npx", "codex"] if command.empty?
 
-      status = CodexNamespace.run(command, rootfs: rootfs, bind_codex_work: bind_codex_work, alpine_setup: alpine_setup)
+      status = CodexNamespace.run(command, rootfs: rootfs, bind_work: bind_work, alpine_setup: alpine_setup)
       status.exit_code
     rescue ex : SysrootNamespace::NamespaceError
       STDERR.puts "Namespace setup failed: #{ex.message}"
       1
+    end
+
+    private def self.run_github_pr_feedback(args : Array(String)) : Int32
+      GitHubCLI.run_pr_feedback(args)
+    end
+
+    private def self.run_github_pr_comment(args : Array(String)) : Int32
+      GitHubCLI.run_pr_comment(args)
+    end
+
+    private def self.run_github_pr_create(args : Array(String)) : Int32
+      GitHubCLI.run_pr_create(args)
     end
 
     private def self.run_default(_args : Array(String)) : Int32
@@ -305,6 +319,9 @@ private def self.run_install(_args : Array(String)) : Int32
     sysroot-namespace-check
     sysroot-runner
     codex-namespace
+    github-pr-feedback
+    github-pr-comment
+    github-pr-create
   ]
 
   FileUtils.mkdir_p(bin_dir)

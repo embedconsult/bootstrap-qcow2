@@ -56,5 +56,178 @@ module Bootstrap
       data = JSON.parse(response.body)
       data["html_url"].as_s
     end
+
+    # Create an issue comment (used for PR conversation comments because PRs are issues).
+    #
+    # Returns the comment HTML URL on success and raises on API errors.
+    def self.create_issue_comment(repo : String,
+                                  issue_number : Int32,
+                                  body : String,
+                                  credentials_path : Path = Path["../.git-credentials"],
+                                  http_post : Proc(String, HTTP::Headers, String, HTTP::Client::Response)? = nil) : String
+      token = extract_github_token(credentials_path)
+
+      payload = {"body" => body}.to_json
+      headers = github_headers(token).dup
+      headers["Content-Type"] = "application/json"
+
+      sender = http_post || ->(url : String, headers : HTTP::Headers, body : String) { HTTP::Client.post(url, headers: headers, body: body) }
+      response = sender.call("https://api.github.com/repos/#{repo}/issues/#{issue_number}/comments", headers, payload)
+
+      unless (200..299).includes?(response.status_code)
+        raise "GitHub comment creation failed (status #{response.status_code}): #{response.body}"
+      end
+
+      data = JSON.parse(response.body)
+      data["html_url"]?.try(&.as_s?) || ""
+    end
+
+    # Aggregated view of pull request feedback across the conversation thread,
+    # inline review comments, and submitted reviews.
+    struct PullRequestFeedback
+      getter review_comments : Array(Comment)
+      getter issue_comments : Array(Comment)
+      getter reviews : Array(Comment)
+
+      def initialize(@review_comments : Array(Comment) = [] of Comment,
+                     @issue_comments : Array(Comment) = [] of Comment,
+                     @reviews : Array(Comment) = [] of Comment)
+      end
+
+      def to_json(json : JSON::Builder) : Nil
+        json.object do
+          json.field "review_comments" { json.array { @review_comments.each { |item| item.to_json(json) } } }
+          json.field "issue_comments" { json.array { @issue_comments.each { |item| item.to_json(json) } } }
+          json.field "reviews" { json.array { @reviews.each { |item| item.to_json(json) } } }
+        end
+      end
+
+      def to_pretty_json : String
+        JSON.parse(to_json).to_pretty_json
+      end
+    end
+
+    # Summarized GitHub comment/review entry.
+    struct Comment
+      getter author : String
+      getter body : String
+      getter created_at : String?
+      getter path : String?
+      getter state : String?
+
+      def initialize(@author : String,
+                     @body : String,
+                     @created_at : String? = nil,
+                     @path : String? = nil,
+                     @state : String? = nil)
+      end
+
+      def to_json(json : JSON::Builder) : Nil
+        json.object do
+          json.field "author", @author
+          json.field "body", @body
+          json.field "created_at", @created_at if @created_at
+          json.field "path", @path if @path
+          json.field "state", @state if @state
+        end
+      end
+    end
+
+    # Fetch all comment/review feedback for a pull request.
+    def self.fetch_pull_request_feedback(repo : String,
+                                         pr_number : Int32,
+                                         credentials_path : Path = Path["../.git-credentials"],
+                                         per_page : Int32 = 100,
+                                         http_get : Proc(String, HTTP::Headers, HTTP::Client::Response)? = nil) : PullRequestFeedback
+      token = extract_github_token(credentials_path)
+      headers = github_headers(token)
+      get = http_get || ->(url : String, headers : HTTP::Headers) { HTTP::Client.get(url, headers: headers) }
+
+      review_comments = fetch_pull_request_review_comments(repo, pr_number, headers, get, per_page: per_page)
+      issue_comments = fetch_pull_request_issue_comments(repo, pr_number, headers, get, per_page: per_page)
+      reviews = fetch_pull_request_reviews(repo, pr_number, headers, get, per_page: per_page)
+
+      PullRequestFeedback.new(
+        review_comments: review_comments,
+        issue_comments: issue_comments,
+        reviews: reviews,
+      )
+    end
+
+    private def self.github_headers(token : String) : HTTP::Headers
+      HTTP::Headers{
+        "User-Agent"    => "codex-cli",
+        "Authorization" => "token #{token}",
+        "Accept"        => "application/vnd.github+json",
+      }
+    end
+
+    private def self.fetch_paginated(url : String,
+                                     headers : HTTP::Headers,
+                                     http_get : Proc(String, HTTP::Headers, HTTP::Client::Response),
+                                     per_page : Int32 = 100) : Array(JSON::Any)
+      items = [] of JSON::Any
+      page = 1
+      loop do
+        delimiter = url.includes?("?") ? "&" : "?"
+        paged_url = "#{url}#{delimiter}per_page=#{per_page}&page=#{page}"
+        response = http_get.call(paged_url, headers)
+        raise "GitHub API request failed (status #{response.status_code}): #{response.body}" unless (200..299).includes?(response.status_code)
+        batch = JSON.parse(response.body).as_a
+        break if batch.empty?
+        items.concat(batch)
+        break if batch.size < per_page
+        page += 1
+      end
+      items
+    end
+
+    private def self.fetch_pull_request_review_comments(repo : String,
+                                                        pr_number : Int32,
+                                                        headers : HTTP::Headers,
+                                                        http_get : Proc(String, HTTP::Headers, HTTP::Client::Response),
+                                                        per_page : Int32 = 100) : Array(Comment)
+      url = "https://api.github.com/repos/#{repo}/pulls/#{pr_number}/comments"
+      fetch_paginated(url, headers, http_get, per_page: per_page).map do |item|
+        Comment.new(
+          author: item["user"]["login"].as_s,
+          body: item["body"].as_s,
+          created_at: item["created_at"]?.try(&.as_s?),
+          path: item["path"]?.try(&.as_s?),
+        )
+      end
+    end
+
+    private def self.fetch_pull_request_issue_comments(repo : String,
+                                                       pr_number : Int32,
+                                                       headers : HTTP::Headers,
+                                                       http_get : Proc(String, HTTP::Headers, HTTP::Client::Response),
+                                                       per_page : Int32 = 100) : Array(Comment)
+      url = "https://api.github.com/repos/#{repo}/issues/#{pr_number}/comments"
+      fetch_paginated(url, headers, http_get, per_page: per_page).map do |item|
+        Comment.new(
+          author: item["user"]["login"].as_s,
+          body: item["body"].as_s,
+          created_at: item["created_at"]?.try(&.as_s?),
+        )
+      end
+    end
+
+    private def self.fetch_pull_request_reviews(repo : String,
+                                                pr_number : Int32,
+                                                headers : HTTP::Headers,
+                                                http_get : Proc(String, HTTP::Headers, HTTP::Client::Response),
+                                                per_page : Int32 = 100) : Array(Comment)
+      url = "https://api.github.com/repos/#{repo}/pulls/#{pr_number}/reviews"
+      fetch_paginated(url, headers, http_get, per_page: per_page).map do |item|
+        body = item["body"]?.try(&.as_s?) || ""
+        Comment.new(
+          author: item["user"]["login"].as_s,
+          body: body,
+          created_at: item["submitted_at"]?.try(&.as_s?),
+          state: item["state"]?.try(&.as_s?),
+        )
+      end
+    end
   end
 end
