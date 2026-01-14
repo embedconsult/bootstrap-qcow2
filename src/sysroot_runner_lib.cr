@@ -30,16 +30,6 @@ module Bootstrap
       end
     end
 
-    # Raised when a command fails during a SystemRunner invocation.
-    class CommandFailedError < Exception
-      getter argv : Array(String)
-      getter exit_code : Int32
-
-      def initialize(@argv : Array(String), @exit_code : Int32, message : String)
-        super(message)
-      end
-    end
-
     # Default runner that shells out via Process.run using strategy metadata.
     struct SystemRunner
       # Run a build step using the selected strategy.
