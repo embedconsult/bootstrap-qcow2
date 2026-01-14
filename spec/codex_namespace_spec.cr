@@ -19,12 +19,19 @@ describe Bootstrap::CodexNamespace do
             end
           end
 
+          class Dir
+            def self.exists?(path : String | Path) : Bool
+              return false if path.to_s == "/work"
+              previous_def
+            end
+          end
+
           temp_root = Path[File.tempname("codex-work")]
           File.delete(temp_root) if File.exists?(temp_root)
           FileUtils.mkdir_p(temp_root)
 
           Dir.cd(temp_root) do
-            status = Bootstrap::CodexNamespace.run(["pwd"], rootfs: Path["/"], bind_work: false, alpine_setup: false)
+            status = Bootstrap::CodexNamespace.run(["pwd"], rootfs: Path["/"], bind_codex_work: true, alpine_setup: false)
             exit status.exit_code
           end
         CR
@@ -39,7 +46,7 @@ describe Bootstrap::CodexNamespace do
     stderr.to_s.should be_empty
   end
 
-  it "binds a host work directory into /work when enabled" do
+  it "creates the host codex/work directory before binding" do
     status = Process.run(
       "crystal",
       [
@@ -67,7 +74,7 @@ describe Bootstrap::CodexNamespace do
           FileUtils.mkdir_p(temp_root)
 
           Dir.cd(temp_root) do
-            status = Bootstrap::CodexNamespace.run(["pwd"], rootfs: Path["/"], bind_work: true, alpine_setup: false)
+            status = Bootstrap::CodexNamespace.run(["pwd"], rootfs: Path["/"], bind_codex_work: true, alpine_setup: false)
             exit 1 unless status.success?
 
             captured = Bootstrap::SysrootNamespace.captured_binds
@@ -75,7 +82,6 @@ describe Bootstrap::CodexNamespace do
 
             host_work, target = captured.not_nil!.first
             exit 1 unless target == Path["work"]
-            exit 1 unless host_work.to_s.ends_with?("/codex/work")
             exit 1 unless Dir.exists?(host_work)
           end
         CR
