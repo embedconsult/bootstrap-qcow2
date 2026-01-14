@@ -6,6 +6,7 @@ require "random/secure"
 require "set"
 require "time"
 require "./build_plan"
+require "./build_plan_reader"
 require "./build_plan_overrides"
 require "./sysroot_build_state"
 
@@ -136,9 +137,9 @@ module Bootstrap
                       resume : Bool = true)
       raise "Missing build plan #{path}" unless File.exists?(path)
       Log.info { "Loading build plan from #{path}" }
-      plan = BuildPlan.from_json(File.read(path))
+      plan = BuildPlanReader.load(path)
       plan = apply_overrides(plan, overrides_path) if overrides_path
-      effective_state_path = state_path || (path == DEFAULT_PLAN_PATH ? DEFAULT_STATE_PATH : nil)
+      effective_state_path = state_path || (resume && path == DEFAULT_PLAN_PATH ? DEFAULT_STATE_PATH : nil)
       state = effective_state_path ? SysrootBuildState.load_or_init(effective_state_path, plan_path: path, overrides_path: overrides_path, report_dir: report_dir) : nil
       state.try(&.save(effective_state_path.not_nil!)) if effective_state_path
       run_plan(plan,

@@ -1,4 +1,5 @@
 require "file_utils"
+require "./alpine_setup"
 require "./sysroot_namespace"
 require "./codex_session_bookmark"
 
@@ -26,6 +27,7 @@ module Bootstrap
         binds << {host_work, Path["work"]}
       end
 
+      AlpineSetup.write_resolv_conf(rootfs) if alpine_setup
       SysrootNamespace.enter_rootfs(rootfs.to_s, extra_binds: binds)
       workdir = bind_work ? Path["/work"] : Path["/"]
       Dir.cd(Dir.exists?(workdir) ? workdir : Path["/"])
@@ -46,10 +48,8 @@ module Bootstrap
       end
 
       if alpine_setup
-        status = Process.run("apk", ["add", "nodejs-lts", "npm", "bash", "crystal", "openssl-dev"], output: STDOUT, error: STDERR)
-        raise "apk install failed" unless status.success?
-        status = Process.run("npm", ["i", "-g", "@openai/codex"], output: STDOUT, error: STDERR)
-        raise "npm install failed" unless status.success?
+        AlpineSetup.install_sysroot_runner_packages
+        AlpineSetup.install_codex_packages
       end
 
       status = Process.run(command.first, command[1..], env: env, input: STDIN, output: STDOUT, error: STDERR)

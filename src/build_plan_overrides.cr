@@ -71,6 +71,7 @@ module Bootstrap
       override = overrides[step.name]?
       return step unless override
 
+      workdir = override.workdir || step.workdir
       install_prefix = override.install_prefix || step.install_prefix
       destdir = override.destdir || step.destdir
       env = merge_env(step.env, override.env)
@@ -79,7 +80,7 @@ module Bootstrap
       BuildStep.new(
         name: step.name,
         strategy: step.strategy,
-        workdir: step.workdir,
+        workdir: workdir,
         configure_flags: configure_flags,
         patches: patches,
         install_prefix: install_prefix,
@@ -116,13 +117,15 @@ module Bootstrap
   struct StepOverride
     include JSON::Serializable
 
+    getter workdir : String?
     getter install_prefix : String?
     getter destdir : String?
     getter env : Hash(String, String)?
     getter configure_flags_add : Array(String) = [] of String
     getter patches_add : Array(String) = [] of String
 
-    def initialize(@install_prefix : String? = nil,
+    def initialize(@workdir : String? = nil,
+                   @install_prefix : String? = nil,
                    @destdir : String? = nil,
                    @env : Hash(String, String)? = nil,
                    @configure_flags_add : Array(String) = [] of String,
