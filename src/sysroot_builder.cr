@@ -632,6 +632,7 @@ module Bootstrap
       SIZE_OFFSET     = 124
       SIZE_LENGTH     =  12
       MTIME_OFFSET    = 136
+      MTIME_LENGTH    =  12
       TYPEFLAG_OFFSET = 156
       LINKNAME_OFFSET = 157
       LINKNAME_LENGTH = 100
@@ -649,6 +650,7 @@ module Bootstrap
 
       # Extract every entry in the tar stream.
       def extract_all
+        deferred_dir_times = [] of Tuple(Path, Int64)
         loop do
           header = Bytes.new(HEADER_SIZE)
           bytes = @io.read_fully?(header)
@@ -661,6 +663,7 @@ module Bootstrap
           header_uid = octal_to_i(header[UID_OFFSET, UID_LENGTH]).to_i
           header_gid = octal_to_i(header[GID_OFFSET, GID_LENGTH]).to_i
           size = octal_to_i(header[SIZE_OFFSET, SIZE_LENGTH])
+          mtime = octal_to_i(header[MTIME_OFFSET, MTIME_LENGTH])
           typeflag = header[TYPEFLAG_OFFSET].chr
           linkname = cstring(header[LINKNAME_OFFSET, LINKNAME_LENGTH])
           normalized_typeflag = typeflag == TYPE_FILE ? TYPE_FILE : typeflag
@@ -686,6 +689,7 @@ module Bootstrap
             FileUtils.mkdir_p(target)
             uid, gid = resolved_owner(header_uid, header_gid)
             apply_ownership(target, uid, gid)
+            deferred_dir_times << {target, mtime}
             skip_padding(size)
             next
           end
@@ -696,6 +700,7 @@ module Bootstrap
             FileUtils.mkdir_p(target)
             File.chmod(target, header_mode(header))
             apply_ownership(target, uid, gid)
+            deferred_dir_times << {target, mtime}
           when TYPE_SYMLINK # symlink
             FileUtils.mkdir_p(target.parent)
             Log.debug { "Creating symlink #{target} -> #{linkname}" }
@@ -714,9 +719,16 @@ module Bootstrap
             FileUtils.mkdir_p(target.parent)
             write_file(target, size, header_mode(header))
             apply_ownership(target, uid, gid)
+            apply_mtime(target, mtime)
           end
 
           skip_padding(size)
+        end
+
+        # Apply directory timestamps after extracting all children; otherwise,
+        # subsequent file creation would clobber the directory mtime.
+        deferred_dir_times.reverse_each do |(path, entry_mtime)|
+          apply_mtime(path, entry_mtime)
         end
       end
 
@@ -746,6 +758,14 @@ module Bootstrap
           end
         end
         File.chmod(path, mode)
+      end
+
+      private def apply_mtime(path : Path, mtime : Int64)
+        return if mtime <= 0
+        time = Time.unix(mtime)
+        File.utime(time, time, path)
+      rescue ex
+        Log.warn { "Failed to apply mtime to #{path}: #{ex.message}" }
       end
 
       # Resolve uid/gid ownership for an entry based on preservation settings.
