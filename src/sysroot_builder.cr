@@ -161,6 +161,7 @@ module Bootstrap
     # directory name when upstream archives use non-standard layouts.
     def packages : Array(PackageSpec)
       bootstrap_repo_dir = "/workspace/bootstrap-qcow2-#{bootstrap_source_branch}"
+      llvm_triple = llvm_target_triple
       [
         PackageSpec.new(
           "bootstrap-qcow2",
@@ -209,6 +210,8 @@ module Bootstrap
           strategy: "llvm",
           configure_flags: [
             "-DCMAKE_BUILD_TYPE=Release",
+            "-DCMAKE_C_COMPILER_TARGET=#{llvm_triple}",
+            "-DCMAKE_CXX_COMPILER_TARGET=#{llvm_triple}",
             "-DCMAKE_CXX_FLAGS=-static-libstdc++ -static-libgcc",
             "-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ -static-libgcc",
             "-DLLVM_TARGETS_TO_BUILD=AArch64",
@@ -269,6 +272,17 @@ module Bootstrap
           phases: ["crystal-from-sysroot", "crystal-from-system"],
         ),
       ]
+    end
+
+    private def llvm_target_triple : String
+      case @architecture
+      when "aarch64", "arm64"
+        "aarch64-unknown-linux-gnu"
+      when "x86_64", "amd64"
+        "x86_64-unknown-linux-gnu"
+      else
+        "#{@architecture}-unknown-linux-gnu"
+      end
     end
 
     # Download all configured package sources and return their cached paths.
