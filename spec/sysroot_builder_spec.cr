@@ -96,7 +96,7 @@ describe Bootstrap::SysrootBuilder do
 
   it "lists build phase names" do
     phases = Bootstrap::SysrootBuilder.new.phase_specs.map(&.name)
-    phases.should eq ["sysroot-from-alpine", "rootfs-from-sysroot"]
+    phases.should eq ["sysroot-from-alpine", "rootfs-from-sysroot", "system-from-sysroot", "tools-from-system", "crystal-from-system"]
   end
 
   it "computes hashes" do
@@ -178,7 +178,7 @@ describe Bootstrap::SysrootBuilder do
       rootfs_phase = plan.phases.last
       rootfs_phase.install_prefix.should eq "/usr"
       rootfs_phase.destdir.should eq "/workspace/rootfs"
-      rootfs_phase.steps.map(&.name).should eq ["musl", "busybox", "musl-ld-path", "sysroot"]
+      rootfs_phase.steps.map(&.name).should eq ["musl", "busybox", "musl-ld-path", "rootfs-marker", "sysroot"]
     end
   end
 

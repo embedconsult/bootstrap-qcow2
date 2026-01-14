@@ -20,6 +20,7 @@ module Bootstrap
     DEFAULT_OVERRIDES_PATH = "/var/lib/sysroot-build-overrides.json"
     DEFAULT_REPORT_DIR     = "/var/lib/sysroot-build-reports"
     DEFAULT_STATE_PATH     = SysrootBuildState::DEFAULT_PATH
+    ROOTFS_MARKER_PATH     = "/.bq2-rootfs"
 
     # Raised when a command fails during a SystemRunner invocation.
     class CommandFailedError < Exception
@@ -227,6 +228,7 @@ module Bootstrap
           DEFAULT_OVERRIDES_PATH
         end
       plan = apply_overrides(plan, effective_overrides_path) if effective_overrides_path
+      stage_iteration_files_for_destdirs(plan, effective_overrides_path)
       effective_state_path = state_path || (resume && path == DEFAULT_PLAN_PATH ? DEFAULT_STATE_PATH : nil)
       state = effective_state_path ? SysrootBuildState.load_or_init(effective_state_path, plan_path: path, overrides_path: effective_overrides_path, report_dir: report_dir) : nil
       state.try(&.save(effective_state_path.not_nil!)) if effective_state_path
@@ -272,6 +274,9 @@ module Bootstrap
                        state : SysrootBuildState? = nil,
                        state_path : String? = nil,
                        resume : Bool = true)
+      if phase.environment.starts_with?("rootfs-") && !File.exists?(ROOTFS_MARKER_PATH)
+        raise "Refusing to run #{phase.name} (env=#{phase.environment}) outside the produced rootfs (missing #{ROOTFS_MARKER_PATH})"
+      end
       Log.info { "Executing phase #{phase.name} (env=#{phase.environment}, workspace=#{phase.workspace})" }
       if destdir = phase.destdir
         prepare_destdir(destdir)
@@ -345,6 +350,24 @@ module Bootstrap
       Log.info { "Applying build plan overrides from #{path}" }
       overrides = BuildPlanOverrides.from_json(File.read(path))
       overrides.apply(plan)
+    end
+
+    private def self.stage_iteration_files_for_destdirs(plan : BuildPlan, overrides_path : String?) : Nil
+      plan_json = plan.to_json
+      overrides_json = overrides_path && File.exists?(overrides_path) ? File.read(overrides_path) : nil
+      plan.phases.each do |phase|
+        next unless destdir = phase.destdir
+        stage_path = File.join(destdir, DEFAULT_PLAN_PATH.lchop('/'))
+        overrides_stage = File.join(destdir, DEFAULT_OVERRIDES_PATH.lchop('/'))
+        report_stage = File.join(destdir, DEFAULT_REPORT_DIR.lchop('/'))
+
+        FileUtils.mkdir_p(File.dirname(stage_path))
+        File.write(stage_path, plan_json)
+        File.write(overrides_stage, overrides_json || "{}\n")
+        FileUtils.mkdir_p(report_stage)
+      end
+    rescue ex
+      Log.warn { "Failed to stage iteration files into destdir rootfs: #{ex.message}" }
     end
 
     private def self.filter_phases_by_packages(phases : Array(BuildPhase), packages : Array(String)) : Array(BuildPhase)

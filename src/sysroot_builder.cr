@@ -42,6 +42,9 @@ module Bootstrap
     DEFAULT_LIBYAML       = "0.2.5"
     DEFAULT_LIBFFI        = "3.4.6"
     DEFAULT_BDWGC         = "8.2.6"
+    DEFAULT_FOSSIL        = "2.25"
+    DEFAULT_GIT           = "2.45.2"
+    DEFAULT_CRYSTAL       = "1.18.2"
     DEFAULT_BQ2_BRANCH    = "codex-development"
 
     record PackageSpec,
@@ -50,6 +53,7 @@ module Bootstrap
       url : URI,
       sha256 : String? = nil,
       checksum_url : URI? = nil,
+      phases : Array(String)? = nil,
       configure_flags : Array(String) = [] of String,
       build_directory : String? = nil,
       strategy : String = "autotools",
@@ -163,19 +167,21 @@ module Bootstrap
           bootstrap_source_branch,
           URI.parse("https://github.com/embedconsult/bootstrap-qcow2/archive/refs/heads/#{bootstrap_source_branch}.tar.gz"),
           strategy: "crystal",
+          phases: ["sysroot-from-alpine"],
         ),
-        PackageSpec.new("m4", DEFAULT_M4, URI.parse("https://ftp.gnu.org/gnu/m4/m4-#{DEFAULT_M4}.tar.gz")),
-        PackageSpec.new("musl", DEFAULT_MUSL, URI.parse("https://musl.libc.org/releases/musl-#{DEFAULT_MUSL}.tar.gz")),
+        PackageSpec.new("m4", DEFAULT_M4, URI.parse("https://ftp.gnu.org/gnu/m4/m4-#{DEFAULT_M4}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
+        PackageSpec.new("musl", DEFAULT_MUSL, URI.parse("https://musl.libc.org/releases/musl-#{DEFAULT_MUSL}.tar.gz"), phases: ["sysroot-from-alpine", "rootfs-from-sysroot"]),
         PackageSpec.new(
           "busybox",
           DEFAULT_BUSYBOX,
           URI.parse("https://github.com/mirror/busybox/archive/refs/tags/#{DEFAULT_BUSYBOX.tr(".", "_")}.tar.gz"),
           strategy: "busybox",
           patches: ["#{bootstrap_repo_dir}/patches/busybox-#{DEFAULT_BUSYBOX.tr(".", "_")}/tc-disable-cbq-when-missing-headers.patch"],
+          phases: ["sysroot-from-alpine", "rootfs-from-sysroot"],
         ),
-        PackageSpec.new("make", DEFAULT_GNU_MAKE, URI.parse("https://ftp.gnu.org/gnu/make/make-#{DEFAULT_GNU_MAKE}.tar.gz")),
-        PackageSpec.new("zlib", DEFAULT_ZLIB, URI.parse("https://zlib.net/zlib-#{DEFAULT_ZLIB}.tar.gz")),
-        PackageSpec.new("libressl", DEFAULT_LIBRESSL, URI.parse("https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-#{DEFAULT_LIBRESSL}.tar.gz")),
+        PackageSpec.new("make", DEFAULT_GNU_MAKE, URI.parse("https://ftp.gnu.org/gnu/make/make-#{DEFAULT_GNU_MAKE}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
+        PackageSpec.new("zlib", DEFAULT_ZLIB, URI.parse("https://zlib.net/zlib-#{DEFAULT_ZLIB}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
+        PackageSpec.new("libressl", DEFAULT_LIBRESSL, URI.parse("https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-#{DEFAULT_LIBRESSL}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
         PackageSpec.new(
           "cmake",
           DEFAULT_CMAKE,
@@ -193,8 +199,9 @@ module Bootstrap
             "-DOPENSSL_CRYPTO_LIBRARY=/opt/sysroot/lib/libcrypto.so",
           ],
           patches: ["#{bootstrap_repo_dir}/patches/cmake-#{DEFAULT_CMAKE}/cmcppdap-include-cstdint.patch"],
+          phases: ["sysroot-from-alpine", "system-from-sysroot"],
         ),
-        PackageSpec.new("libatomic_ops", DEFAULT_LIBATOMIC_OPS, URI.parse("https://github.com/ivmai/libatomic_ops/releases/download/v#{DEFAULT_LIBATOMIC_OPS}/libatomic_ops-#{DEFAULT_LIBATOMIC_OPS}.tar.gz")),
+        PackageSpec.new("libatomic_ops", DEFAULT_LIBATOMIC_OPS, URI.parse("https://github.com/ivmai/libatomic_ops/releases/download/v#{DEFAULT_LIBATOMIC_OPS}/libatomic_ops-#{DEFAULT_LIBATOMIC_OPS}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
         PackageSpec.new(
           "llvm-project",
           DEFAULT_LLVM_VER,
@@ -213,11 +220,12 @@ module Bootstrap
             "-DLLVM_ENABLE_PIC=OFF",
           ],
           patches: ["#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/smallvector-include-cstdint.patch"],
+          phases: ["sysroot-from-alpine", "system-from-sysroot"],
         ),
-        PackageSpec.new("bdwgc", DEFAULT_BDWGC, URI.parse("https://github.com/ivmai/bdwgc/releases/download/v#{DEFAULT_BDWGC}/gc-#{DEFAULT_BDWGC}.tar.gz"), build_directory: "gc-#{DEFAULT_BDWGC}"),
-        PackageSpec.new("pcre2", DEFAULT_PCRE2, URI.parse("https://github.com/PhilipHazel/pcre2/releases/download/pcre2-#{DEFAULT_PCRE2}/pcre2-#{DEFAULT_PCRE2}.tar.gz")),
-        PackageSpec.new("gmp", DEFAULT_GMP, URI.parse("https://ftp.gnu.org/gnu/gmp/gmp-#{DEFAULT_GMP}.tar.gz")),
-        PackageSpec.new("libiconv", DEFAULT_LIBICONV, URI.parse("https://ftp.gnu.org/pub/gnu/libiconv/libiconv-#{DEFAULT_LIBICONV}.tar.gz")),
+        PackageSpec.new("bdwgc", DEFAULT_BDWGC, URI.parse("https://github.com/ivmai/bdwgc/releases/download/v#{DEFAULT_BDWGC}/gc-#{DEFAULT_BDWGC}.tar.gz"), build_directory: "gc-#{DEFAULT_BDWGC}", phases: ["sysroot-from-alpine", "system-from-sysroot"]),
+        PackageSpec.new("pcre2", DEFAULT_PCRE2, URI.parse("https://github.com/PhilipHazel/pcre2/releases/download/pcre2-#{DEFAULT_PCRE2}/pcre2-#{DEFAULT_PCRE2}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
+        PackageSpec.new("gmp", DEFAULT_GMP, URI.parse("https://ftp.gnu.org/gnu/gmp/gmp-#{DEFAULT_GMP}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
+        PackageSpec.new("libiconv", DEFAULT_LIBICONV, URI.parse("https://ftp.gnu.org/pub/gnu/libiconv/libiconv-#{DEFAULT_LIBICONV}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
         PackageSpec.new(
           "libxml2",
           DEFAULT_LIBXML2,
@@ -228,9 +236,28 @@ module Bootstrap
             "-DLIBXML2_WITH_TESTS=OFF",
             "-DLIBXML2_WITH_LZMA=OFF",
           ],
+          phases: ["sysroot-from-alpine", "system-from-sysroot"],
         ),
-        PackageSpec.new("libyaml", DEFAULT_LIBYAML, URI.parse("https://pyyaml.org/download/libyaml/yaml-#{DEFAULT_LIBYAML}.tar.gz"), build_directory: "yaml-#{DEFAULT_LIBYAML}"),
-        PackageSpec.new("libffi", DEFAULT_LIBFFI, URI.parse("https://github.com/libffi/libffi/releases/download/v#{DEFAULT_LIBFFI}/libffi-#{DEFAULT_LIBFFI}.tar.gz")),
+        PackageSpec.new("libyaml", DEFAULT_LIBYAML, URI.parse("https://pyyaml.org/download/libyaml/yaml-#{DEFAULT_LIBYAML}.tar.gz"), build_directory: "yaml-#{DEFAULT_LIBYAML}", phases: ["sysroot-from-alpine", "system-from-sysroot"]),
+        PackageSpec.new("libffi", DEFAULT_LIBFFI, URI.parse("https://github.com/libffi/libffi/releases/download/v#{DEFAULT_LIBFFI}/libffi-#{DEFAULT_LIBFFI}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
+        PackageSpec.new(
+          "fossil",
+          DEFAULT_FOSSIL,
+          URI.parse("https://www.fossil-scm.org/home/tarball/fossil-src-#{DEFAULT_FOSSIL}.tar.gz"),
+          phases: ["tools-from-system"],
+        ),
+        PackageSpec.new(
+          "git",
+          DEFAULT_GIT,
+          URI.parse("https://www.kernel.org/pub/software/scm/git/git-#{DEFAULT_GIT}.tar.gz"),
+          phases: ["tools-from-system"],
+        ),
+        PackageSpec.new(
+          "crystal",
+          DEFAULT_CRYSTAL,
+          URI.parse("https://github.com/crystal-lang/crystal/archive/refs/tags/#{DEFAULT_CRYSTAL}.tar.gz"),
+          phases: ["crystal-from-system"],
+        ),
       ]
     end
 
@@ -280,7 +307,19 @@ module Bootstrap
 
     # Clone a PackageSpec with a different URL and checksum URL.
     private def pkg_with_url(pkg : PackageSpec, url : URI, checksum_url : URI?) : PackageSpec
-      PackageSpec.new(pkg.name, pkg.version, url, pkg.sha256, checksum_url, pkg.configure_flags, pkg.build_directory, pkg.strategy, pkg.patches, [] of URI)
+      PackageSpec.new(
+        pkg.name,
+        pkg.version,
+        url,
+        sha256: pkg.sha256,
+        checksum_url: checksum_url,
+        phases: pkg.phases,
+        configure_flags: pkg.configure_flags,
+        build_directory: pkg.build_directory,
+        strategy: pkg.strategy,
+        patches: pkg.patches,
+        extra_urls: [] of URI,
+      )
     end
 
     # Validate the downloaded archive against SHA256 and CRC32. If an expected
@@ -488,6 +527,17 @@ module Bootstrap
               },
             ),
             BuildStep.new(
+              name: "rootfs-marker",
+              strategy: "write-file",
+              workdir: "/",
+              configure_flags: [] of String,
+              patches: [] of String,
+              install_prefix: "/.bq2-rootfs",
+              env: {
+                "CONTENT" => "bq2-rootfs\n",
+              },
+            ),
+            BuildStep.new(
               name: "sysroot",
               strategy: "copy-tree",
               workdir: sysroot_prefix,
@@ -496,6 +546,44 @@ module Bootstrap
               install_prefix: sysroot_prefix,
             ),
           ],
+        ),
+        PhaseSpec.new(
+          name: "system-from-sysroot",
+          description: "Rebuild sysroot packages into /usr inside the new rootfs (prefix-free).",
+          workspace: "/workspace",
+          environment: "rootfs-system",
+          install_prefix: "/usr",
+          destdir: nil,
+          env: rootfs_phase_env(sysroot_prefix),
+          package_allowlist: nil,
+          configure_overrides: {
+            "cmake" => [
+              "-DOPENSSL_ROOT_DIR=/usr",
+              "-DOPENSSL_INCLUDE_DIR=/usr/include",
+              "-DOPENSSL_SSL_LIBRARY=/usr/lib/libssl.so",
+              "-DOPENSSL_CRYPTO_LIBRARY=/usr/lib/libcrypto.so",
+            ],
+          },
+        ),
+        PhaseSpec.new(
+          name: "tools-from-system",
+          description: "Build additional developer tools inside the new rootfs.",
+          workspace: "/workspace",
+          environment: "rootfs-system",
+          install_prefix: "/usr",
+          destdir: nil,
+          env: rootfs_phase_env(sysroot_prefix),
+          package_allowlist: nil,
+        ),
+        PhaseSpec.new(
+          name: "crystal-from-system",
+          description: "Build Crystal inside the new rootfs (requires a bootstrap Crystal compiler).",
+          workspace: "/workspace",
+          environment: "rootfs-system",
+          install_prefix: "/usr",
+          destdir: nil,
+          env: rootfs_phase_env(sysroot_prefix),
+          package_allowlist: nil,
         ),
       ]
     end
@@ -530,7 +618,7 @@ module Bootstrap
     # Construct a phased build plan. The plan is serialized into the chroot so
     # it can be replayed by the coordinator runner.
     def build_plan : BuildPlan
-      phases = phase_specs.map { |spec| build_phase(spec) }
+      phases = phase_specs.map { |spec| build_phase(spec) }.reject(&.steps.empty?)
       BuildPlan.new(phases)
     end
 
@@ -544,7 +632,7 @@ module Bootstrap
     # Convert a PhaseSpec into a concrete BuildPhase with computed workdirs and
     # per-package build steps.
     private def build_phase(spec : PhaseSpec) : BuildPhase
-      phase_packages = select_packages(spec.package_allowlist)
+      phase_packages = select_packages(spec.name, spec.package_allowlist)
       steps = phase_packages.map do |pkg|
         build_directory = pkg.build_directory || strip_archive_extension(pkg.filename)
         build_root = File.join(spec.workspace, build_directory)
@@ -574,8 +662,13 @@ module Bootstrap
     #
     # When *allowlist* is nil, includes all packages. Otherwise, it maps each
     # requested name to its PackageSpec and raises if any are missing.
-    private def select_packages(allowlist : Array(String)?) : Array(PackageSpec)
-      return packages unless allowlist
+    private def select_packages(phase_name : String, allowlist : Array(String)?) : Array(PackageSpec)
+      unless allowlist
+        return packages.select do |pkg|
+          phases = pkg.phases
+          phases ? phases.includes?(phase_name) : phase_name == "sysroot-from-alpine"
+        end
+      end
       allowlist.map do |name|
         pkg = packages.find { |candidate| candidate.name == name }
         raise "Unknown package #{name} in build phase allowlist" unless pkg
