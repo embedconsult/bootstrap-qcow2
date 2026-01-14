@@ -128,9 +128,23 @@ module Bootstrap
       private def apply_patches(patches : Array(String))
         patches.each do |patch|
           Log.info { "Applying patch #{patch}" }
-          argv = ["patch", "-p1", "--forward", "-N", "-i", patch]
-          status = Process.run(argv[0], argv[1..], output: STDOUT, error: STDERR)
-          raise CommandFailedError.new(argv, status.exit_code, "Patch failed (#{status.exit_code}): #{patch}") unless status.success?
+          dry_run = ["patch", "-p1", "--forward", "-N", "--dry-run", "-i", patch]
+          dry_status = Process.run(dry_run[0], dry_run[1..], output: STDOUT, error: STDERR)
+          if dry_status.success?
+            argv = ["patch", "-p1", "--forward", "-N", "-i", patch]
+            status = Process.run(argv[0], argv[1..], output: STDOUT, error: STDERR)
+            raise CommandFailedError.new(argv, status.exit_code, "Patch failed (#{status.exit_code}): #{patch}") unless status.success?
+            next
+          end
+
+          reverse_dry_run = ["patch", "-p1", "--reverse", "--dry-run", "-i", patch]
+          reverse_status = Process.run(reverse_dry_run[0], reverse_dry_run[1..], output: STDOUT, error: STDERR)
+          if reverse_status.success?
+            Log.info { "Patch already applied; skipping #{patch}" }
+            next
+          end
+
+          raise CommandFailedError.new(dry_run, dry_status.exit_code, "Patch failed (#{dry_status.exit_code}): #{patch}")
         end
       end
 

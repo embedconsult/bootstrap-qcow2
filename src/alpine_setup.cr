@@ -22,13 +22,18 @@ module Bootstrap
       clang
       libgcc
       libstdc++-dev
+      libressl-dev
       crystal
       lld
       linux-headers
       make
       musl-dev
       patch
+      zlib-dev
+      pcre2-dev
+      gc-dev
       perl
+      python3
       shards
     ]
 
