@@ -297,14 +297,14 @@ describe Bootstrap::SysrootRunner do
     state = Bootstrap::SysrootBuildState.load_or_init(
       state_path,
       plan_path: plan_path,
-      overrides_path: Bootstrap::SysrootRunner::DEFAULT_OVERRIDES_PATH,
+      overrides_path: nil,
       report_dir: nil
     )
     state.mark_success("one", "a")
     state.save(state_path)
 
     runner = RecordingRunner.new
-    Bootstrap::SysrootRunner.run_plan(plan_path, runner, report_dir: nil, state_path: state_path)
+    Bootstrap::SysrootRunner.run_plan(plan_path, runner, report_dir: nil, state_path: state_path, overrides_path: nil)
     runner.calls.map { |call| call[:name] }.should eq ["b"]
 
     updated = Bootstrap::SysrootBuildState.load(state_path)
@@ -341,14 +341,14 @@ describe Bootstrap::SysrootRunner do
     state = Bootstrap::SysrootBuildState.load_or_init(
       state_path,
       plan_path: plan_path,
-      overrides_path: Bootstrap::SysrootRunner::DEFAULT_OVERRIDES_PATH,
+      overrides_path: nil,
       report_dir: nil
     )
     state.mark_success("one", "a")
     state.save(state_path)
 
     runner = RecordingRunner.new
-    Bootstrap::SysrootRunner.run_plan(plan_path, runner, report_dir: nil, state_path: state_path, resume: false)
+    Bootstrap::SysrootRunner.run_plan(plan_path, runner, report_dir: nil, state_path: state_path, resume: false, overrides_path: nil)
     runner.calls.map { |call| call[:name] }.should eq ["a", "b"]
   ensure
     File.delete?(state_path) if state_path

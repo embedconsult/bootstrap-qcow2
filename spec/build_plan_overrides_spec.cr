@@ -49,7 +49,7 @@ describe Bootstrap::BuildPlanOverrides do
           install_prefix: "/usr",
           env: {"CC" => "clang"} of String => String,
           steps: {
-            "pkg" => Bootstrap::StepOverride.new(configure_flags_add: ["--with-foo"]),
+            "pkg" => Bootstrap::StepOverride.new(workdir: "/w/pkg", configure_flags_add: ["--with-foo"]),
           },
         ),
       },
@@ -59,6 +59,7 @@ describe Bootstrap::BuildPlanOverrides do
     updated.phases.first.install_prefix.should eq "/usr"
     updated.phases.first.env["PATH"].should eq "/bin"
     updated.phases.first.env["CC"].should eq "clang"
+    updated.phases.first.steps.first.workdir.should eq "/w/pkg"
     updated.phases.first.steps.first.configure_flags.should eq ["--with-foo"]
   end
 

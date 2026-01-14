@@ -1,50 +1,12 @@
 require "./spec_helper"
 
 describe Bootstrap::CodexNamespace do
-  it "falls back to / when /work is unavailable" do
-    stdout = IO::Memory.new
-    stderr = IO::Memory.new
-
+  it "binds a host work directory into /work" do
     status = Process.run(
       "crystal",
       [
         "eval",
-        <<-CR
-          require "./src/codex_namespace"
-
-          class Bootstrap::SysrootNamespace
-            def self.enter_rootfs(rootfs : String,
-                                  extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path),
-                                  bind_host_dev : Bool = true)
-            end
-          end
-
-          temp_root = Path[File.tempname("codex-work")]
-          File.delete(temp_root) if File.exists?(temp_root)
-          FileUtils.mkdir_p(temp_root)
-
-          Dir.cd(temp_root) do
-            status = Bootstrap::CodexNamespace.run(["pwd"], rootfs: Path["/"], bind_work: false, alpine_setup: false)
-            exit status.exit_code
-          end
-        CR
-      ],
-      chdir: Path[__DIR__] / "..",
-      output: stdout,
-      error: stderr
-    )
-
-    status.success?.should be_true
-    stdout.to_s.lines.last?.try(&.chomp).should eq("/")
-    stderr.to_s.should be_empty
-  end
-
-  it "binds a host work directory into /work when enabled" do
-    status = Process.run(
-      "crystal",
-      [
-        "eval",
-        <<-CR
+        <<-CR,
           require "./src/codex_namespace"
           require "file_utils"
 
@@ -62,12 +24,34 @@ describe Bootstrap::CodexNamespace do
             end
           end
 
+          module Bootstrap::CodexSessionBookmark
+            def self.read(work_dir : Path = Path["/work"]) : String?
+              nil
+            end
+
+            def self.latest_from(codex_home : Path) : String?
+              nil
+            end
+
+            def self.write(work_dir : Path, session_id : String) : Nil
+            end
+          end
+
           temp_root = Path[File.tempname("codex-work")]
           File.delete(temp_root) if File.exists?(temp_root)
           FileUtils.mkdir_p(temp_root)
+          FileUtils.mkdir_p(temp_root / "bin")
+
+          codex_path = temp_root / "bin" / "codex"
+          File.write(codex_path, "#!/bin/sh\nexit 0\n")
+          File.chmod(codex_path, 0o755)
 
           Dir.cd(temp_root) do
-            status = Bootstrap::CodexNamespace.run(["pwd"], rootfs: Path["/"], bind_work: true, alpine_setup: false)
+            rootfs = temp_root / "rootfs"
+            FileUtils.mkdir_p(rootfs)
+            work_dir = temp_root / "workdir"
+            exec_path = (temp_root / "bin").to_s + ":/usr/bin:/bin"
+            status = Bootstrap::CodexNamespace.run(rootfs: rootfs, alpine_setup: false, exec_path: exec_path, work_dir: work_dir)
             exit 1 unless status.success?
 
             captured = Bootstrap::SysrootNamespace.captured_binds
@@ -77,6 +61,114 @@ describe Bootstrap::CodexNamespace do
             exit 1 unless target == Path["work"]
             exit 1 unless host_work.to_s.ends_with?("/codex/work")
             exit 1 unless Dir.exists?(host_work)
+          end
+        CR
+      ],
+      chdir: Path[__DIR__] / ".."
+    )
+
+    status.success?.should be_true
+  end
+
+  it "passes add-dir flags and resume arguments" do
+    status = Process.run(
+      "crystal",
+      [
+        "eval",
+        <<-CR,
+          require "./src/codex_namespace"
+          require "file_utils"
+
+          class Bootstrap::SysrootNamespace
+            def self.enter_rootfs(rootfs : String,
+                                  extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path),
+                                  bind_host_dev : Bool = true)
+            end
+          end
+
+          module Bootstrap::CodexSessionBookmark
+            def self.read(work_dir : Path = Path["/work"]) : String?
+              "11111111-2222-3333-4444-555555555555"
+            end
+
+            def self.latest_from(codex_home : Path) : String?
+              nil
+            end
+
+            def self.write(work_dir : Path, session_id : String) : Nil
+            end
+          end
+
+          temp_root = Path[File.tempname("codex-work")]
+          File.delete(temp_root) if File.exists?(temp_root)
+          FileUtils.mkdir_p(temp_root)
+          FileUtils.mkdir_p(temp_root / "bin")
+
+          codex_path = temp_root / "bin" / "codex"
+          File.write(codex_path, "#!/bin/sh\nset -eu\nseen_var=0\nseen_opt=0\nseen_ws=0\nseen_resume=0\nseen_id=0\nwhile [ $# -gt 0 ]; do\n  case $1 in\n    --add-dir)\n      shift\n      case ${1:-} in\n        /var) seen_var=1 ;;\n        /opt) seen_opt=1 ;;\n        /workspace) seen_ws=1 ;;\n      esac\n      ;;\n    resume)\n      seen_resume=1\n      shift\n      [ ${1:-} = 11111111-2222-3333-4444-555555555555 ] || exit 3\n      seen_id=1\n      ;;\n  esac\n  shift || true\ndone\n[ $seen_var -eq 1 ] || exit 10\n[ $seen_opt -eq 1 ] || exit 11\n[ $seen_ws -eq 1 ] || exit 12\n[ $seen_resume -eq 1 ] || exit 13\n[ $seen_id -eq 1 ] || exit 14\nexit 0\n")
+          File.chmod(codex_path, 0o755)
+
+          Dir.cd(temp_root) do
+            rootfs = temp_root / "rootfs"
+            FileUtils.mkdir_p(rootfs)
+            work_dir = temp_root / "workdir"
+            exec_path = (temp_root / "bin").to_s + ":/usr/bin:/bin"
+            status = Bootstrap::CodexNamespace.run(rootfs: rootfs, alpine_setup: false, exec_path: exec_path, work_dir: work_dir)
+            exit status.exit_code
+          end
+        CR
+      ],
+      chdir: Path[__DIR__] / ".."
+    )
+
+    status.success?.should be_true
+  end
+
+  it "honors explicit add_dirs" do
+    status = Process.run(
+      "crystal",
+      [
+        "eval",
+        <<-CR,
+          require "./src/codex_namespace"
+          require "file_utils"
+
+          class Bootstrap::SysrootNamespace
+            def self.enter_rootfs(rootfs : String,
+                                  extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path),
+                                  bind_host_dev : Bool = true)
+            end
+          end
+
+          module Bootstrap::CodexSessionBookmark
+            def self.read(work_dir : Path = Path["/work"]) : String?
+              nil
+            end
+
+            def self.latest_from(codex_home : Path) : String?
+              nil
+            end
+
+            def self.write(work_dir : Path, session_id : String) : Nil
+            end
+          end
+
+          temp_root = Path[File.tempname("codex-work")]
+          File.delete(temp_root) if File.exists?(temp_root)
+          FileUtils.mkdir_p(temp_root)
+          FileUtils.mkdir_p(temp_root / "bin")
+
+          codex_path = temp_root / "bin" / "codex"
+          File.write(codex_path, "#!/bin/sh\nset -eu\nseen_custom=0\nseen_default=0\nwhile [ $# -gt 0 ]; do\n  case $1 in\n    --add-dir)\n      shift\n      case ${1:-} in\n        /tmp/custom) seen_custom=1 ;;\n        /var|/opt|/workspace) seen_default=1 ;;\n      esac\n      ;;\n  esac\n  shift || true\ndone\n[ $seen_custom -eq 1 ] || exit 20\n[ $seen_default -eq 0 ] || exit 21\nexit 0\n")
+          File.chmod(codex_path, 0o755)
+
+          Dir.cd(temp_root) do
+            rootfs = temp_root / "rootfs"
+            FileUtils.mkdir_p(rootfs)
+            work_dir = temp_root / "workdir"
+            exec_path = (temp_root / "bin").to_s + ":/usr/bin:/bin"
+            status = Bootstrap::CodexNamespace.run(rootfs: rootfs, alpine_setup: false, add_dirs: ["/tmp/custom"], exec_path: exec_path, work_dir: work_dir)
+            exit status.exit_code
           end
         CR
       ],

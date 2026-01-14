@@ -6,6 +6,7 @@ require "random/secure"
 require "set"
 require "time"
 require "./build_plan"
+require "./build_plan_reader"
 require "./build_plan_overrides"
 require "./sysroot_build_state"
 
@@ -59,7 +60,11 @@ module Bootstrap
             install_root = destdir || install_prefix
             run_cmd(["make", "CONFIG_PREFIX=#{install_root}", "install"], env: env)
           when "llvm"
-            run_cmd(["cmake", "-S", ".", "-B", "build", "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + step.configure_flags, env: env)
+            source_dir = "."
+            unless File.exists?("CMakeLists.txt")
+              source_dir = "llvm" if File.exists?(File.join("llvm", "CMakeLists.txt"))
+            end
+            run_cmd(["cmake", "-S", source_dir, "-B", "build", "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + step.configure_flags, env: env)
             run_cmd(["cmake", "--build", "build", "-j#{cpus}"], env: env)
             install_env = destdir ? env.merge({"DESTDIR" => destdir}) : env
             run_cmd(["cmake", "--install", "build"], env: install_env)
@@ -71,11 +76,51 @@ module Bootstrap
               run_cmd(["install", "-m", "0755", artifact, "#{bin_prefix}/bin/"], env: env)
             end
           else # autotools/default
-            run_cmd(["./configure", "--prefix=#{install_prefix}"] + step.configure_flags, env: env)
-            run_cmd(["make", "-j#{cpus}"], env: env)
-            run_make_install(destdir, env)
+            if File.exists?("configure")
+              normalize_autotools_timestamps
+              run_cmd(["./configure", "--prefix=#{install_prefix}"] + step.configure_flags, env: env)
+              run_cmd(["make", "-j#{cpus}"], env: env)
+              run_make_install(destdir, env)
+            elsif File.exists?("CMakeLists.txt")
+              run_cmd(["cmake", "-S", ".", "-B", "build", "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + step.configure_flags, env: env)
+              run_cmd(["cmake", "--build", "build", "-j#{cpus}"], env: env)
+              install_env = destdir ? env.merge({"DESTDIR" => destdir}) : env
+              run_cmd(["cmake", "--install", "build"], env: install_env)
+            else
+              raise "Unknown build strategy #{step.strategy} and missing ./configure in #{step.workdir}"
+            end
           end
           Log.info { "Finished #{step.name}" }
+        end
+      end
+
+      # Many release tarballs include pre-generated autotools artifacts
+      # (`configure`, `aclocal.m4`, etc.) that should not be regenerated during
+      # a normal build. If an extractor fails to preserve mtimes, those artifacts
+      # can appear older than `configure.ac` and trigger automake/autoconf
+      # rebuild rules, which breaks minimal bootstrap environments.
+      private def normalize_autotools_timestamps
+        return unless File.exists?("configure.ac")
+        reference = File.info("configure.ac").modification_time
+        bump = reference + 1.second
+        %w[
+          aclocal.m4
+          configure
+          config.h.in
+          config.hin
+          Makefile.in
+          lib/config.hin
+          src/config.h.in
+          src/config.hin
+          include/config.h.in
+          include/config.hin
+        ].each do |candidate|
+          next unless File.exists?(candidate)
+          info = File.info(candidate, follow_symlinks: false)
+          next if info.modification_time > reference
+          File.utime(bump, bump, candidate)
+        rescue ex
+          Log.warn { "Failed to bump autotools timestamp for #{candidate}: #{ex.message}" }
         end
       end
 
@@ -83,7 +128,7 @@ module Bootstrap
       private def apply_patches(patches : Array(String))
         patches.each do |patch|
           Log.info { "Applying patch #{patch}" }
-          argv = ["patch", "-p1", "-i", patch]
+          argv = ["patch", "-p1", "--forward", "-N", "-i", patch]
           status = Process.run(argv[0], argv[1..], output: STDOUT, error: STDERR)
           raise CommandFailedError.new(argv, status.exit_code, "Patch failed (#{status.exit_code}): #{patch}") unless status.success?
         end
@@ -129,17 +174,18 @@ module Bootstrap
                       runner = SystemRunner.new,
                       phase : String? = nil,
                       packages : Array(String)? = nil,
-                      overrides_path : String? = DEFAULT_OVERRIDES_PATH,
+                      overrides_path : String? = nil,
                       report_dir : String? = DEFAULT_REPORT_DIR,
                       dry_run : Bool = false,
                       state_path : String? = nil,
                       resume : Bool = true)
       raise "Missing build plan #{path}" unless File.exists?(path)
       Log.info { "Loading build plan from #{path}" }
-      plan = BuildPlan.from_json(File.read(path))
-      plan = apply_overrides(plan, overrides_path) if overrides_path
-      effective_state_path = state_path || (path == DEFAULT_PLAN_PATH ? DEFAULT_STATE_PATH : nil)
-      state = effective_state_path ? SysrootBuildState.load_or_init(effective_state_path, plan_path: path, overrides_path: overrides_path, report_dir: report_dir) : nil
+      plan = BuildPlanReader.load(path)
+      effective_overrides_path = overrides_path || (path == DEFAULT_PLAN_PATH ? DEFAULT_OVERRIDES_PATH : nil)
+      plan = apply_overrides(plan, effective_overrides_path) if effective_overrides_path
+      effective_state_path = state_path || (resume && path == DEFAULT_PLAN_PATH ? DEFAULT_STATE_PATH : nil)
+      state = effective_state_path ? SysrootBuildState.load_or_init(effective_state_path, plan_path: path, overrides_path: effective_overrides_path, report_dir: report_dir) : nil
       state.try(&.save(effective_state_path.not_nil!)) if effective_state_path
       run_plan(plan,
         runner,

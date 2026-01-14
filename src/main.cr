@@ -1,6 +1,8 @@
 require "log"
 require "./bootstrap-qcow2"
+require "./alpine_setup"
 require "./cli"
+require "./build_plan_utils"
 require "./sysroot_builder"
 require "./sysroot_namespace"
 require "./sysroot_runner_lib"
@@ -18,6 +20,7 @@ module Bootstrap
       "sysroot-namespace"       => ->(args : Array(String)) { run_sysroot_namespace(args) },
       "sysroot-namespace-check" => ->(args : Array(String)) { run_sysroot_namespace_check(args) },
       "sysroot-runner"          => ->(args : Array(String)) { run_sysroot_runner(args) },
+      "sysroot-plan-write"      => ->(args : Array(String)) { run_sysroot_plan_write(args) },
       "codex-namespace"         => ->(args : Array(String)) { run_codex_namespace(args) },
       "github-pr-feedback"      => ->(args : Array(String)) { run_github_pr_feedback(args) },
       "github-pr-comment"       => ->(args : Array(String)) { run_github_pr_comment(args) },
@@ -45,6 +48,7 @@ module Bootstrap
       puts "  sysroot-namespace       Enter a namespaced rootfs and exec a command"
       puts "  sysroot-namespace-check Check host namespace prerequisites"
       puts "  sysroot-runner          Replay build plan inside the sysroot"
+      puts "  sysroot-plan-write      Write a fresh build plan JSON"
       puts "  codex-namespace         Run Codex inside a namespaced rootfs"
       puts "  github-pr-feedback      Fetch PR feedback as JSON"
       puts "  github-pr-comment       Post a PR conversation comment"
@@ -217,48 +221,92 @@ module Bootstrap
     end
 
     private def self.run_sysroot_runner(args : Array(String)) : Int32
+      plan_path = SysrootRunner::DEFAULT_PLAN_PATH
       phase : String? = nil
       packages = [] of String
       overrides_path : String? = SysrootRunner::DEFAULT_OVERRIDES_PATH
       report_dir : String? = SysrootRunner::DEFAULT_REPORT_DIR
+      state_path : String? = nil
       dry_run = false
+      resume = true
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-runner [options]") do |p|
+        p.on("--plan PATH", "Read the build plan from PATH (default: #{SysrootRunner::DEFAULT_PLAN_PATH})") { |path| plan_path = path }
         p.on("--phase NAME", "Select build phase to run (default: first phase; use 'all' for every phase)") { |name| phase = name }
         p.on("--package NAME", "Only run the named package(s); repeatable") { |name| packages << name }
         p.on("--overrides PATH", "Apply runtime overrides JSON (default: #{SysrootRunner::DEFAULT_OVERRIDES_PATH})") { |path| overrides_path = path }
         p.on("--no-overrides", "Disable runtime overrides") { overrides_path = nil }
         p.on("--report-dir PATH", "Write failure reports to PATH (default: #{SysrootRunner::DEFAULT_REPORT_DIR})") { |path| report_dir = path }
         p.on("--no-report", "Disable failure report writing") { report_dir = nil }
+        p.on("--state-path PATH", "Write runner state/bookmarks to PATH (default: #{SysrootRunner::DEFAULT_STATE_PATH} when using the default plan path)") { |path| state_path = path }
+        p.on("--no-resume", "Disable resume/state tracking (useful when the default state path is not writable)") { resume = false }
         p.on("--dry-run", "List selected phases/steps and exit") { dry_run = true }
       end
       return CLI.print_help(parser) if help
 
       SysrootRunner.run_plan(
+        plan_path,
         phase: phase,
         packages: packages.empty? ? nil : packages,
         overrides_path: overrides_path,
         report_dir: report_dir,
         dry_run: dry_run,
+        state_path: state_path,
+        resume: resume,
       )
+      0
+    end
+
+    # Writes a freshly generated build plan JSON.
+    #
+    # This is useful when iterating inside a sysroot that contains an older plan
+    # schema (or when you want to reset the plan after updating the tooling).
+    private def self.run_sysroot_plan_write(args : Array(String)) : Int32
+      output = SysrootRunner::DEFAULT_PLAN_PATH
+      workspace_root = Bootstrap::BuildPlanUtils::DEFAULT_WORKSPACE_ROOT
+      force = false
+      parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-plan-write [options]") do |p|
+        p.on("--output PATH", "Write the plan to PATH (default: #{SysrootRunner::DEFAULT_PLAN_PATH})") { |path| output = path }
+        p.on("--workspace-root PATH", "Rewrite plan workdirs rooted at /workspace to PATH (default: #{workspace_root})") { |path| workspace_root = path }
+        p.on("--force", "Overwrite an existing plan at the output path") { force = true }
+      end
+      return CLI.print_help(parser) if help
+
+      if File.exists?(output) && !force
+        STDERR.puts "Refusing to overwrite existing plan at #{output} (pass --force)"
+        return 1
+      end
+
+      tmp_workspace = Path["/tmp/bq2-plan-write-#{Random::Secure.hex(4)}"]
+      builder = SysrootBuilder.new(workspace: tmp_workspace)
+      plan = builder.build_plan
+      plan = Bootstrap::BuildPlanUtils.rewrite_workspace_root(plan, workspace_root) if workspace_root != Bootstrap::BuildPlanUtils::DEFAULT_WORKSPACE_ROOT
+
+      FileUtils.mkdir_p(File.dirname(output))
+      File.write(output, plan.to_json)
+      puts "Wrote build plan to #{output}"
       0
     end
 
     private def self.run_codex_namespace(args : Array(String)) : Int32
       rootfs = Path["data/sysroot/rootfs"]
-      bind_work = true
       alpine_setup = false
+      add_dirs = Bootstrap::CodexNamespace::DEFAULT_CODEX_ADD_DIRS.dup
 
-      parser, remaining, help = CLI.parse(args, "Usage: bq2 codex-namespace [options] [-- cmd ...]") do |p|
+      parser, remaining, help = CLI.parse(args, "Usage: bq2 codex-namespace [options]") do |p|
         p.on("-C DIR", "Rootfs directory for the command (default: #{rootfs})") { |dir| rootfs = Path[dir].expand }
-        p.on("--no-bind-work", "Do not bind a host work directory into /work") { bind_work = false }
-        p.on("--alpine", "Assume rootfs is Alpine and install runtime deps for npx codex (node/npm/crystal)") { alpine_setup = true }
+        p.on("--alpine", "Assume rootfs is Alpine and install runtime deps for Codex (node/npm/crystal)") { alpine_setup = true }
+        p.on("--no-default-add-dirs", "Do not pass the default Codex sandbox writable dirs (/var,/opt,/workspace)") { add_dirs.clear }
+        p.on("--add-dir PATH", "Add an extra writable dir for the Codex sandbox (repeatable)") { |dir| add_dirs << dir }
       end
       return CLI.print_help(parser) if help
 
-      command = remaining.dup
-      command = ["npx", "codex"] if command.empty?
+      unless remaining.empty?
+        STDERR.puts "Unexpected extra arguments: #{remaining.join(" ")}"
+        STDERR.puts "codex-namespace runs Codex; pass options only."
+        return 1
+      end
 
-      status = CodexNamespace.run(command, rootfs: rootfs, bind_work: bind_work, alpine_setup: alpine_setup)
+      status = CodexNamespace.run(rootfs: rootfs, alpine_setup: alpine_setup, add_dirs: add_dirs)
       status.exit_code
     rescue ex : SysrootNamespace::NamespaceError
       STDERR.puts "Namespace setup failed: #{ex.message}"
@@ -293,16 +341,10 @@ module Bootstrap
       chroot_path = builder.generate_chroot(include_sources: true)
       puts "Prepared chroot directory at #{chroot_path}"
 
-      File.write(chroot_path / "/etc/resolv.conf", "nameserver 8.8.8.8", perm = 0o644)
+      AlpineSetup.write_resolv_conf(chroot_path)
       SysrootNamespace.enter_rootfs(chroot_path.to_s)
-      status = Process.run(
-        "apk",
-        ["add", "crystal", "clang", "lld"],
-        input: STDIN,
-        output: STDOUT,
-        error: STDERR,
-      )
-      status.exit_code
+      AlpineSetup.install_sysroot_runner_packages
+      0
     end
   end
 end
@@ -318,6 +360,7 @@ private def self.run_install(_args : Array(String)) : Int32
     sysroot-namespace
     sysroot-namespace-check
     sysroot-runner
+    sysroot-plan-write
     codex-namespace
     github-pr-feedback
     github-pr-comment
