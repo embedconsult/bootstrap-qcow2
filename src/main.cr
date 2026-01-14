@@ -289,20 +289,21 @@ module Bootstrap
 
     private def self.run_codex_namespace(args : Array(String)) : Int32
       rootfs = Path["data/sysroot/rootfs"]
-      bind_work = true
       alpine_setup = false
 
-      parser, remaining, help = CLI.parse(args, "Usage: bq2 codex-namespace [options] [-- cmd ...]") do |p|
+      parser, remaining, help = CLI.parse(args, "Usage: bq2 codex-namespace [options]") do |p|
         p.on("-C DIR", "Rootfs directory for the command (default: #{rootfs})") { |dir| rootfs = Path[dir].expand }
-        p.on("--no-bind-work", "Do not bind a host work directory into /work") { bind_work = false }
-        p.on("--alpine", "Assume rootfs is Alpine and install runtime deps for npx codex (node/npm/crystal)") { alpine_setup = true }
+        p.on("--alpine", "Assume rootfs is Alpine and install runtime deps for Codex (node/npm/crystal)") { alpine_setup = true }
       end
       return CLI.print_help(parser) if help
 
-      command = remaining.dup
-      command = ["npx", "codex"] if command.empty?
+      unless remaining.empty?
+        STDERR.puts "Unexpected extra arguments: #{remaining.join(" ")}"
+        STDERR.puts "codex-namespace runs Codex; pass options only."
+        return 1
+      end
 
-      status = CodexNamespace.run(command, rootfs: rootfs, bind_work: bind_work, alpine_setup: alpine_setup)
+      status = CodexNamespace.run(rootfs: rootfs, alpine_setup: alpine_setup)
       status.exit_code
     rescue ex : SysrootNamespace::NamespaceError
       STDERR.puts "Namespace setup failed: #{ex.message}"

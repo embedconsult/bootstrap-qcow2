@@ -8,55 +8,40 @@ module Bootstrap
     DEFAULT_ROOTFS = Path["data/sysroot/rootfs"]
 
     # Runs a command inside a fresh namespace rooted at *rootfs*. Binds the host
-    # work directory (`./codex/work`) into `/work` when requested.
+    # work directory (`./codex/work`) into `/work`.
     #
     # When invoking Codex, the wrapper stores the most recent Codex session id in
     # `/work/.codex-session-id` and will resume that session on the next run when
-    # the default command is used.
+    # possible.
     # Optionally installs node/npm via apk when targeting Alpine rootfs.
-    def self.run(command : Array(String) = ["npx", "codex"],
-                 rootfs : Path = DEFAULT_ROOTFS,
-                 bind_work : Bool = true,
-                 alpine_setup : Bool = false) : Process::Status
-      raise "Empty command" if command.empty?
-
-      binds = [] of Tuple(Path, Path)
-      if bind_work
-        host_work = Path["codex/work"].expand
-        FileUtils.mkdir_p(host_work)
-        binds << {host_work, Path["work"]}
-      end
+    def self.run(rootfs : Path = DEFAULT_ROOTFS, alpine_setup : Bool = false) : Process::Status
+      host_work = Path["codex/work"].expand
+      FileUtils.mkdir_p(host_work)
+      binds = [{host_work, Path["work"]}] of Tuple(Path, Path)
 
       AlpineSetup.write_resolv_conf(rootfs) if alpine_setup
       SysrootNamespace.enter_rootfs(rootfs.to_s, extra_binds: binds)
-      workdir = bind_work ? Path["/work"] : Path["/"]
-      Dir.cd(Dir.exists?(workdir) ? workdir : Path["/"])
+      Dir.cd(Path["/work"])
 
-      env = {} of String => String
-      uses_codex = command == ["codex"] || command == ["npx", "codex"] || command.first? == "codex" || (command.size > 1 && command.first == "npx" && command[1] == "codex")
-      if bind_work && uses_codex
-        env["HOME"] = "/work"
-        env["CODEX_HOME"] = "/work/.codex"
-        FileUtils.mkdir_p(Path["/work/.codex"])
-        if bookmark = CodexSessionBookmark.read(Path["/work"])
-          if command == ["npx", "codex"]
-            command = ["npx", "codex", "resume", bookmark]
-          elsif command == ["codex"]
-            command = ["codex", "resume", bookmark]
-          end
-        end
-      end
+      env = {
+        "HOME"       => "/work",
+        "CODEX_HOME" => "/work/.codex",
+      }
+      FileUtils.mkdir_p(Path["/work/.codex"])
 
       if alpine_setup
         AlpineSetup.install_sysroot_runner_packages
         AlpineSetup.install_codex_packages
       end
 
+      command = if bookmark = CodexSessionBookmark.read(Path["/work"])
+                  ["codex", "resume", bookmark]
+                else
+                  ["codex"]
+                end
       status = Process.run(command.first, command[1..], env: env, input: STDIN, output: STDOUT, error: STDERR)
-      if bind_work && uses_codex
-        if latest = CodexSessionBookmark.latest_from(Path["/work/.codex"])
-          CodexSessionBookmark.write(Path["/work"], latest)
-        end
+      if latest = CodexSessionBookmark.latest_from(Path["/work/.codex"])
+        CodexSessionBookmark.write(Path["/work"], latest)
       end
       status
     end
