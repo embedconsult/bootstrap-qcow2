@@ -99,6 +99,7 @@ module Bootstrap
               run_cmd(["install", "-m", "0755", artifact, "#{bin_prefix}/bin/"], env: env)
             end
           when "crystal-compiler"
+            FileUtils.rm_rf(".build") if Dir.exists?(".build")
             run_cmd(["make", "-j#{cpus}", "crystal"], env: env)
             install_env = destdir ? env.merge({"DESTDIR" => destdir}) : env
             run_cmd(["make", "install", "PREFIX=#{install_prefix}"], env: install_env)
