@@ -109,12 +109,25 @@ module Bootstrap
             run_cmd(["cmake", "--install", stage1_build_dir], env: install_env)
 
             install_root = destdir ? "#{destdir}#{install_prefix}" : install_prefix
-            triple = detect_clang_target_triple("#{install_root}/bin/clang", env: env)
+            stage2_cc = "#{install_root}/bin/clang"
+            stage2_cxx = "#{install_root}/bin/clang++"
+            raise "llvm-libcxx stage2 requires #{stage2_cc}" unless File.exists?(stage2_cc)
+            raise "llvm-libcxx stage2 requires #{stage2_cxx}" unless File.exists?(stage2_cxx)
+            triple = detect_clang_target_triple(stage2_cc, env: env)
             libcxx_include = "#{install_root}/include/c++/v1"
+            libcxx_target_include = "#{install_root}/include/#{triple}/c++/v1"
             libcxx_libdir = "#{install_root}/lib/#{triple}"
+            libcxx_archive = "#{libcxx_libdir}/libc++.a"
+            libcxxabi_archive = "#{libcxx_libdir}/libc++abi.a"
+            libunwind_archive = "#{libcxx_libdir}/libunwind.a"
+            cxx_standard_libs = "-Wl,--start-group #{libcxx_archive} #{libcxxabi_archive} #{libunwind_archive} -Wl,--end-group"
 
             stage2_flags = step.configure_flags.reject { |flag| flag.starts_with?("-DLLVM_ENABLE_RUNTIMES=") } + [
-              "-DCMAKE_CXX_FLAGS=-nostdinc++ -isystem #{libcxx_include} -stdlib=libc++ -L#{libcxx_libdir} -L#{install_root}/lib",
+              "-DCMAKE_C_COMPILER=#{stage2_cc}",
+              "-DCMAKE_CXX_COMPILER=#{stage2_cxx}",
+              "-DCMAKE_C_FLAGS=--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld",
+              "-DCMAKE_CXX_FLAGS=-nostdinc++ -isystem #{libcxx_include} -isystem #{libcxx_target_include} -nostdlib++ -stdlib=libc++ --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{install_root}/lib",
+              "-DCMAKE_CXX_STANDARD_LIBRARIES=#{cxx_standard_libs}",
               "-DCMAKE_EXE_LINKER_FLAGS=-L#{libcxx_libdir} -L#{install_root}/lib",
               "-DCMAKE_SHARED_LINKER_FLAGS=-L#{libcxx_libdir} -L#{install_root}/lib",
               "-DCMAKE_MODULE_LINKER_FLAGS=-L#{libcxx_libdir} -L#{install_root}/lib",
