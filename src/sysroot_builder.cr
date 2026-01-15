@@ -521,7 +521,15 @@ module Bootstrap
       sysroot_prefix = "/opt/sysroot"
       rootfs_destdir = "/workspace/rootfs"
       sysroot_triple = sysroot_target_triple
-      musl_ld_path = "/etc/ld-musl-#{@architecture}.path"
+      musl_arch = case @architecture
+                  when "aarch64", "arm64"
+                    "aarch64"
+                  when "x86_64", "amd64"
+                    "x86_64"
+                  else
+                    @architecture
+                  end
+      musl_ld_path = "/etc/ld-musl-#{musl_arch}.path"
       [
         PhaseSpec.new(
           name: "sysroot-from-alpine",
