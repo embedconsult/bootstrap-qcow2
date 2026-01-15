@@ -114,7 +114,7 @@ module Bootstrap
             libcxx_libdir = "#{install_root}/lib/#{triple}"
 
             stage2_flags = step.configure_flags.reject { |flag| flag.starts_with?("-DLLVM_ENABLE_RUNTIMES=") } + [
-              "-DCMAKE_CXX_FLAGS=-nostdinc++ -isystem #{libcxx_include} -stdlib=libc++",
+              "-DCMAKE_CXX_FLAGS=-nostdinc++ -isystem #{libcxx_include} -stdlib=libc++ -L#{libcxx_libdir} -L#{install_root}/lib",
               "-DCMAKE_EXE_LINKER_FLAGS=-L#{libcxx_libdir} -L#{install_root}/lib",
               "-DCMAKE_SHARED_LINKER_FLAGS=-L#{libcxx_libdir} -L#{install_root}/lib",
               "-DCMAKE_MODULE_LINKER_FLAGS=-L#{libcxx_libdir} -L#{install_root}/lib",
