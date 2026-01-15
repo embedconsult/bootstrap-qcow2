@@ -213,6 +213,7 @@ module Bootstrap
             "-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ -static-libgcc",
             "-DLLVM_TARGETS_TO_BUILD=AArch64",
             "-DLLVM_ENABLE_PROJECTS=clang;lld;compiler-rt",
+            "-DLLVM_ENABLE_RUNTIMES=libunwind",
             "-DLLVM_INCLUDE_TESTS=OFF",
             "-DLLVM_INCLUDE_EXAMPLES=OFF",
             "-DLLVM_INCLUDE_BENCHMARKS=OFF",
@@ -226,6 +227,10 @@ module Bootstrap
             "-DCOMPILER_RT_BUILD_LIBFUZZER=OFF",
             "-DCOMPILER_RT_BUILD_PROFILE=OFF",
             "-DCOMPILER_RT_BUILD_MEMPROF=OFF",
+            "-DLIBUNWIND_USE_COMPILER_RT=ON",
+            "-DLIBUNWIND_ENABLE_SHARED=ON",
+            "-DLIBUNWIND_ENABLE_STATIC=ON",
+            "-DLIBUNWIND_INCLUDE_TESTS=OFF",
           ],
           patches: ["#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/smallvector-include-cstdint.patch"],
           phases: ["sysroot-from-alpine", "system-from-sysroot"],
@@ -619,8 +624,8 @@ module Bootstrap
     # The rootfs phase is intended to use tools from the newly built sysroot,
     # but still execute in the bootstrap environment.
     private def rootfs_phase_env(sysroot_prefix : String) : Hash(String, String)
-      cc = "#{sysroot_prefix}/bin/clang --rtlib=compiler-rt"
-      cxx = "#{sysroot_prefix}/bin/clang++ --rtlib=compiler-rt"
+      cc = "#{sysroot_prefix}/bin/clang --rtlib=compiler-rt --unwindlib=libunwind"
+      cxx = "#{sysroot_prefix}/bin/clang++ --rtlib=compiler-rt --unwindlib=libunwind"
       {
         "PATH" => "#{sysroot_prefix}/bin:#{sysroot_prefix}/sbin:/usr/bin:/bin",
         "CC"   => cc,
