@@ -558,7 +558,7 @@ module Bootstrap
               patches: [] of String,
               install_prefix: musl_ld_path,
               env: {
-                "CONTENT" => "/lib:/usr/lib:/opt/sysroot/lib:/opt/sysroot/usr/lib\n",
+                "CONTENT" => "/lib:/usr/lib:/opt/sysroot/lib:/opt/sysroot/lib/#{sysroot_triple}:/opt/sysroot/usr/lib\n",
               },
             ),
             BuildStep.new(
