@@ -210,13 +210,12 @@ module Bootstrap
           strategy: "llvm",
           configure_flags: [
             "-DCMAKE_BUILD_TYPE=Release",
-            "-DCMAKE_CXX_FLAGS=-static-libstdc++ -static-libgcc",
-            "-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ -static-libgcc",
             "-DLLVM_TARGETS_TO_BUILD=AArch64",
             "-DLLVM_HOST_TRIPLE=#{sysroot_triple}",
             "-DLLVM_DEFAULT_TARGET_TRIPLE=#{sysroot_triple}",
             "-DLLVM_ENABLE_PROJECTS=clang;lld;compiler-rt",
-            "-DLLVM_ENABLE_RUNTIMES=libunwind",
+            "-DLLVM_ENABLE_RUNTIMES=libunwind;libcxxabi;libcxx",
+            "-DLLVM_ENABLE_LIBCXX=ON",
             "-DLLVM_INCLUDE_TESTS=OFF",
             "-DLLVM_INCLUDE_EXAMPLES=OFF",
             "-DLLVM_INCLUDE_BENCHMARKS=OFF",
@@ -234,6 +233,16 @@ module Bootstrap
             "-DLIBUNWIND_ENABLE_SHARED=OFF",
             "-DLIBUNWIND_ENABLE_STATIC=ON",
             "-DLIBUNWIND_INCLUDE_TESTS=OFF",
+            "-DLIBCXX_HAS_MUSL_LIBC=ON",
+            "-DLIBCXX_USE_COMPILER_RT=ON",
+            "-DLIBCXX_ENABLE_SHARED=ON",
+            "-DLIBCXX_ENABLE_STATIC=ON",
+            "-DLIBCXX_INCLUDE_TESTS=OFF",
+            "-DLIBCXXABI_USE_COMPILER_RT=ON",
+            "-DLIBCXXABI_USE_LLVM_UNWINDER=ON",
+            "-DLIBCXXABI_ENABLE_SHARED=ON",
+            "-DLIBCXXABI_ENABLE_STATIC=ON",
+            "-DLIBCXXABI_INCLUDE_TESTS=OFF",
           ],
           patches: ["#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/smallvector-include-cstdint.patch"],
           phases: ["sysroot-from-alpine", "system-from-sysroot"],
@@ -519,7 +528,7 @@ module Bootstrap
           env_overrides: {
             "cmake" => {
               "CPPFLAGS" => "-I#{sysroot_prefix}/include",
-              "LDFLAGS"  => "-L#{sysroot_prefix}/lib -static-libstdc++ -static-libgcc",
+              "LDFLAGS"  => "-L#{sysroot_prefix}/lib",
             },
           },
         ),
@@ -531,12 +540,15 @@ module Bootstrap
           install_prefix: sysroot_prefix,
           destdir: nil,
           env: rootfs_phase_env(sysroot_prefix).merge({
-            "CRYSTAL"      => "/usr/bin/crystal",
-            "SHARDS"       => "/usr/bin/shards",
-            "LLVM_CONFIG"  => "#{sysroot_prefix}/bin/llvm-config",
-            "CPPFLAGS"     => "-I#{sysroot_prefix}/include",
-            "LDFLAGS"      => "-L#{sysroot_prefix}/lib/#{sysroot_triple} -L#{sysroot_prefix}/lib",
-            "LIBRARY_PATH" => "#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
+            "CRYSTAL_CACHE_DIR" => "/tmp/crystal_cache",
+            "CRYSTAL"           => "/usr/bin/crystal",
+            "SHARDS"            => "/usr/bin/shards",
+            "LLVM_CONFIG"       => "#{sysroot_prefix}/bin/llvm-config",
+            "CC"                => "#{sysroot_prefix}/bin/clang++ --target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -stdlib=libc++",
+            "CXX"               => "#{sysroot_prefix}/bin/clang++ --target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -stdlib=libc++",
+            "CPPFLAGS"          => "-I#{sysroot_prefix}/include",
+            "LDFLAGS"           => "-L#{sysroot_prefix}/lib/#{sysroot_triple} -L#{sysroot_prefix}/lib",
+            "LIBRARY_PATH"      => "#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
           }),
           package_allowlist: nil,
         ),
@@ -656,11 +668,9 @@ module Bootstrap
     # the seed rootfs uses Clang for all C/C++ compilation.
     private def sysroot_phase_env(sysroot_prefix : String) : Hash(String, String)
       {
-        "PATH"     => "#{sysroot_prefix}/bin:#{sysroot_prefix}/sbin:/usr/bin:/bin",
-        "CC"       => "/usr/bin/clang",
-        "CXX"      => "/usr/bin/clang++",
-        "CXXFLAGS" => "-static-libstdc++ -static-libgcc",
-        "LDFLAGS"  => "-static-libstdc++ -static-libgcc",
+        "PATH" => "#{sysroot_prefix}/bin:#{sysroot_prefix}/sbin:/usr/bin:/bin",
+        "CC"   => "/usr/bin/clang",
+        "CXX"  => "/usr/bin/clang++",
       }
     end
 
