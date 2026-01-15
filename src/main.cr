@@ -126,6 +126,26 @@ module Bootstrap
 
       state = SysrootBuildState.load(resolved_state_path)
       puts(state.progress.current_phase || "(none)")
+
+      plan_path = File.join(rootfs_dir, "var/lib/sysroot-build-plan.json")
+      plan_path = state.plan_path unless File.exists?(plan_path)
+      if File.exists?(plan_path)
+        plan = BuildPlan.from_json(File.read(plan_path))
+        next_phase = plan.phases.find do |phase|
+          phase.steps.any? { |step| !state.completed?(phase.name, step.name) }
+        end
+        if next_phase
+          next_step = next_phase.steps.find { |step| !state.completed?(next_phase.name, step.name) }
+          puts("next_phase=#{next_phase.name}")
+          puts("next_step=#{next_step.not_nil!.name}") if next_step
+        else
+          puts("next_phase=(none)")
+        end
+      end
+
+      if (success = state.progress.last_success)
+        puts("last_success=#{success.phase}/#{success.step}")
+      end
       if (failure = state.progress.last_failure)
         puts("last_failure=#{failure.phase}/#{failure.step}")
       end
