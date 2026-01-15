@@ -91,6 +91,37 @@ module Bootstrap
             run_cmd(["cmake", "--build", "build", "-j#{cpus}"], env: env)
             install_env = destdir ? env.merge({"DESTDIR" => destdir}) : env
             run_cmd(["cmake", "--install", "build"], env: install_env)
+          when "llvm-libcxx"
+            source_dir = "."
+            unless File.exists?("CMakeLists.txt")
+              source_dir = "llvm" if File.exists?(File.join("llvm", "CMakeLists.txt"))
+            end
+
+            stage1_build_dir = "build-stage1"
+            stage2_build_dir = "build-stage2"
+            FileUtils.rm_rf(stage1_build_dir) if Dir.exists?(stage1_build_dir)
+            FileUtils.rm_rf(stage2_build_dir) if Dir.exists?(stage2_build_dir)
+
+            stage1_flags = step.configure_flags.reject { |flag| flag.starts_with?("-DLLVM_ENABLE_LIBCXX=") }
+            run_cmd(["cmake", "-S", source_dir, "-B", stage1_build_dir, "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + stage1_flags, env: env)
+            run_cmd(["cmake", "--build", stage1_build_dir, "-j#{cpus}"], env: env)
+            install_env = destdir ? env.merge({"DESTDIR" => destdir}) : env
+            run_cmd(["cmake", "--install", stage1_build_dir], env: install_env)
+
+            install_root = destdir ? "#{destdir}#{install_prefix}" : install_prefix
+            triple = detect_clang_target_triple("#{install_root}/bin/clang", env: env)
+            libcxx_include = "#{install_root}/include/c++/v1"
+            libcxx_libdir = "#{install_root}/lib/#{triple}"
+
+            stage2_flags = step.configure_flags.reject { |flag| flag.starts_with?("-DLLVM_ENABLE_RUNTIMES=") } + [
+              "-DCMAKE_CXX_FLAGS=-nostdinc++ -isystem #{libcxx_include} -stdlib=libc++",
+              "-DCMAKE_EXE_LINKER_FLAGS=-L#{libcxx_libdir} -L#{install_root}/lib",
+              "-DCMAKE_SHARED_LINKER_FLAGS=-L#{libcxx_libdir} -L#{install_root}/lib",
+              "-DCMAKE_MODULE_LINKER_FLAGS=-L#{libcxx_libdir} -L#{install_root}/lib",
+            ]
+            run_cmd(["cmake", "-S", source_dir, "-B", stage2_build_dir, "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + stage2_flags, env: env)
+            run_cmd(["cmake", "--build", stage2_build_dir, "-j#{cpus}"], env: env)
+            run_cmd(["cmake", "--install", stage2_build_dir], env: install_env)
           when "crystal"
             run_cmd(["shards", "build"], env: env)
             bin_prefix = destdir ? "#{destdir}#{install_prefix}" : install_prefix
@@ -186,6 +217,17 @@ module Bootstrap
           raise CommandFailedError.new(argv, status.exit_code, "Command failed (#{status.exit_code}): #{argv.join(" ")}")
         end
         Log.debug { "Completed #{argv.first} with exit #{status.exit_code}" }
+      end
+
+      private def detect_clang_target_triple(clang_path : String, env : Hash(String, String)) : String
+        output = IO::Memory.new
+        status = Process.run(clang_path, ["-dumpmachine"], env: env, output: output, error: STDERR)
+        unless status.success?
+          raise CommandFailedError.new([clang_path, "-dumpmachine"], status.exit_code, "Failed to detect target triple via #{clang_path} -dumpmachine")
+        end
+        triple = output.to_s.strip
+        raise "Empty target triple from #{clang_path} -dumpmachine" if triple.empty?
+        triple
       end
 
       # Runs `make install`, optionally staging through `DESTDIR`.

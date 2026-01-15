@@ -207,7 +207,7 @@ module Bootstrap
           "llvm-project",
           DEFAULT_LLVM_VER,
           URI.parse("https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-#{DEFAULT_LLVM_VER}.tar.gz"),
-          strategy: "llvm",
+          strategy: "llvm-libcxx",
           configure_flags: [
             "-DCMAKE_BUILD_TYPE=Release",
             "-DLLVM_TARGETS_TO_BUILD=AArch64",
@@ -282,6 +282,7 @@ module Bootstrap
           DEFAULT_CRYSTAL,
           URI.parse("https://github.com/crystal-lang/crystal/archive/refs/tags/#{DEFAULT_CRYSTAL}.tar.gz"),
           strategy: "crystal-compiler",
+          patches: ["#{bootstrap_repo_dir}/patches/crystal-#{DEFAULT_CRYSTAL}/use-libcxx.patch"],
           phases: ["crystal-from-sysroot", "crystal-from-system"],
         ),
       ]

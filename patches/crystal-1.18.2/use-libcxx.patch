@@ -1,0 +1,9 @@
+--- a/src/llvm/lib_llvm.cr
++++ b/src/llvm/lib_llvm.cr
+@@
+-      @[Link("stdc++")]
++      @[Link("c++")]
++      @[Link("c++abi")]
++      @[Link("unwind")]
+       lib LibLLVM
+       end
