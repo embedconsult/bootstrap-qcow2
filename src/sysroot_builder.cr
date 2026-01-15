@@ -161,6 +161,7 @@ module Bootstrap
     # directory name when upstream archives use non-standard layouts.
     def packages : Array(PackageSpec)
       bootstrap_repo_dir = "/workspace/bootstrap-qcow2-#{bootstrap_source_branch}"
+      sysroot_triple = sysroot_target_triple
       [
         PackageSpec.new(
           "bootstrap-qcow2",
@@ -212,6 +213,8 @@ module Bootstrap
             "-DCMAKE_CXX_FLAGS=-static-libstdc++ -static-libgcc",
             "-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ -static-libgcc",
             "-DLLVM_TARGETS_TO_BUILD=AArch64",
+            "-DLLVM_HOST_TRIPLE=#{sysroot_triple}",
+            "-DLLVM_DEFAULT_TARGET_TRIPLE=#{sysroot_triple}",
             "-DLLVM_ENABLE_PROJECTS=clang;lld;compiler-rt",
             "-DLLVM_ENABLE_RUNTIMES=libunwind",
             "-DLLVM_INCLUDE_TESTS=OFF",
@@ -501,6 +504,7 @@ module Bootstrap
     def phase_specs : Array(PhaseSpec)
       sysroot_prefix = "/opt/sysroot"
       rootfs_destdir = "/workspace/rootfs"
+      sysroot_triple = sysroot_target_triple
       musl_ld_path = "/etc/ld-musl-#{@architecture}.path"
       [
         PhaseSpec.new(
@@ -531,8 +535,8 @@ module Bootstrap
             "SHARDS"       => "/usr/bin/shards",
             "LLVM_CONFIG"  => "#{sysroot_prefix}/bin/llvm-config",
             "CPPFLAGS"     => "-I#{sysroot_prefix}/include",
-            "LDFLAGS"      => "-Wl,--dynamic-linker=/lib/ld-musl-aarch64.so.1 -L#{sysroot_prefix}/lib/aarch64-unknown-linux-gnu -L#{sysroot_prefix}/lib",
-            "LIBRARY_PATH" => "#{sysroot_prefix}/lib/aarch64-unknown-linux-gnu:#{sysroot_prefix}/lib",
+            "LDFLAGS"      => "-L#{sysroot_prefix}/lib/#{sysroot_triple} -L#{sysroot_prefix}/lib",
+            "LIBRARY_PATH" => "#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
           }),
           package_allowlist: nil,
         ),
@@ -624,13 +628,25 @@ module Bootstrap
     # The rootfs phase is intended to use tools from the newly built sysroot,
     # but still execute in the bootstrap environment.
     private def rootfs_phase_env(sysroot_prefix : String) : Hash(String, String)
-      cc = "#{sysroot_prefix}/bin/clang --rtlib=compiler-rt --unwindlib=libunwind"
-      cxx = "#{sysroot_prefix}/bin/clang++ --rtlib=compiler-rt --unwindlib=libunwind"
+      target = sysroot_target_triple
+      cc = "#{sysroot_prefix}/bin/clang --target=#{target} --rtlib=compiler-rt --unwindlib=libunwind"
+      cxx = "#{sysroot_prefix}/bin/clang++ --target=#{target} --rtlib=compiler-rt --unwindlib=libunwind"
       {
         "PATH" => "#{sysroot_prefix}/bin:#{sysroot_prefix}/sbin:/usr/bin:/bin",
         "CC"   => cc,
         "CXX"  => cxx,
       }
+    end
+
+    private def sysroot_target_triple : String
+      case @architecture
+      when "aarch64", "arm64"
+        "aarch64-alpine-linux-musl"
+      when "x86_64", "amd64"
+        "x86_64-alpine-linux-musl"
+      else
+        "#{@architecture}-alpine-linux-musl"
+      end
     end
 
     # Return environment variables for the sysroot bootstrap phase.
