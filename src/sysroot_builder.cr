@@ -531,7 +531,7 @@ module Bootstrap
             "SHARDS"       => "/usr/bin/shards",
             "LLVM_CONFIG"  => "#{sysroot_prefix}/bin/llvm-config",
             "CPPFLAGS"     => "-I#{sysroot_prefix}/include",
-            "LDFLAGS"      => "-L#{sysroot_prefix}/lib/aarch64-unknown-linux-gnu -L#{sysroot_prefix}/lib",
+            "LDFLAGS"      => "-Wl,--dynamic-linker=/lib/ld-musl-aarch64.so.1 -L#{sysroot_prefix}/lib/aarch64-unknown-linux-gnu -L#{sysroot_prefix}/lib",
             "LIBRARY_PATH" => "#{sysroot_prefix}/lib/aarch64-unknown-linux-gnu:#{sysroot_prefix}/lib",
           }),
           package_allowlist: nil,
