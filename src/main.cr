@@ -21,6 +21,7 @@ module Bootstrap
       "sysroot-namespace-check" => ->(args : Array(String)) { run_sysroot_namespace_check(args) },
       "sysroot-runner"          => ->(args : Array(String)) { run_sysroot_runner(args) },
       "sysroot-plan-write"      => ->(args : Array(String)) { run_sysroot_plan_write(args) },
+      "sysroot-status"          => ->(args : Array(String)) { run_sysroot_status(args) },
       "codex-namespace"         => ->(args : Array(String)) { run_codex_namespace(args) },
       "github-pr-feedback"      => ->(args : Array(String)) { run_github_pr_feedback(args) },
       "github-pr-comment"       => ->(args : Array(String)) { run_github_pr_comment(args) },
@@ -49,6 +50,7 @@ module Bootstrap
       puts "  sysroot-namespace-check Check host namespace prerequisites"
       puts "  sysroot-runner          Replay build plan inside the sysroot"
       puts "  sysroot-plan-write      Write a fresh build plan JSON"
+      puts "  sysroot-status          Print current sysroot build phase"
       puts "  codex-namespace         Run Codex inside a namespaced rootfs"
       puts "  github-pr-feedback      Fetch PR feedback as JSON"
       puts "  github-pr-comment       Post a PR conversation comment"
@@ -98,6 +100,36 @@ module Bootstrap
     private def self.normalize_bind_target(value : String) : Path
       cleaned = value.starts_with?("/") ? value[1..] : value
       Path[cleaned]
+    end
+
+    private def self.run_sysroot_status(args : Array(String)) : Int32
+      workspace = "data/sysroot"
+      rootfs : String? = nil
+      state_path : String? = nil
+
+      parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-status [options]") do |p|
+        p.on("-w DIR", "--workspace=DIR", "Sysroot workspace directory (default: #{workspace})") { |val| workspace = val }
+        p.on("--rootfs=PATH", "Prepared rootfs directory (default: <workspace>/rootfs)") { |val| rootfs = val }
+        p.on("--state=PATH", "Explicit sysroot build state JSON path") { |val| state_path = val }
+      end
+      return CLI.print_help(parser) if help
+
+      rootfs_dir = rootfs
+      rootfs_dir ||= File.join(workspace, "rootfs")
+      resolved_state_path = state_path
+      resolved_state_path ||= File.join(rootfs_dir, "var/lib/sysroot-build-state.json")
+      resolved_state_path = resolved_state_path.not_nil!
+      unless File.exists?(resolved_state_path)
+        resolved_state_path = SysrootBuildState::DEFAULT_PATH if File.exists?(SysrootBuildState::DEFAULT_PATH)
+      end
+      raise "Missing sysroot build state at #{resolved_state_path}" unless File.exists?(resolved_state_path)
+
+      state = SysrootBuildState.load(resolved_state_path)
+      puts(state.progress.current_phase || "(none)")
+      if (failure = state.progress.last_failure)
+        puts("last_failure=#{failure.phase}/#{failure.step}")
+      end
+      0
     end
 
     private def self.run_sysroot_builder(args : Array(String)) : Int32
@@ -374,6 +406,7 @@ private def self.run_install(_args : Array(String)) : Int32
     sysroot-namespace-check
     sysroot-runner
     sysroot-plan-write
+    sysroot-status
     codex-namespace
     github-pr-feedback
     github-pr-comment
