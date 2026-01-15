@@ -62,8 +62,10 @@ module Bootstrap
       rootfs = "data/sysroot/rootfs"
       extra_binds = [] of Tuple(Path, Path)
       command = [] of String
+      enter_workspace_rootfs = false
       parser, remaining, help = CLI.parse(args, "Usage: bq2 sysroot-namespace [options] [-- command...]") do |p|
         p.on("--rootfs=PATH", "Path to the sysroot rootfs (default: #{rootfs})") { |val| rootfs = val }
+        p.on("--workspace-rootfs", "Enter the generated rootfs at <rootfs>/workspace/rootfs (output of rootfs-from-sysroot)") { enter_workspace_rootfs = true }
         p.on("--bind=SRC:DST", "Bind-mount SRC into DST inside the rootfs (repeatable; DST is inside rootfs)") do |val|
           parts = val.split(":", 2)
           raise "Expected --bind=SRC:DST" unless parts.size == 2
@@ -75,6 +77,9 @@ module Bootstrap
       return CLI.print_help(parser) if help
 
       command = remaining.empty? ? ["/bin/sh"] : remaining
+      if enter_workspace_rootfs
+        rootfs = (Path[rootfs].expand / "workspace" / "rootfs").to_s
+      end
       Log.debug { "Entering namespace with rootfs=#{rootfs} command=#{command.join(" ")}" }
 
       SysrootNamespace.enter_rootfs(rootfs, extra_binds: extra_binds)
