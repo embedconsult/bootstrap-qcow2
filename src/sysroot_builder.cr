@@ -228,7 +228,7 @@ module Bootstrap
             "-DCOMPILER_RT_BUILD_PROFILE=OFF",
             "-DCOMPILER_RT_BUILD_MEMPROF=OFF",
             "-DLIBUNWIND_USE_COMPILER_RT=ON",
-            "-DLIBUNWIND_ENABLE_SHARED=ON",
+            "-DLIBUNWIND_ENABLE_SHARED=OFF",
             "-DLIBUNWIND_ENABLE_STATIC=ON",
             "-DLIBUNWIND_INCLUDE_TESTS=OFF",
           ],
