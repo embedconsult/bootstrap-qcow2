@@ -174,6 +174,7 @@ module Bootstrap
       codex_url : URI? = nil
       codex_sha256 : String? = nil
       codex_target = Bootstrap::SysrootBuilder::DEFAULT_CODEX_TARGET
+      install_codex = false
       refresh_plan = false
       restage_sources = false
 
@@ -200,6 +201,9 @@ module Bootstrap
           preserve_ownership_for_rootfs = true
           owner_gid = val.to_i
         end
+        p.on("--codex", "Install the host codex binary into the rootfs (default target: #{codex_target})") do
+          install_codex = true
+        end
         p.on("--codex-bin PATH", "Copy a host Codex binary into the rootfs workspace (default target: #{codex_target})") do |val|
           codex_bin = Path[val].expand
         end
@@ -216,6 +220,15 @@ module Bootstrap
         p.on("--restage-sources", "Extract missing sources into an existing rootfs /workspace (requires --reuse-rootfs)") { restage_sources = true }
       end
       return CLI.print_help(parser) if help
+
+      if install_codex && codex_bin.nil? && codex_url.nil?
+        if found = Process.find_executable("codex")
+          codex_bin = Path[found]
+        else
+          STDERR.puts "codex not found on PATH; pass --codex-bin or --codex-url instead"
+          return 1
+        end
+      end
 
       Log.info { "Sysroot builder log level=#{Log.for("").level} (env-configured)" }
       builder = SysrootBuilder.new(

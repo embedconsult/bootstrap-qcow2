@@ -375,7 +375,7 @@ describe Bootstrap::SysrootBuilder do
           builder.fake_tarball = tarball
           rootfs = builder.prepare_rootfs(include_sources: false)
 
-          staged = rootfs / "workspace/codex/bin/codex"
+          staged = rootfs / "usr/bin/codex"
           File.exists?(staged).should be_true
           File.read(staged).should eq "codex"
         end

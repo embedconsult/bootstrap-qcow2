@@ -54,7 +54,7 @@ module Bootstrap
     DEFAULT_GIT           = "2.45.2"
     DEFAULT_CRYSTAL       = "1.18.2"
     DEFAULT_BQ2_BRANCH    = "codex-development"
-    DEFAULT_CODEX_TARGET  = Path["/workspace/codex/bin/codex"]
+    DEFAULT_CODEX_TARGET  = Path["/usr/bin/codex"]
 
     record PackageSpec,
       name : String,
