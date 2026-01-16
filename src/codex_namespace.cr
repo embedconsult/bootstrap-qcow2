@@ -121,7 +121,7 @@ module Bootstrap
         extract_dir = Path["#{target}.extract"]
         FileUtils.rm_r(extract_dir) if Dir.exists?(extract_dir)
         FileUtils.mkdir_p(extract_dir)
-        extract_tarball(source, extract_dir)
+        extract_tarball(source, extract_dir, gzip_tarball?(source, codex_url))
         codex_binary = find_codex_binary(extract_dir)
         raise "Codex binary not found in #{source}" unless codex_binary
         FileUtils.cp(codex_binary, target)
@@ -151,9 +151,18 @@ module Bootstrap
       uri_path.ends_with?(".tar.gz") || uri_path.ends_with?(".tgz")
     end
 
-    private def self.extract_tarball(archive : Path, destination : Path) : Nil
-      status = Process.run("tar", ["-xf", archive.to_s, "-C", destination.to_s])
+    private def self.extract_tarball(archive : Path, destination : Path, gzip : Bool) : Nil
+      args = ["-xf", archive.to_s, "-C", destination.to_s]
+      args.unshift("-z") if gzip
+      status = Process.run("tar", args)
       raise "Failed to extract #{archive}" unless status.success?
+    end
+
+    private def self.gzip_tarball?(path : Path, uri : URI) : Bool
+      return true if path.to_s.ends_with?(".tar.gz") || path.to_s.ends_with?(".tgz")
+      uri_path = uri.path
+      return false unless uri_path
+      uri_path.ends_with?(".tar.gz") || uri_path.ends_with?(".tgz")
     end
 
     private def self.find_codex_binary(root : Path) : Path?
@@ -163,7 +172,19 @@ module Bootstrap
         next unless File.file?(path)
         matches << path
       end
-      matches.find { |path| File::Info.executable?(path) } || matches.first?
+      matches.find { |path| elf_binary?(path) } ||
+        matches.find { |path| File::Info.executable?(path) } ||
+        matches.first?
+    end
+
+    private def self.elf_binary?(path : Path) : Bool
+      File.open(path) do |file|
+        magic = Bytes.new(4)
+        return false unless file.read(magic) == 4
+        magic[0] == 0x7f && magic[1] == 'E'.ord && magic[2] == 'L'.ord && magic[3] == 'F'.ord
+      end
+    rescue
+      false
     end
 
     private def self.normalize_rootfs_target(path : Path) : Path
