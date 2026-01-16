@@ -14,14 +14,13 @@ module Bootstrap
       "/opt",
       "/workspace",
     ]
-    DEFAULT_CODEX_RELEASE_BASE = "https://github.com/openai/codex/releases/latest/download"
-    DEFAULT_CODEX_ARCH         = {% if flag?(:x86_64) %}
-                                   "x64"
-                                 {% elsif flag?(:aarch64) || flag?(:arm64) %}
-                                   "arm64"
-                                 {% else %}
-                                   nil
-                                 {% end %}
+    DEFAULT_CODEX_URL = {% if flag?(:aarch64) || flag?(:arm64) %}
+                          "https://github.com/openai/codex/releases/download/rust-v0.87.0/codex-aarch64-unknown-linux-gnu.tar.gz"
+                        {% elsif flag?(:x86_64) %}
+                          "https://github.com/openai/codex/releases/download/rust-v0.87.0/codex-x86_64-unknown-linux-gnu.tar.gz"
+                        {% else %}
+                          nil
+                        {% end %}
     DEFAULT_CODEX_TARGET = Path["/usr/bin/codex"]
     DEFAULT_WORK_MOUNT   = Path["work"]
     DEFAULT_WORK_DIR     = Path["/work"]
@@ -92,9 +91,9 @@ module Bootstrap
     end
 
     def self.default_codex_url? : URI?
-      arch = DEFAULT_CODEX_ARCH
-      return nil unless arch
-      URI.parse("#{DEFAULT_CODEX_RELEASE_BASE}/codex-linux-#{arch}")
+      url = DEFAULT_CODEX_URL
+      return nil unless url
+      URI.parse(url)
     end
 
     # Download the Codex binary into the rootfs when requested.
@@ -103,23 +102,61 @@ module Bootstrap
       target = rootfs / normalize_rootfs_target(codex_target)
       return if File.exists?(target) && File::Info.executable?(target)
       download : Path? = nil
+      extract_dir : Path? = nil
       FileUtils.mkdir_p(target.parent)
-      if codex_url.scheme == "file"
-        source = Path[codex_url.path]
-        raise "Codex binary not found at #{source}" unless File.exists?(source)
-        FileUtils.cp(source, target)
+      source = if codex_url.scheme == "file"
+                 path = Path[codex_url.path]
+                 raise "Codex binary not found at #{path}" unless File.exists?(path)
+                 path
+               else
+                 download = Path["#{target}.download"]
+                 download_to(codex_url, download)
+                 download
+               end
+      if codex_sha256
+        actual = sha256(source)
+        raise "Codex SHA256 mismatch: expected #{codex_sha256}, got #{actual}" unless actual == codex_sha256
+      end
+      if tarball?(source)
+        extract_dir = Path["#{target}.extract"]
+        FileUtils.rm_r(extract_dir) if Dir.exists?(extract_dir)
+        FileUtils.mkdir_p(extract_dir)
+        extract_tarball(source, extract_dir)
+        codex_binary = find_codex_binary(extract_dir)
+        raise "Codex binary not found in #{source}" unless codex_binary
+        FileUtils.cp(codex_binary, target)
       else
-        download = Path["#{target}.download"]
-        download_to(codex_url, download)
-        if codex_sha256
-          actual = sha256(download)
-          raise "Codex SHA256 mismatch: expected #{codex_sha256}, got #{actual}" unless actual == codex_sha256
+        if codex_url.scheme == "file"
+          FileUtils.cp(source, target)
+        else
+          FileUtils.mv(source, target)
+          download = nil
         end
-        FileUtils.mv(download, target)
       end
       File.chmod(target, 0o755)
     ensure
       File.delete?(download) if download
+      FileUtils.rm_r(extract_dir) if extract_dir && Dir.exists?(extract_dir)
+    end
+
+    private def self.tarball?(path : Path) : Bool
+      name = path.to_s
+      name.ends_with?(".tar.gz") || name.ends_with?(".tgz")
+    end
+
+    private def self.extract_tarball(archive : Path, destination : Path) : Nil
+      status = Process.run("tar", ["-xf", archive.to_s, "-C", destination.to_s])
+      raise "Failed to extract #{archive}" unless status.success?
+    end
+
+    private def self.find_codex_binary(root : Path) : Path?
+      matches = [] of Path
+      Dir.glob((root / "**" / "codex").to_s) do |entry|
+        path = Path[entry]
+        next unless File.file?(path)
+        matches << path
+      end
+      matches.find { |path| File::Info.executable?(path) } || matches.first?
     end
 
     private def self.normalize_rootfs_target(path : Path) : Path
