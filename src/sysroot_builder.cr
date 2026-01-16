@@ -584,10 +584,22 @@ module Bootstrap
 
     # Resolve the base rootfs tarball, favoring a local override when provided.
     private def resolve_base_rootfs_tarball(base_rootfs : PackageSpec) : Path
-      return download_and_verify(base_rootfs) unless @base_rootfs_path
-      path = @base_rootfs_path.not_nil!
-      raise "Base rootfs tarball not found at #{path}" unless File.exists?(path)
-      path
+      if @base_rootfs_path
+        path = @base_rootfs_path.not_nil!
+        raise "Base rootfs tarball not found at #{path}" unless File.exists?(path)
+        return path
+      end
+
+      if (path = default_base_rootfs_path) && File.exists?(path)
+        return path
+      end
+
+      download_and_verify(base_rootfs)
+    end
+
+    # Returns the default local rootfs tarball path when present.
+    private def default_base_rootfs_path : Path?
+      sources_dir / "bq2-rootfs-#{Bootstrap::VERSION}.tar.gz"
     end
 
     # Normalize a rootfs target path to be relative to the rootfs directory.
@@ -621,7 +633,7 @@ module Bootstrap
     def phase_specs : Array(PhaseSpec)
       sysroot_prefix = "/opt/sysroot"
       rootfs_destdir = "/workspace/rootfs"
-      rootfs_tarball = "/workspace/rootfs-prefix-free.tar.gz"
+      rootfs_tarball = "/workspace/bq-rootfs.tar.gz"
       sysroot_triple = sysroot_target_triple
       sysroot_env = sysroot_phase_env(sysroot_prefix)
       rootfs_env = rootfs_phase_env(sysroot_prefix)
