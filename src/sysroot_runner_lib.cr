@@ -34,6 +34,11 @@ module Bootstrap
 
     # Default runner that shells out via Process.run using strategy metadata.
     struct SystemRunner
+      getter clean_build_dirs : Bool
+
+      def initialize(@clean_build_dirs : Bool = true)
+      end
+
       # Run a build step using the selected strategy.
       #
       # The effective install destination is computed from the phase defaults
@@ -86,7 +91,7 @@ module Bootstrap
             unless File.exists?("CMakeLists.txt")
               source_dir = "llvm" if File.exists?(File.join("llvm", "CMakeLists.txt"))
             end
-            FileUtils.rm_rf("build") if Dir.exists?("build")
+            FileUtils.rm_rf("build") if clean_build_dirs && Dir.exists?("build")
             run_cmd(["cmake", "-S", source_dir, "-B", "build", "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + step.configure_flags, env: env)
             run_cmd(["cmake", "--build", "build", "-j#{cpus}"], env: env)
             install_env = destdir ? env.merge({"DESTDIR" => destdir}) : env
@@ -99,8 +104,10 @@ module Bootstrap
 
             stage1_build_dir = "build-stage1"
             stage2_build_dir = "build-stage2"
-            FileUtils.rm_rf(stage1_build_dir) if Dir.exists?(stage1_build_dir)
-            FileUtils.rm_rf(stage2_build_dir) if Dir.exists?(stage2_build_dir)
+            if clean_build_dirs
+              FileUtils.rm_rf(stage1_build_dir) if Dir.exists?(stage1_build_dir)
+              FileUtils.rm_rf(stage2_build_dir) if Dir.exists?(stage2_build_dir)
+            end
 
             stage1_flags = step.configure_flags.reject { |flag| flag.starts_with?("-DLLVM_ENABLE_LIBCXX=") }
             run_cmd(["cmake", "-S", source_dir, "-B", stage1_build_dir, "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + stage1_flags, env: env)
@@ -154,7 +161,7 @@ module Bootstrap
               run_cmd(["make", "-j#{cpus}"], env: env)
               run_make_install(destdir, env)
             elsif File.exists?("CMakeLists.txt")
-              FileUtils.rm_rf("build") if Dir.exists?("build")
+              FileUtils.rm_rf("build") if clean_build_dirs && Dir.exists?("build")
               run_cmd(["cmake", "-S", ".", "-B", "build", "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + step.configure_flags, env: env)
               run_cmd(["cmake", "--build", "build", "-j#{cpus}"], env: env)
               install_env = destdir ? env.merge({"DESTDIR" => destdir}) : env
@@ -361,7 +368,11 @@ module Bootstrap
         end
         Log.info { "Building #{step.name} in #{step.workdir}" }
         begin
-          runner.run(phase, step)
+          effective_runner = runner
+          if resume && state && retrying_step?(phase.name, step.name, state)
+            effective_runner = SystemRunner.new(clean_build_dirs: false)
+          end
+          effective_runner.run(phase, step)
           if state
             state.mark_success(phase.name, step.name)
             state.save(state_path.not_nil!) if state_path
@@ -376,6 +387,12 @@ module Bootstrap
         end
       end
       Log.info { "All build steps completed" }
+    end
+
+    private def self.retrying_step?(phase_name : String, step_name : String, state : SysrootBuildState) : Bool
+      failure = state.progress.last_failure
+      return false unless failure
+      failure.phase == phase_name && failure.step == step_name
     end
 
     private def self.filter_phases_by_state(phases : Array(BuildPhase), state : SysrootBuildState) : Array(BuildPhase)
@@ -493,6 +510,8 @@ module Bootstrap
         argv = ex.argv
         exit_code = ex.exit_code
       end
+      effective_env = phase.env.dup
+      step.env.each { |key, value| effective_env[key] = value }
 
       report = {
         "format_version" => 1,
@@ -512,6 +531,7 @@ module Bootstrap
           "install_prefix"  => step.install_prefix,
           "destdir"         => step.destdir,
           "env"             => step.env,
+          "effective_env"   => effective_env,
           "configure_flags" => step.configure_flags,
           "patches"         => step.patches,
         },
