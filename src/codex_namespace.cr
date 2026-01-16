@@ -83,7 +83,7 @@ module Bootstrap
     private def self.stage_codex_binary(rootfs : Path, codex_url : URI?, codex_sha256 : String?, codex_target : Path) : Nil
       return unless codex_url
       target = rootfs / normalize_rootfs_target(codex_target)
-      return if File.exists?(target) && File.executable?(target)
+      return if File.exists?(target) && File.info(target).executable?
       download : Path? = nil
       FileUtils.mkdir_p(target.parent)
       if codex_url.scheme == "file"
