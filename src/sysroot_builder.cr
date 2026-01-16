@@ -110,6 +110,8 @@ module Bootstrap
                    @owner_uid : Int32? = nil,
                    @owner_gid : Int32? = nil,
                    @codex_bin : Path? = nil,
+                   @codex_url : URI? = nil,
+                   @codex_sha256 : String? = nil,
                    @codex_target : Path = DEFAULT_CODEX_TARGET)
       FileUtils.mkdir_p(@workspace)
       FileUtils.mkdir_p(cache_dir)
@@ -516,8 +518,13 @@ module Bootstrap
 
     # Copy a host Codex binary into the rootfs workspace when configured.
     def stage_codex_binary : Nil
-      return unless @codex_bin
-      source = @codex_bin.not_nil!
+      return unless @codex_bin || @codex_url
+      source =
+        if @codex_bin
+          @codex_bin.not_nil!
+        else
+          download_and_verify(codex_package)
+        end
       raise "Codex binary not found at #{source}" unless File.exists?(source)
       target = rootfs_dir / normalize_rootfs_target(@codex_target)
       FileUtils.mkdir_p(target.parent)
@@ -533,6 +540,12 @@ module Bootstrap
       value = path.to_s
       value = value[1..] if value.starts_with?("/")
       Path[value]
+    end
+
+    private def codex_package : PackageSpec
+      url = @codex_url
+      raise "Codex URL is missing" unless url
+      PackageSpec.new("codex", "binary", url, sha256: @codex_sha256)
     end
 
     # Define the multi-phase build in an LFS-inspired style:

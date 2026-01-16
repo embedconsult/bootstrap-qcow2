@@ -234,16 +234,16 @@ describe Bootstrap::SysrootBuilder do
       tarball = dir / "miniroot.tar"
       Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
 
-      codex_bin = dir / "codex"
-      File.write(codex_bin, "codex")
+      with_http_server("codex") do |url|
+        sha = Digest::SHA256.hexdigest("codex")
+        builder = StubBuilder.new(dir, codex_url: URI.parse(url), codex_sha256: sha)
+        builder.fake_tarball = tarball
+        rootfs = builder.prepare_rootfs(include_sources: false)
 
-      builder = StubBuilder.new(dir, codex_bin: codex_bin)
-      builder.fake_tarball = tarball
-      rootfs = builder.prepare_rootfs(include_sources: false)
-
-      staged = rootfs / "workspace/codex/bin/codex"
-      File.exists?(staged).should be_true
-      File.read(staged).should eq "codex"
+        staged = rootfs / "workspace/codex/bin/codex"
+        File.exists?(staged).should be_true
+        File.read(staged).should eq "codex"
+      end
     end
   end
 

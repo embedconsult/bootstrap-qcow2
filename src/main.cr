@@ -168,6 +168,8 @@ module Bootstrap
       write_tarball = true
       reuse_rootfs = false
       codex_bin : Path? = nil
+      codex_url : URI? = nil
+      codex_sha256 : String? = nil
       codex_target = Bootstrap::SysrootBuilder::DEFAULT_CODEX_TARGET
 
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-builder [options]") do |p|
@@ -197,7 +199,11 @@ module Bootstrap
         p.on("--codex-bin PATH", "Copy a host Codex binary into the rootfs workspace (default target: #{codex_target})") do |val|
           codex_bin = Path[val].expand
         end
-        p.on("--codex-target PATH", "Target path for --codex-bin inside the rootfs (default: #{codex_target})") do |val|
+        p.on("--codex-url URL", "Download Codex using the sysroot builder fetcher") do |val|
+          codex_url = URI.parse(val)
+        end
+        p.on("--codex-sha256 SHA256", "Expected SHA256 for --codex-url") { |val| codex_sha256 = val }
+        p.on("--codex-target PATH", "Target path for --codex-bin/--codex-url inside the rootfs (default: #{codex_target})") do |val|
           codex_target = Path[val]
         end
       end
@@ -216,13 +222,15 @@ module Bootstrap
         owner_uid: owner_uid,
         owner_gid: owner_gid,
         codex_bin: codex_bin,
+        codex_url: codex_url,
+        codex_sha256: codex_sha256,
         codex_target: codex_target
       )
 
       if reuse_rootfs && builder.rootfs_ready?
         puts "Reusing existing rootfs at #{builder.rootfs_dir}"
         puts "Build plan found at #{builder.plan_path} (iteration state is maintained by sysroot-runner)"
-        builder.stage_codex_binary if codex_bin
+        builder.stage_codex_binary if codex_bin || codex_url
         if write_tarball
           builder.write_chroot_tarball(output)
           puts "Generated sysroot tarball at #{output}"
