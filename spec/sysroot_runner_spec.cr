@@ -135,6 +135,24 @@ describe Bootstrap::SysrootRunner do
     runner.calls.first[:phase].should eq "two"
   end
 
+  it "allows rootfs phases to run outside the rootfs when requested" do
+    phase = Bootstrap::BuildPhase.new(
+      name: "rootfs-phase",
+      description: "rootfs phase",
+      workspace: "/workspace",
+      environment: "rootfs-system",
+      install_prefix: "/usr",
+      steps: [] of Bootstrap::BuildStep,
+    )
+    runner = RecordingRunner.new
+
+    expect_raises(Exception, /Refusing to run/) do
+      Bootstrap::SysrootRunner.run_phase(phase, runner, report_dir: nil)
+    end
+
+    Bootstrap::SysrootRunner.run_phase(phase, runner, report_dir: nil, allow_outside_rootfs: true)
+  end
+
   it "raises when a requested phase does not exist" do
     plan = Bootstrap::BuildPlan.new([
       Bootstrap::BuildPhase.new(name: "one", description: "a", workspace: "/workspace", environment: "test", install_prefix: "/opt/sysroot", steps: [] of Bootstrap::BuildStep),

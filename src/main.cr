@@ -299,6 +299,7 @@ module Bootstrap
       state_path : String? = nil
       dry_run = false
       resume = true
+      allow_outside_rootfs = false
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-runner [options]") do |p|
         p.on("--plan PATH", "Read the build plan from PATH (default: #{SysrootRunner::DEFAULT_PLAN_PATH})") { |path| plan_path = path }
         p.on("--phase NAME", "Select build phase to run (default: first phase; use 'all' for every phase)") { |name| phase = name }
@@ -315,6 +316,7 @@ module Bootstrap
         p.on("--no-report", "Disable failure report writing") { report_dir = nil }
         p.on("--state-path PATH", "Write runner state/bookmarks to PATH (default: #{SysrootRunner::DEFAULT_STATE_PATH} when using the default plan path)") { |path| state_path = path }
         p.on("--no-resume", "Disable resume/state tracking (useful when the default state path is not writable)") { resume = false }
+        p.on("--allow-outside-rootfs", "Allow running rootfs-* phases outside the produced rootfs (requires destdir overrides)") { allow_outside_rootfs = true }
         p.on("--dry-run", "List selected phases/steps and exit") { dry_run = true }
       end
       return CLI.print_help(parser) if help
@@ -329,6 +331,7 @@ module Bootstrap
         dry_run: dry_run,
         state_path: state_path,
         resume: resume,
+        allow_outside_rootfs: allow_outside_rootfs,
       )
       0
     end

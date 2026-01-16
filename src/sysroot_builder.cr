@@ -567,6 +567,7 @@ module Bootstrap
     def phase_specs : Array(PhaseSpec)
       sysroot_prefix = "/opt/sysroot"
       rootfs_destdir = "/workspace/rootfs"
+      rootfs_tarball = "/workspace/rootfs-prefix-free.tar.gz"
       sysroot_triple = sysroot_target_triple
       musl_arch = case @architecture
                   when "aarch64", "arm64"
@@ -693,6 +694,34 @@ module Bootstrap
           destdir: nil,
           env: rootfs_phase_env(sysroot_prefix),
           package_allowlist: nil,
+        ),
+        PhaseSpec.new(
+          name: "finalize-rootfs",
+          description: "Strip the sysroot prefix and emit a prefix-free rootfs tarball.",
+          workspace: "/workspace",
+          environment: "rootfs-finalize",
+          install_prefix: "/usr",
+          destdir: rootfs_destdir,
+          env: rootfs_phase_env(sysroot_prefix),
+          package_allowlist: [] of String,
+          extra_steps: [
+            BuildStep.new(
+              name: "strip-sysroot",
+              strategy: "remove-tree",
+              workdir: "/",
+              configure_flags: [] of String,
+              patches: [] of String,
+              install_prefix: sysroot_prefix,
+            ),
+            BuildStep.new(
+              name: "rootfs-tarball",
+              strategy: "tarball",
+              workdir: "/",
+              configure_flags: [] of String,
+              patches: [] of String,
+              install_prefix: rootfs_tarball,
+            ),
+          ],
         ),
       ]
     end

@@ -96,7 +96,7 @@ describe Bootstrap::SysrootBuilder do
 
   it "lists build phase names" do
     phases = Bootstrap::SysrootBuilder.new.phase_specs.map(&.name)
-    phases.should eq ["sysroot-from-alpine", "crystal-from-sysroot", "rootfs-from-sysroot", "system-from-sysroot", "tools-from-system", "crystal-from-system"]
+    phases.should eq ["sysroot-from-alpine", "crystal-from-sysroot", "rootfs-from-sysroot", "system-from-sysroot", "tools-from-system", "crystal-from-system", "finalize-rootfs"]
   end
 
   it "computes hashes" do
@@ -175,17 +175,20 @@ describe Bootstrap::SysrootBuilder do
       builder = StubBuilder.new(dir)
       builder.override_packages = [pkg, musl, busybox, linux_headers]
       plan = builder.build_plan
-      plan.phases.map(&.name).should eq ["sysroot-from-alpine", "rootfs-from-sysroot"]
+      plan.phases.map(&.name).should eq ["sysroot-from-alpine", "rootfs-from-sysroot", "finalize-rootfs"]
       sysroot_phase = plan.phases.first
       sysroot_phase.install_prefix.should eq "/opt/sysroot"
       sysroot_phase.destdir.should be_nil
       sysroot_phase.steps.size.should eq 3
       sysroot_phase.steps.find(&.name.==("pkg")).not_nil!.configure_flags.should eq ["--foo"]
 
-      rootfs_phase = plan.phases.last
+      rootfs_phase = plan.phases.find(&.name.==("rootfs-from-sysroot")).not_nil!
       rootfs_phase.install_prefix.should eq "/usr"
       rootfs_phase.destdir.should eq "/workspace/rootfs"
       rootfs_phase.steps.map(&.name).should eq ["musl", "busybox", "linux-headers", "musl-ld-path", "rootfs-marker", "sysroot"]
+
+      finalize_phase = plan.phases.find(&.name.==("finalize-rootfs")).not_nil!
+      finalize_phase.steps.map(&.name).should eq ["strip-sysroot", "rootfs-tarball"]
     end
   end
 
@@ -206,7 +209,7 @@ describe Bootstrap::SysrootBuilder do
       plan_path = builder.write_plan
       File.exists?(plan_path).should be_true
       plan = Bootstrap::BuildPlan.from_json(File.read(plan_path))
-      plan.phases.map(&.name).should eq ["sysroot-from-alpine", "rootfs-from-sysroot"]
+      plan.phases.map(&.name).should eq ["sysroot-from-alpine", "rootfs-from-sysroot", "finalize-rootfs"]
     end
   end
 

@@ -86,6 +86,30 @@ module Bootstrap
             target = destdir ? "#{destdir}#{install_prefix}" : install_prefix
             FileUtils.mkdir_p(File.dirname(target))
             File.write(target, content)
+          when "remove-tree"
+            raise "remove-tree requires step.install_prefix (path to remove)" unless step.install_prefix
+            remove_root = destdir ? "#{destdir}#{install_prefix}" : install_prefix
+            raise "Refusing to remove #{remove_root}" if remove_root == "/" || remove_root.empty?
+            FileUtils.rm_rf(remove_root)
+          when "tarball"
+            output = step.install_prefix
+            raise "tarball requires step.install_prefix (output path)" unless output
+            output = output.not_nil!
+            source_root = step.workdir
+            if destdir
+              if source_root.starts_with?(destdir)
+                # Already rooted at the destdir.
+              elsif source_root == "/"
+                source_root = destdir
+              elsif source_root.starts_with?("/")
+                source_root = "#{destdir}#{source_root}"
+              else
+                source_root = File.join(destdir, source_root)
+              end
+            end
+            raise "Missing tarball source #{source_root}" unless Dir.exists?(source_root)
+            FileUtils.mkdir_p(File.dirname(output))
+            run_cmd(["tar", "-czf", output, "-C", source_root, "."], env: env)
           when "linux-headers"
             install_root = destdir ? "#{destdir}#{install_prefix}" : install_prefix
             run_cmd(["make"] + step.configure_flags + ["headers"], env: env)
@@ -278,6 +302,9 @@ module Bootstrap
     # By default only the first phase is executed; pass `phase: "all"` or a
     # specific phase name to override.
     #
+    # Use `allow_outside_rootfs` to replay rootfs phases without the marker
+    # present (for example, when staging into a destdir from outside a chroot).
+    #
     # When running inside the sysroot (default plan path), the runner uses the
     # state bookmark at `/var/lib/sysroot-build-state.json` to skip previously
     # completed steps and to persist progress for fast, iterative retries.
@@ -290,7 +317,8 @@ module Bootstrap
                       report_dir : String? = DEFAULT_REPORT_DIR,
                       dry_run : Bool = false,
                       state_path : String? = nil,
-                      resume : Bool = true)
+                      resume : Bool = true,
+                      allow_outside_rootfs : Bool = false)
       raise "Missing build plan #{path}" unless File.exists?(path)
       Log.info { "Loading build plan from #{path}" }
       plan = BuildPlanReader.load(path)
@@ -313,7 +341,8 @@ module Bootstrap
         dry_run: dry_run,
         state: state,
         state_path: effective_state_path,
-        resume: resume)
+        resume: resume,
+        allow_outside_rootfs: allow_outside_rootfs)
     end
 
     # Execute an in-memory plan without requiring it to be read from disk.
@@ -327,7 +356,8 @@ module Bootstrap
                       dry_run : Bool = false,
                       state : SysrootBuildState? = nil,
                       state_path : String? = nil,
-                      resume : Bool = true)
+                      resume : Bool = true,
+                      allow_outside_rootfs : Bool = false)
       phases = selected_phases(plan, phase)
       phases = filter_phases_by_packages(phases, packages) if packages
       phases = filter_phases_by_state(phases, state) if resume && state
@@ -336,7 +366,7 @@ module Bootstrap
         return
       end
       phases.each do |phase_plan|
-        run_phase(phase_plan, runner, report_dir: report_dir, state: state, state_path: state_path, resume: resume)
+        run_phase(phase_plan, runner, report_dir: report_dir, state: state, state_path: state_path, resume: resume, allow_outside_rootfs: allow_outside_rootfs)
       end
     end
 
@@ -346,8 +376,9 @@ module Bootstrap
                        report_dir : String? = DEFAULT_REPORT_DIR,
                        state : SysrootBuildState? = nil,
                        state_path : String? = nil,
-                       resume : Bool = true)
-      if phase.environment.starts_with?("rootfs-") && !File.exists?(ROOTFS_MARKER_PATH)
+                       resume : Bool = true,
+                       allow_outside_rootfs : Bool = false)
+      if !allow_outside_rootfs && phase.environment.starts_with?("rootfs-") && !File.exists?(ROOTFS_MARKER_PATH)
         raise "Refusing to run #{phase.name} (env=#{phase.environment}) outside the produced rootfs (missing #{ROOTFS_MARKER_PATH})"
       end
       Log.info { "Executing phase #{phase.name} (env=#{phase.environment}, workspace=#{phase.workspace})" }
