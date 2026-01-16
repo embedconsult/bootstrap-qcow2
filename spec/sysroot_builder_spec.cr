@@ -185,7 +185,7 @@ describe Bootstrap::SysrootBuilder do
       rootfs_phase = plan.phases.find(&.name.==("rootfs-from-sysroot")).not_nil!
       rootfs_phase.install_prefix.should eq "/usr"
       rootfs_phase.destdir.should eq "/workspace/rootfs"
-      rootfs_phase.steps.map(&.name).should eq ["musl", "busybox", "linux-headers", "musl-ld-path", "rootfs-marker", "sysroot"]
+      rootfs_phase.steps.map(&.name).should eq ["musl", "busybox", "linux-headers", "musl-ld-path", "os-release", "rootfs-marker", "sysroot"]
 
       finalize_phase = plan.phases.find(&.name.==("finalize-rootfs")).not_nil!
       finalize_phase.steps.map(&.name).should eq ["strip-sysroot", "rootfs-tarball"]

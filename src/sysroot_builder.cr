@@ -188,7 +188,7 @@ module Bootstrap
           phases: ["sysroot-from-alpine", "rootfs-from-sysroot"],
         ),
         PackageSpec.new("make", DEFAULT_GNU_MAKE, URI.parse("https://ftp.gnu.org/gnu/make/make-#{DEFAULT_GNU_MAKE}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
-        PackageSpec.new("zlib", DEFAULT_ZLIB, URI.parse("https://zlib.net/zlib-#{DEFAULT_ZLIB}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
+        PackageSpec.new("zlib", DEFAULT_ZLIB, URI.parse("https://zlib.net/zlib-#{DEFAULT_ZLIB}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"], configure_flags: ["--shared"]),
         PackageSpec.new(
           "linux-headers",
           DEFAULT_LINUX,
@@ -569,6 +569,8 @@ module Bootstrap
       rootfs_destdir = "/workspace/rootfs"
       rootfs_tarball = "/workspace/rootfs-prefix-free.tar.gz"
       sysroot_triple = sysroot_target_triple
+      sysroot_env = sysroot_phase_env(sysroot_prefix)
+      rootfs_env = rootfs_phase_env(sysroot_prefix)
       musl_arch = case @architecture
                   when "aarch64", "arm64"
                     "aarch64"
@@ -586,12 +588,15 @@ module Bootstrap
           environment: "alpine-seed",
           install_prefix: sysroot_prefix,
           destdir: nil,
-          env: sysroot_phase_env(sysroot_prefix),
+          env: sysroot_env,
           package_allowlist: nil,
           env_overrides: {
             "cmake" => {
               "CPPFLAGS" => "-I#{sysroot_prefix}/include",
               "LDFLAGS"  => "-L#{sysroot_prefix}/lib",
+            },
+            "zlib" => {
+              "LDSHARED" => "#{sysroot_env["CC"]} -shared -Wl,-soname,libz.so.1",
             },
           },
         ),
@@ -602,7 +607,7 @@ module Bootstrap
           environment: "sysroot-toolchain",
           install_prefix: sysroot_prefix,
           destdir: nil,
-          env: rootfs_phase_env(sysroot_prefix).merge({
+          env: rootfs_env.merge({
             "CRYSTAL_CACHE_DIR" => "/tmp/crystal_cache",
             "CRYSTAL"           => "/usr/bin/crystal",
             "SHARDS"            => "/usr/bin/shards",
@@ -622,7 +627,7 @@ module Bootstrap
           environment: "sysroot-toolchain",
           install_prefix: "/usr",
           destdir: rootfs_destdir,
-          env: rootfs_phase_env(sysroot_prefix),
+          env: rootfs_env,
           package_allowlist: ["musl", "busybox", "linux-headers"],
           extra_steps: [
             BuildStep.new(
@@ -634,6 +639,17 @@ module Bootstrap
               install_prefix: musl_ld_path,
               env: {
                 "CONTENT" => "/lib:/usr/lib:/opt/sysroot/lib:/opt/sysroot/lib/#{sysroot_triple}:/opt/sysroot/usr/lib\n",
+              },
+            ),
+            BuildStep.new(
+              name: "os-release",
+              strategy: "write-file",
+              workdir: "/",
+              configure_flags: [] of String,
+              patches: [] of String,
+              install_prefix: "/etc/os-release",
+              env: {
+                "CONTENT" => rootfs_os_release_content,
               },
             ),
             BuildStep.new(
@@ -664,8 +680,13 @@ module Bootstrap
           environment: "rootfs-system",
           install_prefix: "/usr",
           destdir: nil,
-          env: rootfs_phase_env(sysroot_prefix),
+          env: rootfs_env,
           package_allowlist: nil,
+          env_overrides: {
+            "zlib" => {
+              "LDSHARED" => "#{rootfs_env["CC"]} -shared -Wl,-soname,libz.so.1",
+            },
+          },
           configure_overrides: {
             "cmake" => [
               "-DOPENSSL_ROOT_DIR=/usr",
@@ -682,7 +703,7 @@ module Bootstrap
           environment: "rootfs-system",
           install_prefix: "/usr",
           destdir: nil,
-          env: rootfs_phase_env(sysroot_prefix),
+          env: rootfs_env,
           package_allowlist: nil,
         ),
         PhaseSpec.new(
@@ -692,7 +713,7 @@ module Bootstrap
           environment: "rootfs-system",
           install_prefix: "/usr",
           destdir: nil,
-          env: rootfs_phase_env(sysroot_prefix),
+          env: rootfs_env,
           package_allowlist: nil,
         ),
         PhaseSpec.new(
@@ -724,6 +745,20 @@ module Bootstrap
           ],
         ),
       ]
+    end
+
+    # Return the os-release contents for the generated rootfs.
+    private def rootfs_os_release_content : String
+      version = @base_version
+      branch = @branch
+      <<-TEXT
+      NAME="bootstrap-qcow2"
+      ID=bootstrap-qcow2
+      VERSION_ID="#{version}"
+      VERSION="source-built (#{branch})"
+      PRETTY_NAME="bootstrap-qcow2 source-built (#{branch})"
+      HOME_URL="https://github.com/embedconsult/bootstrap-qcow2"
+      TEXT
     end
 
     # Return environment variables for the rootfs validation phase.

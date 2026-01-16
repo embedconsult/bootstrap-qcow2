@@ -21,6 +21,7 @@ module Bootstrap
       "sysroot-namespace-check" => ->(args : Array(String)) { run_sysroot_namespace_check(args) },
       "sysroot-runner"          => ->(args : Array(String)) { run_sysroot_runner(args) },
       "sysroot-plan-write"      => ->(args : Array(String)) { run_sysroot_plan_write(args) },
+      "sysroot-tarball"         => ->(args : Array(String)) { run_sysroot_tarball(args) },
       "sysroot-status"          => ->(args : Array(String)) { run_sysroot_status(args) },
       "codex-namespace"         => ->(args : Array(String)) { run_codex_namespace(args) },
       "github-pr-feedback"      => ->(args : Array(String)) { run_github_pr_feedback(args) },
@@ -50,6 +51,7 @@ module Bootstrap
       puts "  sysroot-namespace-check Check host namespace prerequisites"
       puts "  sysroot-runner          Replay build plan inside the sysroot"
       puts "  sysroot-plan-write      Write a fresh build plan JSON"
+      puts "  sysroot-tarball         Emit a prefix-free rootfs tarball"
       puts "  sysroot-status          Print current sysroot build phase"
       puts "  codex-namespace         Run Codex inside a namespaced rootfs"
       puts "  github-pr-feedback      Fetch PR feedback as JSON"
@@ -364,6 +366,46 @@ module Bootstrap
       FileUtils.mkdir_p(File.dirname(output))
       File.write(output, plan.to_json)
       puts "Wrote build plan to #{output}"
+      0
+    end
+
+    # Run the finalize-rootfs phase to emit a prefix-free rootfs tarball.
+    private def self.run_sysroot_tarball(args : Array(String)) : Int32
+      plan_path = SysrootRunner::DEFAULT_PLAN_PATH
+      overrides_path : String? = nil
+      use_default_overrides = true
+      report_dir : String? = SysrootRunner::DEFAULT_REPORT_DIR
+      state_path : String? = nil
+      resume = true
+      allow_outside_rootfs = false
+      parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-tarball [options]") do |p|
+        p.on("--plan PATH", "Read the build plan from PATH (default: #{SysrootRunner::DEFAULT_PLAN_PATH})") { |path| plan_path = path }
+        p.on("--overrides PATH", "Apply runtime overrides JSON (default: #{SysrootRunner::DEFAULT_OVERRIDES_PATH} when using the default plan path)") do |path|
+          overrides_path = path
+          use_default_overrides = false
+        end
+        p.on("--no-overrides", "Disable runtime overrides") do
+          overrides_path = nil
+          use_default_overrides = false
+        end
+        p.on("--report-dir PATH", "Write failure reports to PATH (default: #{SysrootRunner::DEFAULT_REPORT_DIR})") { |path| report_dir = path }
+        p.on("--no-report", "Disable failure report writing") { report_dir = nil }
+        p.on("--state-path PATH", "Write runner state/bookmarks to PATH (default: #{SysrootRunner::DEFAULT_STATE_PATH} when using the default plan path)") { |path| state_path = path }
+        p.on("--no-resume", "Disable resume/state tracking (useful when the default state path is not writable)") { resume = false }
+        p.on("--allow-outside-rootfs", "Allow running rootfs-* phases outside the produced rootfs (requires destdir overrides)") { allow_outside_rootfs = true }
+      end
+      return CLI.print_help(parser) if help
+
+      SysrootRunner.run_plan(
+        plan_path,
+        phase: "finalize-rootfs",
+        overrides_path: overrides_path,
+        use_default_overrides: use_default_overrides,
+        report_dir: report_dir,
+        state_path: state_path,
+        resume: resume,
+        allow_outside_rootfs: allow_outside_rootfs,
+      )
       0
     end
 
