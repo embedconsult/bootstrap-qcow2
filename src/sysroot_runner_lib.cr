@@ -128,9 +128,9 @@ module Bootstrap
               "-DCMAKE_C_FLAGS=--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld",
               "-DCMAKE_CXX_FLAGS=-nostdinc++ -isystem #{libcxx_include} -isystem #{libcxx_target_include} -nostdlib++ -stdlib=libc++ --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{install_root}/lib",
               "-DCMAKE_CXX_STANDARD_LIBRARIES=#{cxx_standard_libs}",
-              "-DCMAKE_EXE_LINKER_FLAGS=-L#{libcxx_libdir} -L#{install_root}/lib",
-              "-DCMAKE_SHARED_LINKER_FLAGS=-L#{libcxx_libdir} -L#{install_root}/lib",
-              "-DCMAKE_MODULE_LINKER_FLAGS=-L#{libcxx_libdir} -L#{install_root}/lib",
+              "-DCMAKE_EXE_LINKER_FLAGS=--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{install_root}/lib",
+              "-DCMAKE_SHARED_LINKER_FLAGS=--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{install_root}/lib",
+              "-DCMAKE_MODULE_LINKER_FLAGS=--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{install_root}/lib",
             ]
             run_cmd(["cmake", "-S", source_dir, "-B", stage2_build_dir, "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + stage2_flags, env: env)
             run_cmd(["cmake", "--build", stage2_build_dir, "-j#{cpus}"], env: env)

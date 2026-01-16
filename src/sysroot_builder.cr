@@ -195,11 +195,10 @@ module Bootstrap
           URI.parse("https://github.com/Kitware/CMake/releases/download/v#{DEFAULT_CMAKE}/cmake-#{DEFAULT_CMAKE}.tar.gz"),
           strategy: "cmake",
           configure_flags: [
-            "-DCMAKE_CXX_FLAGS=-static-libstdc++ -static-libgcc",
-            "-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ -static-libgcc",
             "-DCMake_HAVE_CXX_MAKE_UNIQUE=ON",
             "-DCMake_HAVE_CXX_UNIQUE_PTR=ON",
             "-DCMake_HAVE_CXX_FILESYSTEM=ON",
+            "-DBUILD_CursesDialog=OFF",
             "-DOPENSSL_ROOT_DIR=/opt/sysroot",
             "-DOPENSSL_INCLUDE_DIR=/opt/sysroot/include",
             "-DOPENSSL_SSL_LIBRARY=/opt/sysroot/lib/libssl.so",
@@ -656,8 +655,11 @@ module Bootstrap
     # but still execute in the bootstrap environment.
     private def rootfs_phase_env(sysroot_prefix : String) : Hash(String, String)
       target = sysroot_target_triple
-      cc = "#{sysroot_prefix}/bin/clang --target=#{target} --rtlib=compiler-rt --unwindlib=libunwind"
-      cxx = "#{sysroot_prefix}/bin/clang++ --target=#{target} --rtlib=compiler-rt --unwindlib=libunwind"
+      libcxx_include = "#{sysroot_prefix}/include/c++/v1"
+      libcxx_target_include = "#{sysroot_prefix}/include/#{target}/c++/v1"
+      libcxx_libdir = "#{sysroot_prefix}/lib/#{target}"
+      cc = "#{sysroot_prefix}/bin/clang --target=#{target} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld"
+      cxx = "#{sysroot_prefix}/bin/clang++ --target=#{target} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -nostdinc++ -isystem #{libcxx_include} -isystem #{libcxx_target_include} -nostdlib++ -stdlib=libc++ -L#{libcxx_libdir} -L#{sysroot_prefix}/lib -Wl,--start-group -lc++ -lc++abi -lunwind -Wl,--end-group"
       {
         "PATH" => "#{sysroot_prefix}/bin:#{sysroot_prefix}/sbin:/usr/bin:/bin",
         "CC"   => cc,
