@@ -37,6 +37,7 @@ module Bootstrap
     DEFAULT_BUSYBOX       = "1.36.1"
     DEFAULT_MUSL          = "1.2.5"
     DEFAULT_CMAKE         = "3.29.6"
+    DEFAULT_SHARDS        = "0.18.0"
     DEFAULT_M4            = "1.4.19"
     DEFAULT_GNU_MAKE      = "4.4.1"
     DEFAULT_ZLIB          = "1.3.1"
@@ -176,6 +177,14 @@ module Bootstrap
       bootstrap_repo_dir = "/workspace/bootstrap-qcow2-#{bootstrap_source_branch}"
       sysroot_triple = sysroot_target_triple
       [
+        PackageSpec.new(
+          "shards",
+          DEFAULT_SHARDS,
+          URI.parse("https://github.com/crystal-lang/shards/archive/refs/tags/v#{DEFAULT_SHARDS}.tar.gz"),
+          strategy: "crystal-build",
+          configure_flags: ["-o", "bin/shards", "src/shards.cr"],
+          phases: ["sysroot-from-alpine", "system-from-sysroot"],
+        ),
         PackageSpec.new(
           "bootstrap-qcow2",
           bootstrap_source_branch,
