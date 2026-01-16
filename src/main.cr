@@ -445,19 +445,23 @@ module Bootstrap
     end
 
     private def self.run_codex_namespace(args : Array(String)) : Int32
+      args = apply_codex_download_default(args)
       rootfs = Path["data/sysroot/rootfs"]
       alpine_setup = false
       add_dirs = Bootstrap::CodexNamespace::DEFAULT_CODEX_ADD_DIRS.dup
       codex_url : URI? = nil
       codex_sha256 : String? = nil
       codex_target = Bootstrap::CodexNamespace::DEFAULT_CODEX_TARGET
+      default_codex_url = Bootstrap::CodexNamespace.default_codex_url?.try(&.to_s) || "unknown"
 
       parser, remaining, help = CLI.parse(args, "Usage: bq2 codex-namespace [options]") do |p|
         p.on("-C DIR", "Rootfs directory for the command (default: #{rootfs})") { |dir| rootfs = Path[dir].expand }
         p.on("--alpine", "Assume rootfs is Alpine and install runtime deps for Codex (node/npm/crystal)") { alpine_setup = true }
         p.on("--no-default-add-dirs", "Do not pass the default Codex sandbox writable dirs (/var,/opt,/workspace)") { add_dirs.clear }
         p.on("--add-dir PATH", "Add an extra writable dir for the Codex sandbox (repeatable)") { |dir| add_dirs << dir }
-        p.on("--codex-download URL", "Download Codex into the rootfs before running it") { |val| codex_url = URI.parse(val) }
+        p.on("--codex-download URL", "Download Codex into the rootfs before running it (default: #{default_codex_url})") do |val|
+          codex_url = URI.parse(val)
+        end
         p.on("--codex-sha256 SHA256", "Expected SHA256 for --codex-download") { |val| codex_sha256 = val }
         p.on("--codex-target PATH", "Target path for --codex-download inside the rootfs (default: #{codex_target})") { |val| codex_target = Path[val] }
       end
@@ -481,6 +485,34 @@ module Bootstrap
     rescue ex : SysrootNamespace::NamespaceError
       STDERR.puts "Namespace setup failed: #{ex.message}"
       1
+    rescue ex
+      STDERR.puts ex.message
+      1
+    end
+
+    private def self.apply_codex_download_default(args : Array(String)) : Array(String)
+      return args if args.empty?
+      expanded = [] of String
+      idx = 0
+      while idx < args.size
+        arg = args[idx]
+        if arg == "--codex-download"
+          next_arg = args[idx + 1]?
+          if next_arg.nil? || next_arg.starts_with?("-")
+            url = Bootstrap::CodexNamespace.default_codex_url?
+            raise "No default Codex URL for this architecture; pass --codex-download URL instead." unless url
+            expanded << "--codex-download=#{url}"
+          else
+            expanded << arg
+            expanded << next_arg
+            idx += 1
+          end
+        else
+          expanded << arg
+        end
+        idx += 1
+      end
+      expanded
     end
 
     private def self.run_github_pr_feedback(args : Array(String)) : Int32

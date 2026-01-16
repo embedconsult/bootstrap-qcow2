@@ -14,6 +14,14 @@ module Bootstrap
       "/opt",
       "/workspace",
     ]
+    DEFAULT_CODEX_RELEASE_BASE = "https://github.com/openai/codex/releases/latest/download"
+    DEFAULT_CODEX_ARCH         = {% if flag?(:x86_64) %}
+                                   "x64"
+                                 {% elsif flag?(:aarch64) || flag?(:arm64) %}
+                                   "arm64"
+                                 {% else %}
+                                   nil
+                                 {% end %}
     DEFAULT_CODEX_TARGET = Path["/usr/bin/codex"]
     DEFAULT_WORK_MOUNT   = Path["work"]
     DEFAULT_WORK_DIR     = Path["/work"]
@@ -79,11 +87,21 @@ module Bootstrap
       status
     end
 
+    def self.default_codex_url : URI
+      default_codex_url? || raise "No default Codex URL for this architecture; pass --codex-download URL instead."
+    end
+
+    def self.default_codex_url? : URI?
+      arch = DEFAULT_CODEX_ARCH
+      return nil unless arch
+      URI.parse("#{DEFAULT_CODEX_RELEASE_BASE}/codex-linux-#{arch}")
+    end
+
     # Download the Codex binary into the rootfs when requested.
     private def self.stage_codex_binary(rootfs : Path, codex_url : URI?, codex_sha256 : String?, codex_target : Path) : Nil
       return unless codex_url
       target = rootfs / normalize_rootfs_target(codex_target)
-      return if File.exists?(target) && File.info(target).executable?
+      return if File.exists?(target) && File::Info.executable?(target)
       download : Path? = nil
       FileUtils.mkdir_p(target.parent)
       if codex_url.scheme == "file"
