@@ -448,12 +448,18 @@ module Bootstrap
       rootfs = Path["data/sysroot/rootfs"]
       alpine_setup = false
       add_dirs = Bootstrap::CodexNamespace::DEFAULT_CODEX_ADD_DIRS.dup
+      codex_url : URI? = nil
+      codex_sha256 : String? = nil
+      codex_target = Bootstrap::CodexNamespace::DEFAULT_CODEX_TARGET
 
       parser, remaining, help = CLI.parse(args, "Usage: bq2 codex-namespace [options]") do |p|
         p.on("-C DIR", "Rootfs directory for the command (default: #{rootfs})") { |dir| rootfs = Path[dir].expand }
         p.on("--alpine", "Assume rootfs is Alpine and install runtime deps for Codex (node/npm/crystal)") { alpine_setup = true }
         p.on("--no-default-add-dirs", "Do not pass the default Codex sandbox writable dirs (/var,/opt,/workspace)") { add_dirs.clear }
         p.on("--add-dir PATH", "Add an extra writable dir for the Codex sandbox (repeatable)") { |dir| add_dirs << dir }
+        p.on("--codex-download URL", "Download Codex into the rootfs before running it") { |val| codex_url = URI.parse(val) }
+        p.on("--codex-sha256 SHA256", "Expected SHA256 for --codex-download") { |val| codex_sha256 = val }
+        p.on("--codex-target PATH", "Target path for --codex-download inside the rootfs (default: #{codex_target})") { |val| codex_target = Path[val] }
       end
       return CLI.print_help(parser) if help
 
@@ -463,7 +469,14 @@ module Bootstrap
         return 1
       end
 
-      status = CodexNamespace.run(rootfs: rootfs, alpine_setup: alpine_setup, add_dirs: add_dirs)
+      status = CodexNamespace.run(
+        rootfs: rootfs,
+        alpine_setup: alpine_setup,
+        add_dirs: add_dirs,
+        codex_url: codex_url,
+        codex_sha256: codex_sha256,
+        codex_target: codex_target
+      )
       status.exit_code
     rescue ex : SysrootNamespace::NamespaceError
       STDERR.puts "Namespace setup failed: #{ex.message}"
