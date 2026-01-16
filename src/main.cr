@@ -169,6 +169,10 @@ module Bootstrap
       owner_gid = nil
       write_tarball = true
       reuse_rootfs = false
+      codex_bin : Path? = nil
+      codex_url : URI? = nil
+      codex_sha256 : String? = nil
+      codex_target = Bootstrap::SysrootBuilder::DEFAULT_CODEX_TARGET
       refresh_plan = false
       restage_sources = false
 
@@ -194,6 +198,16 @@ module Bootstrap
           preserve_ownership_for_rootfs = true
           owner_gid = val.to_i
         end
+        p.on("--codex-bin PATH", "Copy a host Codex binary into the rootfs workspace (default target: #{codex_target})") do |val|
+          codex_bin = Path[val].expand
+        end
+        p.on("--codex-url URL", "Download Codex using the sysroot builder fetcher") do |val|
+          codex_url = URI.parse(val)
+        end
+        p.on("--codex-sha256 SHA256", "Expected SHA256 for --codex-url") { |val| codex_sha256 = val }
+        p.on("--codex-target PATH", "Target path for --codex-bin/--codex-url inside the rootfs (default: #{codex_target})") do |val|
+          codex_target = Path[val]
+        end
         p.on("--no-tarball", "Prepare the chroot tree without writing a tarball") { write_tarball = false }
         p.on("--reuse-rootfs", "Reuse an existing prepared rootfs when present") { reuse_rootfs = true }
         p.on("--refresh-plan", "Rewrite the build plan inside an existing rootfs (requires --reuse-rootfs)") { refresh_plan = true }
@@ -212,7 +226,11 @@ module Bootstrap
         preserve_ownership_for_sources: preserve_ownership_for_sources,
         preserve_ownership_for_rootfs: preserve_ownership_for_rootfs,
         owner_uid: owner_uid,
-        owner_gid: owner_gid
+        owner_gid: owner_gid,
+        codex_bin: codex_bin,
+        codex_url: codex_url,
+        codex_sha256: codex_sha256,
+        codex_target: codex_target
       )
 
       if reuse_rootfs && builder.rootfs_ready?
@@ -222,6 +240,7 @@ module Bootstrap
           builder.stage_sources(skip_existing: true)
           puts "Staged missing sources into #{builder.rootfs_dir}/workspace"
         end
+        builder.stage_codex_binary if codex_bin || codex_url
         if refresh_plan
           builder.write_plan
           puts "Refreshed build plan at #{builder.plan_path}"

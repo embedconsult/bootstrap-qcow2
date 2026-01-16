@@ -53,6 +53,7 @@ module Bootstrap
     DEFAULT_GIT           = "2.45.2"
     DEFAULT_CRYSTAL       = "1.18.2"
     DEFAULT_BQ2_BRANCH    = "codex-development"
+    DEFAULT_CODEX_TARGET  = Path["/workspace/codex/bin/codex"]
 
     record PackageSpec,
       name : String,
@@ -108,7 +109,11 @@ module Bootstrap
                    @preserve_ownership_for_sources : Bool = false,
                    @preserve_ownership_for_rootfs : Bool = false,
                    @owner_uid : Int32? = nil,
-                   @owner_gid : Int32? = nil)
+                   @owner_gid : Int32? = nil,
+                   @codex_bin : Path? = nil,
+                   @codex_url : URI? = nil,
+                   @codex_sha256 : String? = nil,
+                   @codex_target : Path = DEFAULT_CODEX_TARGET)
       FileUtils.mkdir_p(@workspace)
       FileUtils.mkdir_p(cache_dir)
       FileUtils.mkdir_p(checksum_dir)
@@ -512,6 +517,7 @@ module Bootstrap
       FileUtils.mkdir_p(rootfs_dir / "workspace")
       FileUtils.mkdir_p(rootfs_dir / "var/lib")
       stage_sources if include_sources
+      stage_codex_binary
       rootfs_dir
     end
 
@@ -546,8 +552,38 @@ module Bootstrap
       end
     end
 
+    # Copy a host Codex binary into the rootfs workspace when configured.
+    def stage_codex_binary : Nil
+      return unless @codex_bin || @codex_url
+      source =
+        if @codex_bin
+          @codex_bin.not_nil!
+        else
+          download_and_verify(codex_package)
+        end
+      raise "Codex binary not found at #{source}" unless File.exists?(source)
+      target = rootfs_dir / normalize_rootfs_target(@codex_target)
+      FileUtils.mkdir_p(target.parent)
+      FileUtils.cp(source, target)
+      File.chmod(target, 0o755)
+    end
+
     private def bootstrap_source_branch : String
       ENV["BQ2_SOURCE_BRANCH"]? || DEFAULT_BQ2_BRANCH
+    end
+
+    # Normalize a rootfs target path to be relative to the rootfs directory.
+    private def normalize_rootfs_target(path : Path) : Path
+      value = path.to_s
+      value = value[1..] if value.starts_with?("/")
+      Path[value]
+    end
+
+    # Build a package spec for downloading the Codex binary.
+    private def codex_package : PackageSpec
+      url = @codex_url
+      raise "Codex URL is missing" unless url
+      PackageSpec.new("codex", "binary", url, sha256: @codex_sha256)
     end
 
     private def kernel_headers_arch : String
@@ -571,6 +607,8 @@ module Bootstrap
       sysroot_triple = sysroot_target_triple
       sysroot_env = sysroot_phase_env(sysroot_prefix)
       rootfs_env = rootfs_phase_env(sysroot_prefix)
+      os_release_content = rootfs_os_release_content
+      profile_content = rootfs_profile_content
       musl_arch = case @architecture
                   when "aarch64", "arm64"
                     "aarch64"
@@ -591,6 +629,12 @@ module Bootstrap
           env: sysroot_env,
           package_allowlist: nil,
           env_overrides: {
+            "bootstrap-qcow2" => {
+              "CPPFLAGS"        => "-I#{sysroot_prefix}/include",
+              "LDFLAGS"         => "-L#{sysroot_prefix}/lib",
+              "LIBRARY_PATH"    => "#{sysroot_prefix}/lib",
+              "PKG_CONFIG_PATH" => "#{sysroot_prefix}/lib/pkgconfig",
+            },
             "cmake" => {
               "CPPFLAGS" => "-I#{sysroot_prefix}/include",
               "LDFLAGS"  => "-L#{sysroot_prefix}/lib",
@@ -649,7 +693,18 @@ module Bootstrap
               patches: [] of String,
               install_prefix: "/etc/os-release",
               env: {
-                "CONTENT" => rootfs_os_release_content,
+                "CONTENT" => os_release_content,
+              },
+            ),
+            BuildStep.new(
+              name: "profile",
+              strategy: "write-file",
+              workdir: "/",
+              configure_flags: [] of String,
+              patches: [] of String,
+              install_prefix: "/etc/profile",
+              env: {
+                "CONTENT" => profile_content,
               },
             ),
             BuildStep.new(
@@ -705,6 +760,12 @@ module Bootstrap
           destdir: nil,
           env: rootfs_env,
           package_allowlist: nil,
+          env_overrides: {
+            "git" => {
+              "MAKEFLAGS"  => "-e",
+              "NO_GETTEXT" => "1",
+            },
+          },
         ),
         PhaseSpec.new(
           name: "crystal-from-system",
@@ -749,16 +810,33 @@ module Bootstrap
 
     # Return the os-release contents for the generated rootfs.
     private def rootfs_os_release_content : String
-      version = @base_version
-      branch = @branch
-      <<-TEXT
-      NAME="bootstrap-qcow2"
-      ID=bootstrap-qcow2
-      VERSION_ID="#{version}"
-      VERSION="source-built (#{branch})"
-      PRETTY_NAME="bootstrap-qcow2 source-built (#{branch})"
-      HOME_URL="https://github.com/embedconsult/bootstrap-qcow2"
-      TEXT
+      version = Bootstrap::VERSION
+      lines = [
+        "NAME=\"bootstrap-qcow2\"",
+        "ID=bootstrap-qcow2",
+        "VERSION_ID=\"#{version}\"",
+        "VERSION=\"bootstrap-qcow2 #{version}\"",
+        "PRETTY_NAME=\"bootstrap-qcow2 #{version}\"",
+        "HOME_URL=\"https://github.com/embedconsult/bootstrap-qcow2\"",
+      ]
+      lines.join("\n") + "\n"
+    end
+
+    # Return the /etc/profile content for the generated rootfs.
+    private def rootfs_profile_content : String
+      lines = [
+        "# /etc/profile for bootstrap-qcow2 rootfs.",
+        "export PATH=\"/usr/bin:/bin:/usr/sbin:/sbin\"",
+        "export CC=clang",
+        "export CXX=clang++",
+        "export AR=llvm-ar",
+        "export NM=llvm-nm",
+        "export RANLIB=llvm-ranlib",
+        "export STRIP=llvm-strip",
+        "export CRYSTAL_PATH=\"/usr/share/crystal/src\"",
+        "export BQ2_ROOTFS=1",
+      ]
+      lines.join("\n") + "\n"
     end
 
     # Return environment variables for the rootfs validation phase.
@@ -797,9 +875,10 @@ module Bootstrap
     # the seed rootfs uses Clang for all C/C++ compilation.
     private def sysroot_phase_env(sysroot_prefix : String) : Hash(String, String)
       {
-        "PATH" => "#{sysroot_prefix}/bin:#{sysroot_prefix}/sbin:/usr/bin:/bin",
-        "CC"   => "/usr/bin/clang",
-        "CXX"  => "/usr/bin/clang++",
+        "PATH"            => "#{sysroot_prefix}/bin:#{sysroot_prefix}/sbin:/usr/bin:/bin",
+        "CC"              => "/usr/bin/clang",
+        "CXX"             => "/usr/bin/clang++",
+        "LD_LIBRARY_PATH" => "#{sysroot_prefix}/lib",
       }
     end
 
