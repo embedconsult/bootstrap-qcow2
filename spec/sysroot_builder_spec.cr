@@ -226,6 +226,27 @@ describe Bootstrap::SysrootBuilder do
     end
   end
 
+  it "stages a codex binary into the rootfs workspace when configured" do
+    with_tempdir do |dir|
+      tar_dir = dir / "tarroot"
+      FileUtils.mkdir_p(tar_dir)
+      File.write(tar_dir / "etc.txt", "config")
+      tarball = dir / "miniroot.tar"
+      Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
+
+      codex_bin = dir / "codex"
+      File.write(codex_bin, "codex")
+
+      builder = StubBuilder.new(dir, codex_bin: codex_bin)
+      builder.fake_tarball = tarball
+      rootfs = builder.prepare_rootfs(include_sources: false)
+
+      staged = rootfs / "workspace/codex/bin/codex"
+      File.exists?(staged).should be_true
+      File.read(staged).should eq "codex"
+    end
+  end
+
   it "can skip staging sources on request" do
     with_tempdir do |dir|
       tar_dir = dir / "tarroot"

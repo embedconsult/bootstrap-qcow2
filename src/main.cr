@@ -167,6 +167,8 @@ module Bootstrap
       owner_gid = nil
       write_tarball = true
       reuse_rootfs = false
+      codex_bin : Path? = nil
+      codex_target = Bootstrap::SysrootBuilder::DEFAULT_CODEX_TARGET
 
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-builder [options]") do |p|
         p.on("-o OUTPUT", "--output=OUTPUT", "Target sysroot tarball (default: #{output})") { |val| output = Path[val] }
@@ -192,6 +194,12 @@ module Bootstrap
         end
         p.on("--no-tarball", "Prepare the chroot tree without writing a tarball") { write_tarball = false }
         p.on("--reuse-rootfs", "Reuse an existing prepared rootfs when present") { reuse_rootfs = true }
+        p.on("--codex-bin PATH", "Copy a host Codex binary into the rootfs workspace (default target: #{codex_target})") do |val|
+          codex_bin = Path[val].expand
+        end
+        p.on("--codex-target PATH", "Target path for --codex-bin inside the rootfs (default: #{codex_target})") do |val|
+          codex_target = Path[val]
+        end
       end
       return CLI.print_help(parser) if help
 
@@ -206,12 +214,15 @@ module Bootstrap
         preserve_ownership_for_sources: preserve_ownership_for_sources,
         preserve_ownership_for_rootfs: preserve_ownership_for_rootfs,
         owner_uid: owner_uid,
-        owner_gid: owner_gid
+        owner_gid: owner_gid,
+        codex_bin: codex_bin,
+        codex_target: codex_target
       )
 
       if reuse_rootfs && builder.rootfs_ready?
         puts "Reusing existing rootfs at #{builder.rootfs_dir}"
         puts "Build plan found at #{builder.plan_path} (iteration state is maintained by sysroot-runner)"
+        builder.stage_codex_binary if codex_bin
         if write_tarball
           builder.write_chroot_tarball(output)
           puts "Generated sysroot tarball at #{output}"
@@ -356,12 +367,20 @@ module Bootstrap
       rootfs = Path["data/sysroot/rootfs"]
       alpine_setup = false
       add_dirs = Bootstrap::CodexNamespace::DEFAULT_CODEX_ADD_DIRS.dup
+      codex_bin : Path? = nil
+      codex_target = Bootstrap::CodexNamespace::DEFAULT_CODEX_BIN
 
       parser, remaining, help = CLI.parse(args, "Usage: bq2 codex-namespace [options]") do |p|
         p.on("-C DIR", "Rootfs directory for the command (default: #{rootfs})") { |dir| rootfs = Path[dir].expand }
         p.on("--alpine", "Assume rootfs is Alpine and install runtime deps for Codex (node/npm/crystal)") { alpine_setup = true }
         p.on("--no-default-add-dirs", "Do not pass the default Codex sandbox writable dirs (/var,/opt,/workspace)") { add_dirs.clear }
         p.on("--add-dir PATH", "Add an extra writable dir for the Codex sandbox (repeatable)") { |dir| add_dirs << dir }
+        p.on("--codex-bin PATH", "Bind-mount the host Codex binary into the rootfs (default target: #{codex_target})") do |path|
+          codex_bin = Path[path].expand
+        end
+        p.on("--codex-target PATH", "Target path for --codex-bin inside the rootfs (default: #{codex_target})") do |path|
+          codex_target = Path[path]
+        end
       end
       return CLI.print_help(parser) if help
 
@@ -371,7 +390,13 @@ module Bootstrap
         return 1
       end
 
-      status = CodexNamespace.run(rootfs: rootfs, alpine_setup: alpine_setup, add_dirs: add_dirs)
+      status = CodexNamespace.run(
+        rootfs: rootfs,
+        alpine_setup: alpine_setup,
+        add_dirs: add_dirs,
+        codex_bin: codex_bin,
+        codex_target: codex_target
+      )
       status.exit_code
     rescue ex : SysrootNamespace::NamespaceError
       STDERR.puts "Namespace setup failed: #{ex.message}"

@@ -109,6 +109,37 @@ describe Bootstrap::SysrootRunner do
     runner.calls.first[:name].should eq "file-a"
   end
 
+  it "stages build plan and state into destdir rootfs" do
+    destdir = Path[Dir.tempdir] / "bq2-rootfs-iter-#{Random::Secure.hex(8)}"
+    begin
+      steps = [Bootstrap::BuildStep.new(name: "step", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
+      plan = Bootstrap::BuildPlan.new([
+        Bootstrap::BuildPhase.new(
+          name: "rootfs",
+          description: "rootfs phase",
+          workspace: "/workspace",
+          environment: "test",
+          install_prefix: "/usr",
+          destdir: destdir.to_s,
+          steps: steps,
+        ),
+      ])
+      plan_file = File.tempfile("plan")
+      plan_file.print(plan.to_json)
+      plan_file.flush
+      plan_path = plan_file.path
+      plan_file.close
+
+      runner = RecordingRunner.new
+      Bootstrap::SysrootRunner.run_plan(plan_path, runner, report_dir: nil)
+
+      File.exists?(destdir / "var/lib/sysroot-build-plan.json").should be_true
+      File.exists?(destdir / "var/lib/sysroot-build-state.json").should be_true
+    ensure
+      FileUtils.rm_rf(destdir)
+    end
+  end
+
   it "runs all phases when requested" do
     steps = [Bootstrap::BuildStep.new(name: "step", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
     plan = Bootstrap::BuildPlan.new([

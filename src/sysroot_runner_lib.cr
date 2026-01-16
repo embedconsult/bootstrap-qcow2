@@ -420,11 +420,18 @@ module Bootstrap
         stage_path = File.join(destdir, DEFAULT_PLAN_PATH.lchop('/'))
         overrides_stage = File.join(destdir, DEFAULT_OVERRIDES_PATH.lchop('/'))
         report_stage = File.join(destdir, DEFAULT_REPORT_DIR.lchop('/'))
+        state_stage = File.join(destdir, DEFAULT_STATE_PATH.lchop('/'))
 
         FileUtils.mkdir_p(File.dirname(stage_path))
         File.write(stage_path, plan_json)
         File.write(overrides_stage, overrides_json || "{}\n")
         FileUtils.mkdir_p(report_stage)
+        state = SysrootBuildState.new(
+          plan_path: DEFAULT_PLAN_PATH,
+          overrides_path: DEFAULT_OVERRIDES_PATH,
+          report_dir: DEFAULT_REPORT_DIR
+        )
+        File.write(state_stage, state.to_json)
       end
     rescue ex
       Log.warn { "Failed to stage iteration files into destdir rootfs: #{ex.message}" }

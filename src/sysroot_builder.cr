@@ -52,6 +52,7 @@ module Bootstrap
     DEFAULT_GIT           = "2.45.2"
     DEFAULT_CRYSTAL       = "1.18.2"
     DEFAULT_BQ2_BRANCH    = "codex-development"
+    DEFAULT_CODEX_TARGET  = Path["/workspace/codex/bin/codex"]
 
     record PackageSpec,
       name : String,
@@ -107,7 +108,9 @@ module Bootstrap
                    @preserve_ownership_for_sources : Bool = false,
                    @preserve_ownership_for_rootfs : Bool = false,
                    @owner_uid : Int32? = nil,
-                   @owner_gid : Int32? = nil)
+                   @owner_gid : Int32? = nil,
+                   @codex_bin : Path? = nil,
+                   @codex_target : Path = DEFAULT_CODEX_TARGET)
       FileUtils.mkdir_p(@workspace)
       FileUtils.mkdir_p(cache_dir)
       FileUtils.mkdir_p(checksum_dir)
@@ -498,6 +501,7 @@ module Bootstrap
       FileUtils.mkdir_p(rootfs_dir / "workspace")
       FileUtils.mkdir_p(rootfs_dir / "var/lib")
       stage_sources if include_sources
+      stage_codex_binary
       rootfs_dir
     end
 
@@ -510,8 +514,25 @@ module Bootstrap
       end
     end
 
+    # Copy a host Codex binary into the rootfs workspace when configured.
+    def stage_codex_binary : Nil
+      return unless @codex_bin
+      source = @codex_bin.not_nil!
+      raise "Codex binary not found at #{source}" unless File.exists?(source)
+      target = rootfs_dir / normalize_rootfs_target(@codex_target)
+      FileUtils.mkdir_p(target.parent)
+      FileUtils.cp(source, target)
+      File.chmod(target, 0o755)
+    end
+
     private def bootstrap_source_branch : String
       ENV["BQ2_SOURCE_BRANCH"]? || DEFAULT_BQ2_BRANCH
+    end
+
+    private def normalize_rootfs_target(path : Path) : Path
+      value = path.to_s
+      value = value[1..] if value.starts_with?("/")
+      Path[value]
     end
 
     # Define the multi-phase build in an LFS-inspired style:
