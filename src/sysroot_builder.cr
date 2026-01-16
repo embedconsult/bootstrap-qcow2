@@ -40,6 +40,7 @@ module Bootstrap
     DEFAULT_M4            = "1.4.19"
     DEFAULT_GNU_MAKE      = "4.4.1"
     DEFAULT_ZLIB          = "1.3.1"
+    DEFAULT_LINUX         = "6.12.38"
     DEFAULT_PCRE2         = "10.44"
     DEFAULT_LIBATOMIC_OPS = "7.8.2"
     DEFAULT_GMP           = "6.3.0"
@@ -188,6 +189,20 @@ module Bootstrap
         ),
         PackageSpec.new("make", DEFAULT_GNU_MAKE, URI.parse("https://ftp.gnu.org/gnu/make/make-#{DEFAULT_GNU_MAKE}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
         PackageSpec.new("zlib", DEFAULT_ZLIB, URI.parse("https://zlib.net/zlib-#{DEFAULT_ZLIB}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
+        PackageSpec.new(
+          "linux-headers",
+          DEFAULT_LINUX,
+          URI.parse("https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-#{DEFAULT_LINUX}.tar.xz"),
+          strategy: "linux-headers",
+          build_directory: "linux-#{DEFAULT_LINUX}",
+          configure_flags: [
+            "ARCH=#{kernel_headers_arch}",
+            "LLVM=1",
+            "HOSTCC=clang",
+            "HOSTCXX=clang++",
+          ],
+          phases: ["sysroot-from-alpine", "rootfs-from-sysroot", "system-from-sysroot"],
+        ),
         PackageSpec.new("libressl", DEFAULT_LIBRESSL, URI.parse("https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-#{DEFAULT_LIBRESSL}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
         PackageSpec.new(
           "cmake",
@@ -503,14 +518,47 @@ module Bootstrap
     # Extract downloaded sources into /workspace inside the rootfs for offline builds.
     def stage_sources : Nil
       workspace_path = rootfs_dir / "workspace"
-      download_sources.each do |archive|
-        Log.info { "Extracting source archive #{archive} into #{workspace_path}" }
-        extract_tarball(archive, workspace_path, @preserve_ownership_for_sources, force_system_tar: @use_system_tar_for_sources)
+      stage_sources(skip_existing: false, workspace_path: workspace_path)
+    end
+
+    # Extract downloaded sources into /workspace inside the rootfs for offline builds.
+    #
+    # When *skip_existing* is true, source archives are only extracted when the
+    # expected build directory does not already exist.
+    def stage_sources(skip_existing : Bool, workspace_path : Path = rootfs_dir / "workspace") : Nil
+      packages.each do |pkg|
+        archives = download_all(pkg)
+        archives.each_with_index do |archive, idx|
+          build_directory =
+            if idx == 0
+              pkg.build_directory || strip_archive_extension(pkg.filename)
+            else
+              strip_archive_extension(File.basename(archive))
+            end
+          build_root = workspace_path / build_directory
+          if skip_existing && Dir.exists?(build_root)
+            Log.info { "Skipping already-staged source directory #{build_root}" }
+            next
+          end
+          Log.info { "Extracting source archive #{archive} into #{workspace_path}" }
+          extract_tarball(archive, workspace_path, @preserve_ownership_for_sources, force_system_tar: @use_system_tar_for_sources)
+        end
       end
     end
 
     private def bootstrap_source_branch : String
       ENV["BQ2_SOURCE_BRANCH"]? || DEFAULT_BQ2_BRANCH
+    end
+
+    private def kernel_headers_arch : String
+      case @architecture
+      when "aarch64", "arm64"
+        "arm64"
+      when "x86_64", "amd64"
+        "x86"
+      else
+        @architecture
+      end
     end
 
     # Define the multi-phase build in an LFS-inspired style:
@@ -574,7 +622,7 @@ module Bootstrap
           install_prefix: "/usr",
           destdir: rootfs_destdir,
           env: rootfs_phase_env(sysroot_prefix),
-          package_allowlist: ["musl", "busybox"],
+          package_allowlist: ["musl", "busybox", "linux-headers"],
           extra_steps: [
             BuildStep.new(
               name: "musl-ld-path",

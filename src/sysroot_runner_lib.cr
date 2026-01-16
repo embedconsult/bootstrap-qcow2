@@ -86,6 +86,10 @@ module Bootstrap
             target = destdir ? "#{destdir}#{install_prefix}" : install_prefix
             FileUtils.mkdir_p(File.dirname(target))
             File.write(target, content)
+          when "linux-headers"
+            install_root = destdir ? "#{destdir}#{install_prefix}" : install_prefix
+            argv = ["make"] + step.configure_flags + ["INSTALL_HDR_PATH=#{install_root}", "headers_install"]
+            run_cmd(argv, env: env)
           when "llvm"
             source_dir = "."
             unless File.exists?("CMakeLists.txt")

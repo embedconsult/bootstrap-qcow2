@@ -167,6 +167,8 @@ module Bootstrap
       owner_gid = nil
       write_tarball = true
       reuse_rootfs = false
+      refresh_plan = false
+      restage_sources = false
 
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-builder [options]") do |p|
         p.on("-o OUTPUT", "--output=OUTPUT", "Target sysroot tarball (default: #{output})") { |val| output = Path[val] }
@@ -192,6 +194,8 @@ module Bootstrap
         end
         p.on("--no-tarball", "Prepare the chroot tree without writing a tarball") { write_tarball = false }
         p.on("--reuse-rootfs", "Reuse an existing prepared rootfs when present") { reuse_rootfs = true }
+        p.on("--refresh-plan", "Rewrite the build plan inside an existing rootfs (requires --reuse-rootfs)") { refresh_plan = true }
+        p.on("--restage-sources", "Extract missing sources into an existing rootfs /workspace (requires --reuse-rootfs)") { restage_sources = true }
       end
       return CLI.print_help(parser) if help
 
@@ -212,6 +216,14 @@ module Bootstrap
       if reuse_rootfs && builder.rootfs_ready?
         puts "Reusing existing rootfs at #{builder.rootfs_dir}"
         puts "Build plan found at #{builder.plan_path} (iteration state is maintained by sysroot-runner)"
+        if include_sources && restage_sources
+          builder.stage_sources(skip_existing: true)
+          puts "Staged missing sources into #{builder.rootfs_dir}/workspace"
+        end
+        if refresh_plan
+          builder.write_plan
+          puts "Refreshed build plan at #{builder.plan_path}"
+        end
         if write_tarball
           builder.write_chroot_tarball(output)
           puts "Generated sysroot tarball at #{output}"

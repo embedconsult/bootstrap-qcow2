@@ -165,8 +165,15 @@ describe Bootstrap::SysrootBuilder do
       pkg = Bootstrap::SysrootBuilder::PackageSpec.new("pkg", "1.0", URI.parse("https://example.com/pkg-1.0.tar.gz"), configure_flags: ["--foo"])
       musl = Bootstrap::SysrootBuilder::PackageSpec.new("musl", "1.0", URI.parse("https://example.com/musl-1.0.tar.gz"))
       busybox = Bootstrap::SysrootBuilder::PackageSpec.new("busybox", "1.0", URI.parse("https://example.com/busybox-1.0.tar.gz"), strategy: "busybox")
+      linux_headers = Bootstrap::SysrootBuilder::PackageSpec.new(
+        "linux-headers",
+        "1.0",
+        URI.parse("https://example.com/linux-1.0.tar.gz"),
+        strategy: "linux-headers",
+        phases: ["rootfs-from-sysroot"],
+      )
       builder = StubBuilder.new(dir)
-      builder.override_packages = [pkg, musl, busybox]
+      builder.override_packages = [pkg, musl, busybox, linux_headers]
       plan = builder.build_plan
       plan.phases.map(&.name).should eq ["sysroot-from-alpine", "rootfs-from-sysroot"]
       sysroot_phase = plan.phases.first
@@ -178,7 +185,7 @@ describe Bootstrap::SysrootBuilder do
       rootfs_phase = plan.phases.last
       rootfs_phase.install_prefix.should eq "/usr"
       rootfs_phase.destdir.should eq "/workspace/rootfs"
-      rootfs_phase.steps.map(&.name).should eq ["musl", "busybox", "musl-ld-path", "rootfs-marker", "sysroot"]
+      rootfs_phase.steps.map(&.name).should eq ["musl", "busybox", "linux-headers", "musl-ld-path", "rootfs-marker", "sysroot"]
     end
   end
 
@@ -188,6 +195,13 @@ describe Bootstrap::SysrootBuilder do
       builder.override_packages = [
         Bootstrap::SysrootBuilder::PackageSpec.new("musl", "1.0", URI.parse("https://example.com/musl.tar.gz")),
         Bootstrap::SysrootBuilder::PackageSpec.new("busybox", "1.0", URI.parse("https://example.com/busybox.tar.gz"), strategy: "busybox"),
+        Bootstrap::SysrootBuilder::PackageSpec.new(
+          "linux-headers",
+          "1.0",
+          URI.parse("https://example.com/linux.tar.gz"),
+          strategy: "linux-headers",
+          phases: ["rootfs-from-sysroot"],
+        ),
       ]
       plan_path = builder.write_plan
       File.exists?(plan_path).should be_true
