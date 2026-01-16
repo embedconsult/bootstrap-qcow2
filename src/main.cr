@@ -160,6 +160,7 @@ module Bootstrap
       architecture = SysrootBuilder::DEFAULT_ARCH
       branch = SysrootBuilder::DEFAULT_BRANCH
       base_version = SysrootBuilder::DEFAULT_BASE_VERSION
+      base_rootfs_path : Path? = nil
       include_sources = true
       use_system_tar_for_sources = false
       use_system_tar_for_rootfs = false
@@ -182,6 +183,7 @@ module Bootstrap
         p.on("-a ARCH", "--arch=ARCH", "Target architecture (default: #{architecture})") { |val| architecture = val }
         p.on("-b BRANCH", "--branch=BRANCH", "Source branch/release tag (default: #{branch})") { |val| branch = val }
         p.on("-v VERSION", "--base-version=VERSION", "Base rootfs version/tag (default: #{base_version})") { |val| base_version = val }
+        p.on("--base-rootfs PATH", "Use a local rootfs tarball instead of downloading the Alpine minirootfs") { |val| base_rootfs_path = Path[val].expand }
         p.on("--skip-sources", "Skip staging source archives into the rootfs") { include_sources = false }
         p.on("--system-tar-sources", "Use system tar to extract all staged source archives") { use_system_tar_for_sources = true }
         p.on("--system-tar-rootfs", "Use system tar to extract the base rootfs") { use_system_tar_for_rootfs = true }
@@ -221,6 +223,7 @@ module Bootstrap
         architecture: architecture,
         branch: branch,
         base_version: base_version,
+        base_rootfs_path: base_rootfs_path,
         use_system_tar_for_sources: use_system_tar_for_sources,
         use_system_tar_for_rootfs: use_system_tar_for_rootfs,
         preserve_ownership_for_sources: preserve_ownership_for_sources,

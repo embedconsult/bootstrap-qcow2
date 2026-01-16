@@ -243,6 +243,22 @@ describe Bootstrap::SysrootBuilder do
     end
   end
 
+  it "prepares rootfs from a base rootfs tarball path" do
+    with_tempdir do |dir|
+      tar_dir = dir / "tarroot"
+      FileUtils.mkdir_p(tar_dir)
+      File.write(tar_dir / "etc.txt", "config")
+      tarball = dir / "miniroot.tar"
+      Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
+
+      builder = StubBuilder.new(dir, base_rootfs_path: tarball)
+      builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
+      builder.skip_stage_sources = true
+      rootfs = builder.prepare_rootfs(include_sources: false)
+      File.exists?(rootfs / "etc.txt").should be_true
+    end
+  end
+
   it "can skip staging sources on request" do
     with_tempdir do |dir|
       tar_dir = dir / "tarroot"

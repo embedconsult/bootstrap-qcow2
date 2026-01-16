@@ -104,6 +104,7 @@ module Bootstrap
                    @architecture : String = DEFAULT_ARCH,
                    @branch : String = DEFAULT_BRANCH,
                    @base_version : String = DEFAULT_BASE_VERSION,
+                   @base_rootfs_path : Path? = nil,
                    @use_system_tar_for_sources : Bool = false,
                    @use_system_tar_for_rootfs : Bool = false,
                    @preserve_ownership_for_sources : Bool = false,
@@ -511,7 +512,7 @@ module Bootstrap
       FileUtils.rm_rf(rootfs_dir)
       FileUtils.mkdir_p(rootfs_dir)
 
-      tarball = download_and_verify(base_rootfs)
+      tarball = resolve_base_rootfs_tarball(base_rootfs)
       Log.info { "Extracting base rootfs from #{tarball}" }
       extract_tarball(tarball, rootfs_dir, @preserve_ownership_for_rootfs, force_system_tar: @use_system_tar_for_rootfs)
       FileUtils.mkdir_p(rootfs_dir / "workspace")
@@ -570,6 +571,14 @@ module Bootstrap
 
     private def bootstrap_source_branch : String
       ENV["BQ2_SOURCE_BRANCH"]? || DEFAULT_BQ2_BRANCH
+    end
+
+    # Resolve the base rootfs tarball, favoring a local override when provided.
+    private def resolve_base_rootfs_tarball(base_rootfs : PackageSpec) : Path
+      return download_and_verify(base_rootfs) unless @base_rootfs_path
+      path = @base_rootfs_path.not_nil!
+      raise "Base rootfs tarball not found at #{path}" unless File.exists?(path)
+      path
     end
 
     # Normalize a rootfs target path to be relative to the rootfs directory.
