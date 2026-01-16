@@ -117,7 +117,7 @@ module Bootstrap
         actual = sha256(source)
         raise "Codex SHA256 mismatch: expected #{codex_sha256}, got #{actual}" unless actual == codex_sha256
       end
-      if tarball?(source)
+      if tarball?(source, codex_url)
         extract_dir = Path["#{target}.extract"]
         FileUtils.rm_r(extract_dir) if Dir.exists?(extract_dir)
         FileUtils.mkdir_p(extract_dir)
@@ -142,6 +142,13 @@ module Bootstrap
     private def self.tarball?(path : Path) : Bool
       name = path.to_s
       name.ends_with?(".tar.gz") || name.ends_with?(".tgz")
+    end
+
+    private def self.tarball?(path : Path, uri : URI) : Bool
+      return true if tarball?(path)
+      uri_path = uri.path
+      return false unless uri_path
+      uri_path.ends_with?(".tar.gz") || uri_path.ends_with?(".tgz")
     end
 
     private def self.extract_tarball(archive : Path, destination : Path) : Nil
