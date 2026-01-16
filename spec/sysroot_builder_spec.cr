@@ -31,6 +31,41 @@ class StubBuilder < Bootstrap::SysrootBuilder
   end
 end
 
+def write_tar_header(io : IO, name : String, size : Int64, typeflag : Char, mode : Int32)
+  header = Bytes.new(512, 0)
+  write_tar_string(header, 0, 100, name)
+  write_tar_octal(header, 100, 8, mode)
+  write_tar_octal(header, 108, 8, 0)
+  write_tar_octal(header, 116, 8, 0)
+  write_tar_octal(header, 124, 12, size)
+  write_tar_octal(header, 136, 12, Time.utc.to_unix)
+  8.times { |idx| header[148 + idx] = 0x20_u8 }
+  header[156] = typeflag.ord.to_u8
+  write_tar_string(header, 257, 6, "ustar")
+  write_tar_string(header, 263, 2, "00")
+  checksum = header.sum { |byte| byte.to_i64 }
+  write_tar_octal(header, 148, 8, checksum)
+  io.write(header)
+end
+
+def write_tar_string(buffer : Bytes, offset : Int32, length : Int32, value : String)
+  bytes = value.to_slice
+  limit = Math.min(bytes.size, length)
+  limit.times { |idx| buffer[offset + idx] = bytes[idx] }
+end
+
+def write_tar_octal(buffer : Bytes, offset : Int32, length : Int32, value : Int64)
+  string = value.to_s(8).rjust(length - 1, '0')
+  write_tar_string(buffer, offset, length - 1, string)
+  buffer[offset + length - 1] = 0
+end
+
+def pad_tar(io : IO, size : Int64)
+  remainder = size % 512
+  return if remainder == 0
+  io.write(Bytes.new(512 - remainder, 0))
+end
+
 def socket_blocked_reason
   server = TCPServer.new("127.0.0.1", 0)
   server.close
@@ -257,6 +292,28 @@ describe Bootstrap::SysrootBuilder do
       builder.skip_stage_sources = true
       rootfs = builder.prepare_rootfs(include_sources: false)
       File.exists?(rootfs / "etc.txt").should be_true
+    end
+  end
+
+  it "replaces directories with files when tar entries conflict" do
+    with_tempdir do |dir|
+      tarball = dir / "conflict.tar"
+      File.open(tarball, "w") do |io|
+        write_tar_header(io, "foo/", 0_i64, '5', 0o755)
+        content = "replacement"
+        write_tar_header(io, "foo", content.bytesize.to_i64, '0', 0o644)
+        io.write(content.to_slice)
+        pad_tar(io, content.bytesize.to_i64)
+        io.write(Bytes.new(1024, 0))
+      end
+
+      builder = StubBuilder.new(dir, base_rootfs_path: tarball)
+      builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
+      builder.skip_stage_sources = true
+      rootfs = builder.prepare_rootfs(include_sources: false)
+
+      File.file?(rootfs / "foo").should be_true
+      File.exists?(rootfs / "foo" / "bar.txt").should be_false
     end
   end
 

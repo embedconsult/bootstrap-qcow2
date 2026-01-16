@@ -1175,6 +1175,8 @@ module Bootstrap
           end
 
           if name.ends_with?("/")
+            reconcile_existing_target(target, TYPE_DIRECTORY)
+            ensure_parent_dir(target)
             FileUtils.mkdir_p(target)
             uid, gid = resolved_owner(header_uid, header_gid)
             apply_ownership(target, uid, gid)
@@ -1186,15 +1188,21 @@ module Bootstrap
           uid, gid = resolved_owner(header_uid, header_gid)
           case normalized_typeflag
           when TYPE_DIRECTORY # directory
+            reconcile_existing_target(target, TYPE_DIRECTORY)
+            ensure_parent_dir(target)
             FileUtils.mkdir_p(target)
             File.chmod(target, header_mode(header))
             apply_ownership(target, uid, gid)
             deferred_dir_times << {target, mtime}
           when TYPE_SYMLINK # symlink
+            reconcile_existing_target(target, TYPE_SYMLINK)
+            ensure_parent_dir(target)
             FileUtils.mkdir_p(target.parent)
             Log.debug { "Creating symlink #{target} -> #{linkname}" }
             FileUtils.ln_sf(linkname, target)
           when TYPE_HARDLINK # hardlink
+            reconcile_existing_target(target, TYPE_HARDLINK)
+            ensure_parent_dir(target)
             FileUtils.mkdir_p(target.parent)
             link_target = safe_target_path(linkname)
             unless link_target
@@ -1205,6 +1213,8 @@ module Bootstrap
             Log.debug { "Creating hardlink #{target} -> #{link_target}" }
             File.link(link_target, target)
           else # regular file
+            reconcile_existing_target(target, TYPE_FILE)
+            ensure_parent_dir(target)
             FileUtils.mkdir_p(target.parent)
             write_file(target, size, header_mode(header))
             apply_ownership(target, uid, gid)
@@ -1247,6 +1257,38 @@ module Bootstrap
           end
         end
         File.chmod(path, mode)
+      end
+
+      # Ensure the parent path is a directory, removing conflicting entries.
+      private def ensure_parent_dir(target : Path)
+        parent = target.parent
+        return if parent == @destination
+        info = File.info(parent, follow_symlinks: false) rescue nil
+        if info && !info.directory?
+          FileUtils.rm_rf(parent)
+        end
+      end
+
+      # Remove conflicting paths to allow tar entries to replace them.
+      private def reconcile_existing_target(target : Path, entry_type : Char)
+        info = File.info(target, follow_symlinks: false) rescue nil
+        return unless info
+        case entry_type
+        when TYPE_DIRECTORY
+          FileUtils.rm_rf(target) unless info.directory?
+        when TYPE_SYMLINK, TYPE_HARDLINK
+          if info.directory?
+            FileUtils.rm_rf(target)
+          else
+            File.delete?(target)
+          end
+        else
+          if info.directory?
+            FileUtils.rm_rf(target)
+          elsif info.symlink?
+            File.delete?(target)
+          end
+        end
       end
 
       private def apply_mtime(path : Path, mtime : Int64)
