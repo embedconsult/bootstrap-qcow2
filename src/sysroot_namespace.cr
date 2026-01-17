@@ -267,11 +267,12 @@ module Bootstrap
       write_id_map("/proc/self/gid_map", gid)
     end
 
-    # Returns true when the current process already has CAP_SYS_ADMIN and
-    # user namespace setup is likely to be blocked by NoNewPrivs/seccomp,
-    # so we should skip the user namespace and only isolate mounts.
+    # Returns true when the current process already has CAP_SYS_ADMIN.
+    # In that case we can skip creating a user namespace, which preserves
+    # host capabilities such as CAP_NET_RAW (needed for ping) while still
+    # isolating mounts.
     private def self.privileged_mount_only? : Bool
-      cap_sys_admin? && (no_new_privs? || seccomp_enforced?)
+      cap_sys_admin?
     end
 
     private def self.no_new_privs?(proc_status_path : Path = Path["/proc/self/status"]) : Bool
