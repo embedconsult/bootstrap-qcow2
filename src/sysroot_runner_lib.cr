@@ -86,6 +86,24 @@ module Bootstrap
             target = destdir ? "#{destdir}#{install_prefix}" : install_prefix
             FileUtils.mkdir_p(File.dirname(target))
             File.write(target, content)
+          when "prepare-rootfs"
+            idx = 0
+            wrote = false
+            loop do
+              path_key = "FILE_#{idx}_PATH"
+              content_key = "FILE_#{idx}_CONTENT"
+              path = step.env[path_key]?
+              content = step.env[content_key]?
+              break unless path || content
+              raise "prepare-rootfs requires #{path_key}" unless path
+              raise "prepare-rootfs requires #{content_key}" unless content
+              target = destdir ? "#{destdir}#{path}" : path
+              FileUtils.mkdir_p(File.dirname(target))
+              File.write(target, content)
+              wrote = true
+              idx += 1
+            end
+            raise "prepare-rootfs wrote no files" unless wrote
           when "remove-tree"
             raise "remove-tree requires step.install_prefix (path to remove)" unless step.install_prefix
             remove_root = destdir ? "#{destdir}#{install_prefix}" : install_prefix
