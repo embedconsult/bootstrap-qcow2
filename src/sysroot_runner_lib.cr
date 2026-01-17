@@ -34,6 +34,11 @@ module Bootstrap
 
     # Default runner that shells out via Process.run using strategy metadata.
     struct SystemRunner
+      getter clean_build_dirs : Bool
+
+      def initialize(@clean_build_dirs : Bool = true)
+      end
+
       # Run a build step using the selected strategy.
       #
       # The effective install destination is computed from the phase defaults
@@ -81,16 +86,92 @@ module Bootstrap
             target = destdir ? "#{destdir}#{install_prefix}" : install_prefix
             FileUtils.mkdir_p(File.dirname(target))
             File.write(target, content)
+          when "remove-tree"
+            raise "remove-tree requires step.install_prefix (path to remove)" unless step.install_prefix
+            remove_root = destdir ? "#{destdir}#{install_prefix}" : install_prefix
+            raise "Refusing to remove #{remove_root}" if remove_root == "/" || remove_root.empty?
+            FileUtils.rm_rf(remove_root)
+          when "tarball"
+            output = step.install_prefix
+            raise "tarball requires step.install_prefix (output path)" unless output
+            output = output.not_nil!
+            source_root = step.workdir
+            if destdir
+              if source_root.starts_with?(destdir)
+                # Already rooted at the destdir.
+              elsif source_root == "/"
+                source_root = destdir
+              elsif source_root.starts_with?("/")
+                source_root = "#{destdir}#{source_root}"
+              else
+                source_root = File.join(destdir, source_root)
+              end
+            end
+            raise "Missing tarball source #{source_root}" unless Dir.exists?(source_root)
+            FileUtils.mkdir_p(File.dirname(output))
+            run_cmd(["tar", "-czf", output, "-C", source_root, "."], env: env)
+          when "linux-headers"
+            install_root = destdir ? "#{destdir}#{install_prefix}" : install_prefix
+            run_cmd(["make"] + step.configure_flags + ["headers"], env: env)
+            include_dest = File.join(install_root, "include")
+            FileUtils.mkdir_p(include_dest)
+            run_cmd(["cp", "-a", "usr/include/.", include_dest], env: env)
           when "llvm"
             source_dir = "."
             unless File.exists?("CMakeLists.txt")
               source_dir = "llvm" if File.exists?(File.join("llvm", "CMakeLists.txt"))
             end
-            FileUtils.rm_rf("build") if Dir.exists?("build")
+            FileUtils.rm_rf("build") if clean_build_dirs && Dir.exists?("build")
             run_cmd(["cmake", "-S", source_dir, "-B", "build", "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + step.configure_flags, env: env)
             run_cmd(["cmake", "--build", "build", "-j#{cpus}"], env: env)
             install_env = destdir ? env.merge({"DESTDIR" => destdir}) : env
             run_cmd(["cmake", "--install", "build"], env: install_env)
+          when "llvm-libcxx"
+            source_dir = "."
+            unless File.exists?("CMakeLists.txt")
+              source_dir = "llvm" if File.exists?(File.join("llvm", "CMakeLists.txt"))
+            end
+
+            stage1_build_dir = "build-stage1"
+            stage2_build_dir = "build-stage2"
+            if clean_build_dirs
+              FileUtils.rm_rf(stage1_build_dir) if Dir.exists?(stage1_build_dir)
+              FileUtils.rm_rf(stage2_build_dir) if Dir.exists?(stage2_build_dir)
+            end
+
+            stage1_flags = step.configure_flags.reject { |flag| flag.starts_with?("-DLLVM_ENABLE_LIBCXX=") }
+            run_cmd(["cmake", "-S", source_dir, "-B", stage1_build_dir, "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + stage1_flags, env: env)
+            run_cmd(["cmake", "--build", stage1_build_dir, "-j#{cpus}"], env: env)
+            install_env = destdir ? env.merge({"DESTDIR" => destdir}) : env
+            run_cmd(["cmake", "--install", stage1_build_dir], env: install_env)
+
+            install_root = destdir ? "#{destdir}#{install_prefix}" : install_prefix
+            stage2_cc = "#{install_root}/bin/clang"
+            stage2_cxx = "#{install_root}/bin/clang++"
+            raise "llvm-libcxx stage2 requires #{stage2_cc}" unless File.exists?(stage2_cc)
+            raise "llvm-libcxx stage2 requires #{stage2_cxx}" unless File.exists?(stage2_cxx)
+            triple = detect_clang_target_triple(stage2_cc, env: env)
+            libcxx_include = "#{install_root}/include/c++/v1"
+            libcxx_target_include = "#{install_root}/include/#{triple}/c++/v1"
+            libcxx_libdir = "#{install_root}/lib/#{triple}"
+            libcxx_archive = "#{libcxx_libdir}/libc++.a"
+            libcxxabi_archive = "#{libcxx_libdir}/libc++abi.a"
+            libunwind_archive = "#{libcxx_libdir}/libunwind.a"
+            cxx_standard_libs = "-Wl,--start-group #{libcxx_archive} #{libcxxabi_archive} #{libunwind_archive} -Wl,--end-group"
+
+            stage2_flags = step.configure_flags.reject { |flag| flag.starts_with?("-DLLVM_ENABLE_RUNTIMES=") } + [
+              "-DCMAKE_C_COMPILER=#{stage2_cc}",
+              "-DCMAKE_CXX_COMPILER=#{stage2_cxx}",
+              "-DCMAKE_C_FLAGS=--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld",
+              "-DCMAKE_CXX_FLAGS=-nostdinc++ -isystem #{libcxx_include} -isystem #{libcxx_target_include} -nostdlib++ -stdlib=libc++ --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{install_root}/lib",
+              "-DCMAKE_CXX_STANDARD_LIBRARIES=#{cxx_standard_libs}",
+              "-DCMAKE_EXE_LINKER_FLAGS=--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{install_root}/lib",
+              "-DCMAKE_SHARED_LINKER_FLAGS=--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{install_root}/lib",
+              "-DCMAKE_MODULE_LINKER_FLAGS=--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{install_root}/lib",
+            ]
+            run_cmd(["cmake", "-S", source_dir, "-B", stage2_build_dir, "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + stage2_flags, env: env)
+            run_cmd(["cmake", "--build", stage2_build_dir, "-j#{cpus}"], env: env)
+            run_cmd(["cmake", "--install", stage2_build_dir], env: install_env)
           when "crystal"
             run_cmd(["shards", "build"], env: env)
             bin_prefix = destdir ? "#{destdir}#{install_prefix}" : install_prefix
@@ -98,7 +179,15 @@ module Bootstrap
             Dir.glob("bin/*").each do |artifact|
               run_cmd(["install", "-m", "0755", artifact, "#{bin_prefix}/bin/"], env: env)
             end
+          when "crystal-build"
+            run_cmd(["crystal", "build"] + step.configure_flags, env: env)
+            bin_prefix = destdir ? "#{destdir}#{install_prefix}" : install_prefix
+            run_cmd(["install", "-d", "#{bin_prefix}/bin"], env: env)
+            Dir.glob("bin/*").each do |artifact|
+              run_cmd(["install", "-m", "0755", artifact, "#{bin_prefix}/bin/"], env: env)
+            end
           when "crystal-compiler"
+            FileUtils.rm_rf(".build") if Dir.exists?(".build")
             run_cmd(["make", "-j#{cpus}", "crystal"], env: env)
             install_env = destdir ? env.merge({"DESTDIR" => destdir}) : env
             run_cmd(["make", "install", "PREFIX=#{install_prefix}"], env: install_env)
@@ -109,7 +198,7 @@ module Bootstrap
               run_cmd(["make", "-j#{cpus}"], env: env)
               run_make_install(destdir, env)
             elsif File.exists?("CMakeLists.txt")
-              FileUtils.rm_rf("build") if Dir.exists?("build")
+              FileUtils.rm_rf("build") if clean_build_dirs && Dir.exists?("build")
               run_cmd(["cmake", "-S", ".", "-B", "build", "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + step.configure_flags, env: env)
               run_cmd(["cmake", "--build", "build", "-j#{cpus}"], env: env)
               install_env = destdir ? env.merge({"DESTDIR" => destdir}) : env
@@ -187,6 +276,17 @@ module Bootstrap
         Log.debug { "Completed #{argv.first} with exit #{status.exit_code}" }
       end
 
+      private def detect_clang_target_triple(clang_path : String, env : Hash(String, String)) : String
+        output = IO::Memory.new
+        status = Process.run(clang_path, ["-dumpmachine"], env: env, output: output, error: STDERR)
+        unless status.success?
+          raise CommandFailedError.new([clang_path, "-dumpmachine"], status.exit_code, "Failed to detect target triple via #{clang_path} -dumpmachine")
+        end
+        triple = output.to_s.strip
+        raise "Empty target triple from #{clang_path} -dumpmachine" if triple.empty?
+        triple
+      end
+
       # Runs `make install`, optionally staging through `DESTDIR`.
       private def run_make_install(destdir : String?, env : Hash(String, String))
         if destdir
@@ -209,6 +309,9 @@ module Bootstrap
     # By default only the first phase is executed; pass `phase: "all"` or a
     # specific phase name to override.
     #
+    # Use `allow_outside_rootfs` to replay rootfs phases without the marker
+    # present (for example, when staging into a destdir from outside a chroot).
+    #
     # When running inside the sysroot (default plan path), the runner uses the
     # state bookmark at `/var/lib/sysroot-build-state.json` to skip previously
     # completed steps and to persist progress for fast, iterative retries.
@@ -221,7 +324,8 @@ module Bootstrap
                       report_dir : String? = DEFAULT_REPORT_DIR,
                       dry_run : Bool = false,
                       state_path : String? = nil,
-                      resume : Bool = true)
+                      resume : Bool = true,
+                      allow_outside_rootfs : Bool = false)
       raise "Missing build plan #{path}" unless File.exists?(path)
       Log.info { "Loading build plan from #{path}" }
       plan = BuildPlanReader.load(path)
@@ -244,7 +348,8 @@ module Bootstrap
         dry_run: dry_run,
         state: state,
         state_path: effective_state_path,
-        resume: resume)
+        resume: resume,
+        allow_outside_rootfs: allow_outside_rootfs)
     end
 
     # Execute an in-memory plan without requiring it to be read from disk.
@@ -258,7 +363,8 @@ module Bootstrap
                       dry_run : Bool = false,
                       state : SysrootBuildState? = nil,
                       state_path : String? = nil,
-                      resume : Bool = true)
+                      resume : Bool = true,
+                      allow_outside_rootfs : Bool = false)
       phases = selected_phases(plan, phase)
       phases = filter_phases_by_packages(phases, packages) if packages
       phases = filter_phases_by_state(phases, state) if resume && state
@@ -267,7 +373,7 @@ module Bootstrap
         return
       end
       phases.each do |phase_plan|
-        run_phase(phase_plan, runner, report_dir: report_dir, state: state, state_path: state_path, resume: resume)
+        run_phase(phase_plan, runner, report_dir: report_dir, state: state, state_path: state_path, resume: resume, allow_outside_rootfs: allow_outside_rootfs)
       end
     end
 
@@ -277,8 +383,9 @@ module Bootstrap
                        report_dir : String? = DEFAULT_REPORT_DIR,
                        state : SysrootBuildState? = nil,
                        state_path : String? = nil,
-                       resume : Bool = true)
-      if phase.environment.starts_with?("rootfs-") && !File.exists?(ROOTFS_MARKER_PATH)
+                       resume : Bool = true,
+                       allow_outside_rootfs : Bool = false)
+      if !allow_outside_rootfs && phase.environment.starts_with?("rootfs-") && !File.exists?(ROOTFS_MARKER_PATH)
         raise "Refusing to run #{phase.name} (env=#{phase.environment}) outside the produced rootfs (missing #{ROOTFS_MARKER_PATH})"
       end
       Log.info { "Executing phase #{phase.name} (env=#{phase.environment}, workspace=#{phase.workspace})" }
@@ -305,7 +412,11 @@ module Bootstrap
         end
         Log.info { "Building #{step.name} in #{step.workdir}" }
         begin
-          runner.run(phase, step)
+          effective_runner = runner
+          if resume && state && retrying_step?(phase.name, step.name, state)
+            effective_runner = SystemRunner.new(clean_build_dirs: false)
+          end
+          effective_runner.run(phase, step)
           if state
             state.mark_success(phase.name, step.name)
             state.save(state_path.not_nil!) if state_path
@@ -320,6 +431,12 @@ module Bootstrap
         end
       end
       Log.info { "All build steps completed" }
+    end
+
+    private def self.retrying_step?(phase_name : String, step_name : String, state : SysrootBuildState) : Bool
+      failure = state.progress.last_failure
+      return false unless failure
+      failure.phase == phase_name && failure.step == step_name
     end
 
     private def self.filter_phases_by_state(phases : Array(BuildPhase), state : SysrootBuildState) : Array(BuildPhase)
@@ -437,6 +554,8 @@ module Bootstrap
         argv = ex.argv
         exit_code = ex.exit_code
       end
+      effective_env = phase.env.dup
+      step.env.each { |key, value| effective_env[key] = value }
 
       report = {
         "format_version" => 1,
@@ -456,6 +575,7 @@ module Bootstrap
           "install_prefix"  => step.install_prefix,
           "destdir"         => step.destdir,
           "env"             => step.env,
+          "effective_env"   => effective_env,
           "configure_flags" => step.configure_flags,
           "patches"         => step.patches,
         },

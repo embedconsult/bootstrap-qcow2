@@ -21,6 +21,8 @@ module Bootstrap
       "sysroot-namespace-check" => ->(args : Array(String)) { run_sysroot_namespace_check(args) },
       "sysroot-runner"          => ->(args : Array(String)) { run_sysroot_runner(args) },
       "sysroot-plan-write"      => ->(args : Array(String)) { run_sysroot_plan_write(args) },
+      "sysroot-tarball"         => ->(args : Array(String)) { run_sysroot_tarball(args) },
+      "sysroot-status"          => ->(args : Array(String)) { run_sysroot_status(args) },
       "codex-namespace"         => ->(args : Array(String)) { run_codex_namespace(args) },
       "github-pr-feedback"      => ->(args : Array(String)) { run_github_pr_feedback(args) },
       "github-pr-comment"       => ->(args : Array(String)) { run_github_pr_comment(args) },
@@ -49,6 +51,8 @@ module Bootstrap
       puts "  sysroot-namespace-check Check host namespace prerequisites"
       puts "  sysroot-runner          Replay build plan inside the sysroot"
       puts "  sysroot-plan-write      Write a fresh build plan JSON"
+      puts "  sysroot-tarball         Emit a prefix-free rootfs tarball"
+      puts "  sysroot-status          Print current sysroot build phase"
       puts "  codex-namespace         Run Codex inside a namespaced rootfs"
       puts "  github-pr-feedback      Fetch PR feedback as JSON"
       puts "  github-pr-comment       Post a PR conversation comment"
@@ -62,8 +66,10 @@ module Bootstrap
       rootfs = "data/sysroot/rootfs"
       extra_binds = [] of Tuple(Path, Path)
       command = [] of String
+      enter_workspace_rootfs = false
       parser, remaining, help = CLI.parse(args, "Usage: bq2 sysroot-namespace [options] [-- command...]") do |p|
         p.on("--rootfs=PATH", "Path to the sysroot rootfs (default: #{rootfs})") { |val| rootfs = val }
+        p.on("--workspace-rootfs", "Enter the generated rootfs at <rootfs>/workspace/rootfs (output of rootfs-from-sysroot)") { enter_workspace_rootfs = true }
         p.on("--bind=SRC:DST", "Bind-mount SRC into DST inside the rootfs (repeatable; DST is inside rootfs)") do |val|
           parts = val.split(":", 2)
           raise "Expected --bind=SRC:DST" unless parts.size == 2
@@ -75,6 +81,9 @@ module Bootstrap
       return CLI.print_help(parser) if help
 
       command = remaining.empty? ? ["/bin/sh"] : remaining
+      if enter_workspace_rootfs
+        rootfs = (Path[rootfs].expand / "workspace" / "rootfs").to_s
+      end
       Log.debug { "Entering namespace with rootfs=#{rootfs} command=#{command.join(" ")}" }
 
       SysrootNamespace.enter_rootfs(rootfs, extra_binds: extra_binds)
@@ -95,12 +104,63 @@ module Bootstrap
       Path[cleaned]
     end
 
+    private def self.run_sysroot_status(args : Array(String)) : Int32
+      workspace = "data/sysroot"
+      rootfs : String? = nil
+      state_path : String? = nil
+
+      parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-status [options]") do |p|
+        p.on("-w DIR", "--workspace=DIR", "Sysroot workspace directory (default: #{workspace})") { |val| workspace = val }
+        p.on("--rootfs=PATH", "Prepared rootfs directory (default: <workspace>/rootfs)") { |val| rootfs = val }
+        p.on("--state=PATH", "Explicit sysroot build state JSON path") { |val| state_path = val }
+      end
+      return CLI.print_help(parser) if help
+
+      rootfs_dir = rootfs
+      rootfs_dir ||= File.join(workspace, "rootfs")
+      resolved_state_path = state_path
+      resolved_state_path ||= File.join(rootfs_dir, "var/lib/sysroot-build-state.json")
+      resolved_state_path = resolved_state_path.not_nil!
+      unless File.exists?(resolved_state_path)
+        resolved_state_path = SysrootBuildState::DEFAULT_PATH if File.exists?(SysrootBuildState::DEFAULT_PATH)
+      end
+      raise "Missing sysroot build state at #{resolved_state_path}" unless File.exists?(resolved_state_path)
+
+      state = SysrootBuildState.load(resolved_state_path)
+      puts(state.progress.current_phase || "(none)")
+
+      plan_path = File.join(rootfs_dir, "var/lib/sysroot-build-plan.json")
+      plan_path = state.plan_path unless File.exists?(plan_path)
+      if File.exists?(plan_path)
+        plan = BuildPlan.from_json(File.read(plan_path))
+        next_phase = plan.phases.find do |phase|
+          phase.steps.any? { |step| !state.completed?(phase.name, step.name) }
+        end
+        if next_phase
+          next_step = next_phase.steps.find { |step| !state.completed?(next_phase.name, step.name) }
+          puts("next_phase=#{next_phase.name}")
+          puts("next_step=#{next_step.not_nil!.name}") if next_step
+        else
+          puts("next_phase=(none)")
+        end
+      end
+
+      if (success = state.progress.last_success)
+        puts("last_success=#{success.phase}/#{success.step}")
+      end
+      if (failure = state.progress.last_failure)
+        puts("last_failure=#{failure.phase}/#{failure.step}")
+      end
+      0
+    end
+
     private def self.run_sysroot_builder(args : Array(String)) : Int32
       output = Path["sysroot.tar.gz"]
       workspace = Path["data/sysroot"]
       architecture = SysrootBuilder::DEFAULT_ARCH
       branch = SysrootBuilder::DEFAULT_BRANCH
       base_version = SysrootBuilder::DEFAULT_BASE_VERSION
+      base_rootfs_path : Path? = nil
       include_sources = true
       use_system_tar_for_sources = false
       use_system_tar_for_rootfs = false
@@ -110,6 +170,13 @@ module Bootstrap
       owner_gid = nil
       write_tarball = true
       reuse_rootfs = false
+      codex_bin : Path? = nil
+      codex_url : URI? = nil
+      codex_sha256 : String? = nil
+      codex_target = Bootstrap::SysrootBuilder::DEFAULT_CODEX_TARGET
+      install_codex = false
+      refresh_plan = false
+      restage_sources = false
 
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-builder [options]") do |p|
         p.on("-o OUTPUT", "--output=OUTPUT", "Target sysroot tarball (default: #{output})") { |val| output = Path[val] }
@@ -117,6 +184,7 @@ module Bootstrap
         p.on("-a ARCH", "--arch=ARCH", "Target architecture (default: #{architecture})") { |val| architecture = val }
         p.on("-b BRANCH", "--branch=BRANCH", "Source branch/release tag (default: #{branch})") { |val| branch = val }
         p.on("-v VERSION", "--base-version=VERSION", "Base rootfs version/tag (default: #{base_version})") { |val| base_version = val }
+        p.on("--base-rootfs PATH", "Use a local rootfs tarball instead of downloading the Alpine minirootfs") { |val| base_rootfs_path = Path[val].expand }
         p.on("--skip-sources", "Skip staging source archives into the rootfs") { include_sources = false }
         p.on("--system-tar-sources", "Use system tar to extract all staged source archives") { use_system_tar_for_sources = true }
         p.on("--system-tar-rootfs", "Use system tar to extract the base rootfs") { use_system_tar_for_rootfs = true }
@@ -133,10 +201,34 @@ module Bootstrap
           preserve_ownership_for_rootfs = true
           owner_gid = val.to_i
         end
+        p.on("--codex", "Install the host codex binary into the rootfs (default target: #{codex_target})") do
+          install_codex = true
+        end
+        p.on("--codex-bin PATH", "Copy a host Codex binary into the rootfs workspace (default target: #{codex_target})") do |val|
+          codex_bin = Path[val].expand
+        end
+        p.on("--codex-url URL", "Download Codex using the sysroot builder fetcher") do |val|
+          codex_url = URI.parse(val)
+        end
+        p.on("--codex-sha256 SHA256", "Expected SHA256 for --codex-url") { |val| codex_sha256 = val }
+        p.on("--codex-target PATH", "Target path for --codex-bin/--codex-url inside the rootfs (default: #{codex_target})") do |val|
+          codex_target = Path[val]
+        end
         p.on("--no-tarball", "Prepare the chroot tree without writing a tarball") { write_tarball = false }
         p.on("--reuse-rootfs", "Reuse an existing prepared rootfs when present") { reuse_rootfs = true }
+        p.on("--refresh-plan", "Rewrite the build plan inside an existing rootfs (requires --reuse-rootfs)") { refresh_plan = true }
+        p.on("--restage-sources", "Extract missing sources into an existing rootfs /workspace (requires --reuse-rootfs)") { restage_sources = true }
       end
       return CLI.print_help(parser) if help
+
+      if install_codex && codex_bin.nil? && codex_url.nil?
+        if found = Process.find_executable("codex")
+          codex_bin = Path[found]
+        else
+          STDERR.puts "codex not found on PATH; pass --codex-bin or --codex-url instead"
+          return 1
+        end
+      end
 
       Log.info { "Sysroot builder log level=#{Log.for("").level} (env-configured)" }
       builder = SysrootBuilder.new(
@@ -144,17 +236,31 @@ module Bootstrap
         architecture: architecture,
         branch: branch,
         base_version: base_version,
+        base_rootfs_path: base_rootfs_path,
         use_system_tar_for_sources: use_system_tar_for_sources,
         use_system_tar_for_rootfs: use_system_tar_for_rootfs,
         preserve_ownership_for_sources: preserve_ownership_for_sources,
         preserve_ownership_for_rootfs: preserve_ownership_for_rootfs,
         owner_uid: owner_uid,
-        owner_gid: owner_gid
+        owner_gid: owner_gid,
+        codex_bin: codex_bin,
+        codex_url: codex_url,
+        codex_sha256: codex_sha256,
+        codex_target: codex_target
       )
 
       if reuse_rootfs && builder.rootfs_ready?
         puts "Reusing existing rootfs at #{builder.rootfs_dir}"
         puts "Build plan found at #{builder.plan_path} (iteration state is maintained by sysroot-runner)"
+        if include_sources && restage_sources
+          builder.stage_sources(skip_existing: true)
+          puts "Staged missing sources into #{builder.rootfs_dir}/workspace"
+        end
+        builder.stage_codex_binary if codex_bin || codex_url
+        if refresh_plan
+          builder.write_plan
+          puts "Refreshed build plan at #{builder.plan_path}"
+        end
         if write_tarball
           builder.write_chroot_tarball(output)
           puts "Generated sysroot tarball at #{output}"
@@ -230,6 +336,7 @@ module Bootstrap
       state_path : String? = nil
       dry_run = false
       resume = true
+      allow_outside_rootfs = false
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-runner [options]") do |p|
         p.on("--plan PATH", "Read the build plan from PATH (default: #{SysrootRunner::DEFAULT_PLAN_PATH})") { |path| plan_path = path }
         p.on("--phase NAME", "Select build phase to run (default: first phase; use 'all' for every phase)") { |name| phase = name }
@@ -246,6 +353,7 @@ module Bootstrap
         p.on("--no-report", "Disable failure report writing") { report_dir = nil }
         p.on("--state-path PATH", "Write runner state/bookmarks to PATH (default: #{SysrootRunner::DEFAULT_STATE_PATH} when using the default plan path)") { |path| state_path = path }
         p.on("--no-resume", "Disable resume/state tracking (useful when the default state path is not writable)") { resume = false }
+        p.on("--allow-outside-rootfs", "Allow running rootfs-* phases outside the produced rootfs (requires destdir overrides)") { allow_outside_rootfs = true }
         p.on("--dry-run", "List selected phases/steps and exit") { dry_run = true }
       end
       return CLI.print_help(parser) if help
@@ -260,6 +368,7 @@ module Bootstrap
         dry_run: dry_run,
         state_path: state_path,
         resume: resume,
+        allow_outside_rootfs: allow_outside_rootfs,
       )
       0
     end
@@ -295,16 +404,66 @@ module Bootstrap
       0
     end
 
+    # Run the finalize-rootfs phase to emit a prefix-free rootfs tarball.
+    private def self.run_sysroot_tarball(args : Array(String)) : Int32
+      plan_path = SysrootRunner::DEFAULT_PLAN_PATH
+      overrides_path : String? = nil
+      use_default_overrides = true
+      report_dir : String? = SysrootRunner::DEFAULT_REPORT_DIR
+      state_path : String? = nil
+      resume = true
+      allow_outside_rootfs = false
+      parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-tarball [options]") do |p|
+        p.on("--plan PATH", "Read the build plan from PATH (default: #{SysrootRunner::DEFAULT_PLAN_PATH})") { |path| plan_path = path }
+        p.on("--overrides PATH", "Apply runtime overrides JSON (default: #{SysrootRunner::DEFAULT_OVERRIDES_PATH} when using the default plan path)") do |path|
+          overrides_path = path
+          use_default_overrides = false
+        end
+        p.on("--no-overrides", "Disable runtime overrides") do
+          overrides_path = nil
+          use_default_overrides = false
+        end
+        p.on("--report-dir PATH", "Write failure reports to PATH (default: #{SysrootRunner::DEFAULT_REPORT_DIR})") { |path| report_dir = path }
+        p.on("--no-report", "Disable failure report writing") { report_dir = nil }
+        p.on("--state-path PATH", "Write runner state/bookmarks to PATH (default: #{SysrootRunner::DEFAULT_STATE_PATH} when using the default plan path)") { |path| state_path = path }
+        p.on("--no-resume", "Disable resume/state tracking (useful when the default state path is not writable)") { resume = false }
+        p.on("--allow-outside-rootfs", "Allow running rootfs-* phases outside the produced rootfs (requires destdir overrides)") { allow_outside_rootfs = true }
+      end
+      return CLI.print_help(parser) if help
+
+      SysrootRunner.run_plan(
+        plan_path,
+        phase: "finalize-rootfs",
+        overrides_path: overrides_path,
+        use_default_overrides: use_default_overrides,
+        report_dir: report_dir,
+        state_path: state_path,
+        resume: resume,
+        allow_outside_rootfs: allow_outside_rootfs,
+      )
+      0
+    end
+
     private def self.run_codex_namespace(args : Array(String)) : Int32
+      args = apply_codex_download_default(args)
       rootfs = Path["data/sysroot/rootfs"]
       alpine_setup = false
       add_dirs = Bootstrap::CodexNamespace::DEFAULT_CODEX_ADD_DIRS.dup
+      codex_url : URI? = nil
+      codex_sha256 : String? = nil
+      codex_target = Bootstrap::CodexNamespace::DEFAULT_CODEX_TARGET
+      default_codex_url = Bootstrap::CodexNamespace.default_codex_url?.try(&.to_s) || "unknown"
 
       parser, remaining, help = CLI.parse(args, "Usage: bq2 codex-namespace [options]") do |p|
         p.on("-C DIR", "Rootfs directory for the command (default: #{rootfs})") { |dir| rootfs = Path[dir].expand }
         p.on("--alpine", "Assume rootfs is Alpine and install runtime deps for Codex (node/npm/crystal)") { alpine_setup = true }
         p.on("--no-default-add-dirs", "Do not pass the default Codex sandbox writable dirs (/var,/opt,/workspace)") { add_dirs.clear }
         p.on("--add-dir PATH", "Add an extra writable dir for the Codex sandbox (repeatable)") { |dir| add_dirs << dir }
+        p.on("--codex-download URL", "Download Codex into the rootfs before running it (default: #{default_codex_url})") do |val|
+          codex_url = URI.parse(val)
+        end
+        p.on("--codex-sha256 SHA256", "Expected SHA256 for --codex-download") { |val| codex_sha256 = val }
+        p.on("--codex-target PATH", "Target path for --codex-download inside the rootfs (default: #{codex_target})") { |val| codex_target = Path[val] }
       end
       return CLI.print_help(parser) if help
 
@@ -314,11 +473,46 @@ module Bootstrap
         return 1
       end
 
-      status = CodexNamespace.run(rootfs: rootfs, alpine_setup: alpine_setup, add_dirs: add_dirs)
+      status = CodexNamespace.run(
+        rootfs: rootfs,
+        alpine_setup: alpine_setup,
+        add_dirs: add_dirs,
+        codex_url: codex_url,
+        codex_sha256: codex_sha256,
+        codex_target: codex_target
+      )
       status.exit_code
     rescue ex : SysrootNamespace::NamespaceError
       STDERR.puts "Namespace setup failed: #{ex.message}"
       1
+    rescue ex
+      STDERR.puts ex.message
+      1
+    end
+
+    private def self.apply_codex_download_default(args : Array(String)) : Array(String)
+      return args if args.empty?
+      expanded = [] of String
+      idx = 0
+      while idx < args.size
+        arg = args[idx]
+        if arg == "--codex-download"
+          next_arg = args[idx + 1]?
+          if next_arg.nil? || next_arg.starts_with?("-")
+            url = Bootstrap::CodexNamespace.default_codex_url?
+            raise "No default Codex URL for this architecture; pass --codex-download URL instead." unless url
+            expanded << "--codex-download=#{url}"
+          else
+            expanded << arg
+            expanded << next_arg
+            idx += 1
+          end
+        else
+          expanded << arg
+        end
+        idx += 1
+      end
+      expanded
     end
 
     private def self.run_github_pr_feedback(args : Array(String)) : Int32
@@ -369,6 +563,7 @@ private def self.run_install(_args : Array(String)) : Int32
     sysroot-namespace-check
     sysroot-runner
     sysroot-plan-write
+    sysroot-status
     codex-namespace
     github-pr-feedback
     github-pr-comment

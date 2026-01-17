@@ -31,6 +31,41 @@ class StubBuilder < Bootstrap::SysrootBuilder
   end
 end
 
+def write_tar_header(io : IO, name : String, size : Int64, typeflag : Char, mode : Int32)
+  header = Bytes.new(512, 0)
+  write_tar_string(header, 0, 100, name)
+  write_tar_octal(header, 100, 8, mode)
+  write_tar_octal(header, 108, 8, 0)
+  write_tar_octal(header, 116, 8, 0)
+  write_tar_octal(header, 124, 12, size)
+  write_tar_octal(header, 136, 12, Time.utc.to_unix)
+  8.times { |idx| header[148 + idx] = 0x20_u8 }
+  header[156] = typeflag.ord.to_u8
+  write_tar_string(header, 257, 6, "ustar")
+  write_tar_string(header, 263, 2, "00")
+  checksum = header.sum { |byte| byte.to_i64 }
+  write_tar_octal(header, 148, 8, checksum)
+  io.write(header)
+end
+
+def write_tar_string(buffer : Bytes, offset : Int32, length : Int32, value : String)
+  bytes = value.to_slice
+  limit = Math.min(bytes.size, length)
+  limit.times { |idx| buffer[offset + idx] = bytes[idx] }
+end
+
+def write_tar_octal(buffer : Bytes, offset : Int32, length : Int32, value : Int64)
+  string = value.to_s(8).rjust(length - 1, '0')
+  write_tar_string(buffer, offset, length - 1, string)
+  buffer[offset + length - 1] = 0
+end
+
+def pad_tar(io : IO, size : Int64)
+  remainder = size % 512
+  return if remainder == 0
+  io.write(Bytes.new(512 - remainder, 0))
+end
+
 def socket_blocked_reason
   server = TCPServer.new("127.0.0.1", 0)
   server.close
@@ -91,12 +126,13 @@ describe Bootstrap::SysrootBuilder do
   it "lists default packages" do
     names = Bootstrap::SysrootBuilder.new.packages.map(&.name)
     names.should contain("musl")
+    names.should contain("shards")
     names.should contain("llvm-project")
   end
 
   it "lists build phase names" do
     phases = Bootstrap::SysrootBuilder.new.phase_specs.map(&.name)
-    phases.should eq ["sysroot-from-alpine", "crystal-from-sysroot", "rootfs-from-sysroot", "system-from-sysroot", "tools-from-system", "crystal-from-system"]
+    phases.should eq ["sysroot-from-alpine", "crystal-from-sysroot", "rootfs-from-sysroot", "system-from-sysroot", "tools-from-system", "crystal-from-system", "finalize-rootfs"]
   end
 
   it "computes hashes" do
@@ -165,20 +201,30 @@ describe Bootstrap::SysrootBuilder do
       pkg = Bootstrap::SysrootBuilder::PackageSpec.new("pkg", "1.0", URI.parse("https://example.com/pkg-1.0.tar.gz"), configure_flags: ["--foo"])
       musl = Bootstrap::SysrootBuilder::PackageSpec.new("musl", "1.0", URI.parse("https://example.com/musl-1.0.tar.gz"))
       busybox = Bootstrap::SysrootBuilder::PackageSpec.new("busybox", "1.0", URI.parse("https://example.com/busybox-1.0.tar.gz"), strategy: "busybox")
+      linux_headers = Bootstrap::SysrootBuilder::PackageSpec.new(
+        "linux-headers",
+        "1.0",
+        URI.parse("https://example.com/linux-1.0.tar.gz"),
+        strategy: "linux-headers",
+        phases: ["rootfs-from-sysroot"],
+      )
       builder = StubBuilder.new(dir)
-      builder.override_packages = [pkg, musl, busybox]
+      builder.override_packages = [pkg, musl, busybox, linux_headers]
       plan = builder.build_plan
-      plan.phases.map(&.name).should eq ["sysroot-from-alpine", "rootfs-from-sysroot"]
+      plan.phases.map(&.name).should eq ["sysroot-from-alpine", "rootfs-from-sysroot", "finalize-rootfs"]
       sysroot_phase = plan.phases.first
       sysroot_phase.install_prefix.should eq "/opt/sysroot"
       sysroot_phase.destdir.should be_nil
       sysroot_phase.steps.size.should eq 3
       sysroot_phase.steps.find(&.name.==("pkg")).not_nil!.configure_flags.should eq ["--foo"]
 
-      rootfs_phase = plan.phases.last
+      rootfs_phase = plan.phases.find(&.name.==("rootfs-from-sysroot")).not_nil!
       rootfs_phase.install_prefix.should eq "/usr"
       rootfs_phase.destdir.should eq "/workspace/rootfs"
-      rootfs_phase.steps.map(&.name).should eq ["musl", "busybox", "musl-ld-path", "rootfs-marker", "sysroot"]
+      rootfs_phase.steps.map(&.name).should eq ["musl", "busybox", "linux-headers", "musl-ld-path", "os-release", "profile", "rootfs-marker", "sysroot"]
+
+      finalize_phase = plan.phases.find(&.name.==("finalize-rootfs")).not_nil!
+      finalize_phase.steps.map(&.name).should eq ["strip-sysroot", "rootfs-tarball"]
     end
   end
 
@@ -188,11 +234,18 @@ describe Bootstrap::SysrootBuilder do
       builder.override_packages = [
         Bootstrap::SysrootBuilder::PackageSpec.new("musl", "1.0", URI.parse("https://example.com/musl.tar.gz")),
         Bootstrap::SysrootBuilder::PackageSpec.new("busybox", "1.0", URI.parse("https://example.com/busybox.tar.gz"), strategy: "busybox"),
+        Bootstrap::SysrootBuilder::PackageSpec.new(
+          "linux-headers",
+          "1.0",
+          URI.parse("https://example.com/linux.tar.gz"),
+          strategy: "linux-headers",
+          phases: ["rootfs-from-sysroot"],
+        ),
       ]
       plan_path = builder.write_plan
       File.exists?(plan_path).should be_true
       plan = Bootstrap::BuildPlan.from_json(File.read(plan_path))
-      plan.phases.map(&.name).should eq ["sysroot-from-alpine", "rootfs-from-sysroot"]
+      plan.phases.map(&.name).should eq ["sysroot-from-alpine", "rootfs-from-sysroot", "finalize-rootfs"]
     end
   end
 
@@ -223,6 +276,44 @@ describe Bootstrap::SysrootBuilder do
       rootfs = builder.prepare_rootfs
       File.exists?(rootfs / "workspace").should be_true
       File.exists?(rootfs / "workspace/bootstrap-qcow2/src/main.cr").should be_true
+    end
+  end
+
+  it "prepares rootfs from a base rootfs tarball path" do
+    with_tempdir do |dir|
+      tar_dir = dir / "tarroot"
+      FileUtils.mkdir_p(tar_dir)
+      File.write(tar_dir / "etc.txt", "config")
+      tarball = dir / "miniroot.tar"
+      Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
+
+      builder = StubBuilder.new(dir, base_rootfs_path: tarball)
+      builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
+      builder.skip_stage_sources = true
+      rootfs = builder.prepare_rootfs(include_sources: false)
+      File.exists?(rootfs / "etc.txt").should be_true
+    end
+  end
+
+  it "replaces directories with files when tar entries conflict" do
+    with_tempdir do |dir|
+      tarball = dir / "conflict.tar"
+      File.open(tarball, "w") do |io|
+        write_tar_header(io, "foo/", 0_i64, '5', 0o755)
+        content = "replacement"
+        write_tar_header(io, "foo", content.bytesize.to_i64, '0', 0o644)
+        io.write(content.to_slice)
+        pad_tar(io, content.bytesize.to_i64)
+        io.write(Bytes.new(1024, 0))
+      end
+
+      builder = StubBuilder.new(dir, base_rootfs_path: tarball)
+      builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
+      builder.skip_stage_sources = true
+      rootfs = builder.prepare_rootfs(include_sources: false)
+
+      File.file?(rootfs / "foo").should be_true
+      File.exists?(rootfs / "foo" / "bar.txt").should be_false
     end
   end
 
@@ -263,6 +354,32 @@ describe Bootstrap::SysrootBuilder do
       builder.prepare_rootfs(include_sources: true)
       builder.stage_sources_calls.should eq 1
       Dir.children(builder.rootfs_dir / "workspace").should_not be_empty
+    end
+  end
+
+  if reason = SOCKET_BLOCKED_REASON
+    pending "stages a Codex binary from a URL (#{reason})" do
+    end
+  else
+    it "stages a Codex binary from a URL" do
+      with_tempdir do |dir|
+        tar_dir = dir / "tarroot"
+        FileUtils.mkdir_p(tar_dir)
+        File.write(tar_dir / "etc.txt", "config")
+        tarball = dir / "miniroot.tar"
+        Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
+
+        with_http_server("codex") do |url|
+          sha = Digest::SHA256.hexdigest("codex")
+          builder = StubBuilder.new(dir, codex_url: URI.parse(url), codex_sha256: sha)
+          builder.fake_tarball = tarball
+          rootfs = builder.prepare_rootfs(include_sources: false)
+
+          staged = rootfs / "usr/bin/codex"
+          File.exists?(staged).should be_true
+          File.read(staged).should eq "codex"
+        end
+      end
     end
   end
 
