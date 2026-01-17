@@ -75,10 +75,11 @@ module Bootstrap
         codex_args << dir
       end
 
+      codex_executable = resolve_executable("codex", exec_path)
       command = if bookmark = CodexSessionBookmark.read(work_dir)
-                  ["codex"] + codex_args + ["resume", bookmark]
+                  [codex_executable] + codex_args + ["resume", bookmark]
                 else
-                  ["codex"] + codex_args
+                  [codex_executable] + codex_args
                 end
       status = Process.run(command.first, command[1..], env: env, clear_env: true, input: STDIN, output: STDOUT, error: STDERR)
       if latest = CodexSessionBookmark.latest_from(work_dir / ".codex")
@@ -95,6 +96,18 @@ module Bootstrap
       url = DEFAULT_CODEX_URL
       return nil unless url
       URI.parse(url)
+    end
+
+    # Resolve the provided executable name using a PATH-like string.
+    # Returns the original name when no matching executable is found.
+    private def self.resolve_executable(command : String, exec_path : String) : String
+      return command if command.includes?('/')
+      exec_path.split(':').each do |entry|
+        next if entry.empty?
+        candidate = (Path[entry].expand / command)
+        return candidate.to_s if File::Info.executable?(candidate)
+      end
+      command
     end
 
     # Download the Codex binary into the rootfs when requested.
