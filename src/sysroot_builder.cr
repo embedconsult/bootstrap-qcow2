@@ -8,7 +8,6 @@ require "log"
 require "path"
 require "uri"
 require "./build_plan"
-require "./alpine_setup"
 
 module Bootstrap
   # SysrootBuilder prepares a chroot-able environment that can rebuild
@@ -39,6 +38,7 @@ module Bootstrap
     DEFAULT_MUSL          = "1.2.5"
     DEFAULT_CMAKE         = "3.29.6"
     DEFAULT_SHARDS        = "0.18.0"
+    DEFAULT_NAMESERVER    = "8.8.8.8"
     DEFAULT_M4            = "1.4.19"
     DEFAULT_GNU_MAKE      = "4.4.1"
     DEFAULT_ZLIB          = "1.3.1"
@@ -860,7 +860,7 @@ module Bootstrap
     end
 
     private def rootfs_resolv_conf_content : String
-      "nameserver #{AlpineSetup::DEFAULT_NAMESERVER}\n"
+      "nameserver #{DEFAULT_NAMESERVER}\n"
     end
 
     private def rootfs_hosts_content : String
