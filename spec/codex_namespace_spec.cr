@@ -359,12 +359,17 @@ describe Bootstrap::CodexNamespace do
             work_dir = temp_root / "workdir"
             exec_path = (temp_root / "bin").to_s + ":/usr/bin:/bin"
             target = rootfs / "usr/bin/codex"
-            Compress::Gzip::Writer.open(target.to_s) { |gz| gz << "codex-binary" }
+            payload = Bytes[0x7f, 'E'.ord, 'L'.ord, 'F'.ord, 0x00, 0x00, 0x00, 0x00]
+            Compress::Gzip::Writer.open(target.to_s) { |gz| gz.write(payload) }
             File.chmod(target, 0o755)
             url = URI.parse("file://" + codex_path.to_s)
             status = Bootstrap::CodexNamespace.run(rootfs: rootfs, alpine_setup: false, exec_path: exec_path, work_dir: work_dir, codex_url: url)
             exit status.exit_code unless status.success?
-            exit 1 unless File.read(target) == "codex-binary"
+            File.open(target) do |file|
+              header = Bytes.new(4)
+              exit 1 unless file.read(header) == 4
+              exit 1 unless header[0] == 0x7f && header[1] == 'E'.ord && header[2] == 'L'.ord && header[3] == 'F'.ord
+            end
           end
         CR
       ],

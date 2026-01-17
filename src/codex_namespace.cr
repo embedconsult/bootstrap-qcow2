@@ -101,17 +101,26 @@ module Bootstrap
     private def self.stage_codex_binary(rootfs : Path, codex_url : URI?, codex_sha256 : String?, codex_target : Path) : Nil
       return unless codex_url
       target = rootfs / normalize_rootfs_target(codex_target)
-      if File.exists?(target)
-        if gzip_file?(target)
-          gunzip_if_needed(target)
-          File.chmod(target, 0o755)
-          return if File::Info.executable?(target)
-        else
-          return if File::Info.executable?(target)
-        end
-      end
       download : Path? = nil
       extract_dir : Path? = nil
+      if File.exists?(target)
+        gunzip_if_needed(target) if gzip_file?(target)
+        if tar_file?(target)
+          extract_dir = Path["#{target}.extract"]
+          FileUtils.rm_r(extract_dir) if Dir.exists?(extract_dir)
+          FileUtils.mkdir_p(extract_dir)
+          extract_tarball(target, extract_dir, gzip: false)
+          codex_binary = find_codex_binary(extract_dir)
+          raise "Codex binary not found in #{target}" unless codex_binary
+          FileUtils.cp(codex_binary, target)
+          FileUtils.rm_r(extract_dir) if Dir.exists?(extract_dir)
+          File.chmod(target, 0o755)
+          return if elf_binary?(target)
+        elsif elf_binary?(target)
+          File.chmod(target, 0o755)
+          return
+        end
+      end
       FileUtils.mkdir_p(target.parent)
       source = if codex_url.scheme == "file"
                  path = Path[codex_url.path]
@@ -130,7 +139,7 @@ module Bootstrap
         extract_dir = Path["#{target}.extract"]
         FileUtils.rm_r(extract_dir) if Dir.exists?(extract_dir)
         FileUtils.mkdir_p(extract_dir)
-        extract_tarball(source, extract_dir, gzip_tarball?(source, codex_url))
+        extract_tarball(source, extract_dir, gzip: gzip_tarball?(source, codex_url))
         codex_binary = find_codex_binary(extract_dir)
         raise "Codex binary not found in #{source}" unless codex_binary
         FileUtils.cp(codex_binary, target)
@@ -195,6 +204,16 @@ module Bootstrap
         magic = Bytes.new(4)
         return false unless file.read(magic) == 4
         magic[0] == 0x7f && magic[1] == 'E'.ord && magic[2] == 'L'.ord && magic[3] == 'F'.ord
+      end
+    rescue
+      false
+    end
+
+    private def self.tar_file?(path : Path) : Bool
+      File.open(path) do |file|
+        header = Bytes.new(512)
+        return false unless file.read(header) == 512
+        header[257] == 'u'.ord && header[258] == 's'.ord && header[259] == 't'.ord && header[260] == 'a'.ord && header[261] == 'r'.ord
       end
     rescue
       false
