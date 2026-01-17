@@ -38,6 +38,7 @@ module Bootstrap
     DEFAULT_MUSL          = "1.2.5"
     DEFAULT_CMAKE         = "3.29.6"
     DEFAULT_SHARDS        = "0.18.0"
+    DEFAULT_NAMESERVER    = "8.8.8.8"
     DEFAULT_M4            = "1.4.19"
     DEFAULT_GNU_MAKE      = "4.4.1"
     DEFAULT_ZLIB          = "1.3.1"
@@ -639,6 +640,8 @@ module Bootstrap
       rootfs_env = rootfs_phase_env(sysroot_prefix)
       os_release_content = rootfs_os_release_content
       profile_content = rootfs_profile_content
+      resolv_conf_content = rootfs_resolv_conf_content
+      hosts_content = rootfs_hosts_content
       musl_arch = case @architecture
                   when "aarch64", "arm64"
                     "aarch64"
@@ -716,36 +719,23 @@ module Bootstrap
               },
             ),
             BuildStep.new(
-              name: "os-release",
-              strategy: "write-file",
+              name: "prepare-rootfs",
+              strategy: "prepare-rootfs",
               workdir: "/",
               configure_flags: [] of String,
               patches: [] of String,
-              install_prefix: "/etc/os-release",
+              install_prefix: "/",
               env: {
-                "CONTENT" => os_release_content,
-              },
-            ),
-            BuildStep.new(
-              name: "profile",
-              strategy: "write-file",
-              workdir: "/",
-              configure_flags: [] of String,
-              patches: [] of String,
-              install_prefix: "/etc/profile",
-              env: {
-                "CONTENT" => profile_content,
-              },
-            ),
-            BuildStep.new(
-              name: "rootfs-marker",
-              strategy: "write-file",
-              workdir: "/",
-              configure_flags: [] of String,
-              patches: [] of String,
-              install_prefix: "/.bq2-rootfs",
-              env: {
-                "CONTENT" => "bq2-rootfs\n",
+                "FILE_0_PATH"    => "/etc/os-release",
+                "FILE_0_CONTENT" => os_release_content,
+                "FILE_1_PATH"    => "/etc/profile",
+                "FILE_1_CONTENT" => profile_content,
+                "FILE_2_PATH"    => "/etc/resolv.conf",
+                "FILE_2_CONTENT" => resolv_conf_content,
+                "FILE_3_PATH"    => "/etc/hosts",
+                "FILE_3_CONTENT" => hosts_content,
+                "FILE_4_PATH"    => "/.bq2-rootfs",
+                "FILE_4_CONTENT" => "bq2-rootfs\n",
               },
             ),
             BuildStep.new(
@@ -865,6 +855,18 @@ module Bootstrap
         "export STRIP=llvm-strip",
         "export CRYSTAL_PATH=\"/usr/share/crystal/src\"",
         "export BQ2_ROOTFS=1",
+      ]
+      lines.join("\n") + "\n"
+    end
+
+    private def rootfs_resolv_conf_content : String
+      "nameserver #{DEFAULT_NAMESERVER}\n"
+    end
+
+    private def rootfs_hosts_content : String
+      lines = [
+        "127.0.0.1 localhost",
+        "::1 localhost",
       ]
       lines.join("\n") + "\n"
     end
