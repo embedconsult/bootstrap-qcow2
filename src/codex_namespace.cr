@@ -118,6 +118,7 @@ module Bootstrap
             return if elf_binary?(target)
           end
         elsif elf_binary?(target)
+          ensure_runtime_libraries(rootfs, target)
           File.chmod(target, 0o755)
           return
         end
@@ -153,6 +154,7 @@ module Bootstrap
         end
       end
       gunzip_if_needed(target)
+      ensure_runtime_libraries(rootfs, target) if elf_binary?(target)
       File.chmod(target, 0o755)
     ensure
       File.delete?(download) if download
@@ -203,6 +205,90 @@ module Bootstrap
         pick.find { |path| gzip_file?(path) } ||
         pick.find { |path| File::Info.executable?(path) } ||
         (matches.size == 1 ? matches.first? : pick.first?)
+    end
+
+    private def self.ensure_runtime_libraries(rootfs : Path, binary : Path) : Nil
+      return unless elf_binary?(binary)
+      return if File.size(binary) < 1024 * 1024
+      readelf = Process.find_executable("readelf")
+      raise "readelf not found; install binutils to stage Codex runtime libraries" unless readelf
+
+      if interpreter = elf_interpreter(binary, readelf)
+        install_host_path(rootfs, Path[interpreter])
+      end
+
+      elf_needed(binary, readelf).each do |lib_name|
+        next if lib_name.empty?
+        host_path = find_host_library(lib_name)
+        raise "Missing runtime library #{lib_name} for #{binary}" unless host_path
+        install_host_path(rootfs, host_path)
+      end
+    end
+
+    private def self.elf_interpreter(binary : Path, readelf : String) : String?
+      output = readelf_output(readelf, ["-l"], binary)
+      output.each_line do |line|
+        next unless line.includes?("Requesting program interpreter:")
+        start = line.index(":")
+        next unless start
+        value = line[start + 1..].strip
+        if open = value.index('[')
+          close = value.index(']', open)
+          return value[open + 1, close - open - 1] if close
+        end
+      end
+      nil
+    end
+
+    private def self.elf_needed(binary : Path, readelf : String) : Array(String)
+      libs = [] of String
+      output = readelf_output(readelf, ["-d"], binary)
+      output.each_line do |line|
+        next unless line.includes?("NEEDED")
+        if open = line.index('[')
+          close = line.index(']', open)
+          libs << line[open + 1, close - open - 1] if close
+        end
+      end
+      libs.uniq
+    end
+
+    private def self.readelf_output(readelf : String, args : Array(String), binary : Path) : String
+      io = IO::Memory.new
+      status = Process.run(readelf, args + [binary.to_s], output: io, error: io)
+      raise "readelf failed for #{binary}: #{io.to_s}" unless status.success?
+      io.to_s
+    end
+
+    private def self.install_host_path(rootfs : Path, host_path : Path) : Nil
+      raise "Runtime file not found on host: #{host_path}" unless File.exists?(host_path)
+      target = rootfs / normalize_rootfs_target(host_path)
+      return if File.exists?(target)
+      FileUtils.mkdir_p(target.parent)
+      FileUtils.cp(host_path, target)
+    end
+
+    private def self.find_host_library(name : String) : Path?
+      search_dirs = [
+        "/lib",
+        "/lib64",
+        "/usr/lib",
+        "/usr/lib64",
+        "/lib/aarch64-linux-gnu",
+        "/usr/lib/aarch64-linux-gnu",
+        "/lib/arm64-linux-gnu",
+        "/usr/lib/arm64-linux-gnu",
+      ]
+      search_dirs.each do |dir|
+        path = Path[dir] / name
+        return path if File.exists?(path)
+      end
+      search_dirs.each do |dir|
+        Dir.glob(File.join(dir, "**", name)) do |entry|
+          return Path[entry] if File.exists?(entry)
+        end
+      end
+      nil
     end
 
     private def self.elf_binary?(path : Path) : Bool
