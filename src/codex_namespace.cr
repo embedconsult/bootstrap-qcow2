@@ -1,4 +1,5 @@
 require "digest/sha256"
+require "compress/gzip"
 require "file_utils"
 require "http/client"
 require "uri"
@@ -133,6 +134,7 @@ module Bootstrap
           download = nil
         end
       end
+      gunzip_if_needed(target)
       File.chmod(target, 0o755)
     ensure
       File.delete?(download) if download
@@ -167,12 +169,15 @@ module Bootstrap
 
     private def self.find_codex_binary(root : Path) : Path?
       matches = [] of Path
-      Dir.glob((root / "**" / "codex").to_s) do |entry|
-        path = Path[entry]
-        next unless File.file?(path)
-        matches << path
+      ["codex", "codex.gz"].each do |name|
+        Dir.glob((root / "**" / name).to_s) do |entry|
+          path = Path[entry]
+          next unless File.file?(path)
+          matches << path
+        end
       end
       matches.find { |path| elf_binary?(path) } ||
+        matches.find { |path| gzip_file?(path) } ||
         matches.find { |path| File::Info.executable?(path) } ||
         matches.first?
     end
@@ -185,6 +190,31 @@ module Bootstrap
       end
     rescue
       false
+    end
+
+    private def self.gzip_file?(path : Path) : Bool
+      File.open(path) do |file|
+        magic = Bytes.new(2)
+        return false unless file.read(magic) == 2
+        magic[0] == 0x1f && magic[1] == 0x8b
+      end
+    rescue
+      false
+    end
+
+    private def self.gunzip_if_needed(path : Path) : Nil
+      return unless gzip_file?(path)
+      tmp = Path["#{path}.gunzip"]
+      File.open(path) do |input|
+        Compress::Gzip::Reader.open(input) do |gz|
+          File.open(tmp, "w") do |output|
+            IO.copy(gz, output)
+          end
+        end
+      end
+      FileUtils.mv(tmp, path)
+    ensure
+      File.delete?(tmp) if tmp
     end
 
     private def self.normalize_rootfs_target(path : Path) : Path
