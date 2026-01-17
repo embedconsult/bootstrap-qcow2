@@ -111,11 +111,12 @@ module Bootstrap
           FileUtils.mkdir_p(extract_dir)
           extract_tarball(target, extract_dir, gzip: false)
           codex_binary = find_codex_binary(extract_dir)
-          raise "Codex binary not found in #{target}" unless codex_binary
-          FileUtils.cp(codex_binary, target)
-          FileUtils.rm_r(extract_dir) if Dir.exists?(extract_dir)
-          File.chmod(target, 0o755)
-          return if elf_binary?(target)
+          if codex_binary
+            FileUtils.cp(codex_binary, target)
+            FileUtils.rm_r(extract_dir) if Dir.exists?(extract_dir)
+            File.chmod(target, 0o755)
+            return if elf_binary?(target)
+          end
         elsif elf_binary?(target)
           File.chmod(target, 0o755)
           return
@@ -160,14 +161,14 @@ module Bootstrap
 
     private def self.tarball?(path : Path) : Bool
       name = path.to_s
-      name.ends_with?(".tar.gz") || name.ends_with?(".tgz")
+      name.ends_with?(".tar.gz") || name.ends_with?(".tgz") || name.ends_with?(".tar")
     end
 
     private def self.tarball?(path : Path, uri : URI) : Bool
       return true if tarball?(path)
       uri_path = uri.path
       return false unless uri_path
-      uri_path.ends_with?(".tar.gz") || uri_path.ends_with?(".tgz")
+      uri_path.ends_with?(".tar.gz") || uri_path.ends_with?(".tgz") || uri_path.ends_with?(".tar")
     end
 
     private def self.extract_tarball(archive : Path, destination : Path, gzip : Bool) : Nil
@@ -186,17 +187,22 @@ module Bootstrap
 
     private def self.find_codex_binary(root : Path) : Path?
       matches = [] of Path
-      ["codex", "codex.gz"].each do |name|
-        Dir.glob((root / "**" / name).to_s) do |entry|
-          path = Path[entry]
-          next unless File.file?(path)
-          matches << path
-        end
+      Dir.glob((root / "**" / "*").to_s) do |entry|
+        path = Path[entry]
+        next unless File.file?(path)
+        matches << path
       end
-      matches.find { |path| elf_binary?(path) } ||
-        matches.find { |path| gzip_file?(path) } ||
-        matches.find { |path| File::Info.executable?(path) } ||
-        matches.first?
+
+      preferred = matches.select do |path|
+        basename = path.basename
+        basename == "codex" || basename == "codex.gz" || basename.starts_with?("codex-")
+      end
+
+      pick = preferred.empty? ? matches : preferred
+      pick.find { |path| elf_binary?(path) } ||
+        pick.find { |path| gzip_file?(path) } ||
+        pick.find { |path| File::Info.executable?(path) } ||
+        (matches.size == 1 ? matches.first? : pick.first?)
     end
 
     private def self.elf_binary?(path : Path) : Bool
