@@ -54,8 +54,7 @@ module Bootstrap
     DEFAULT_FOSSIL        = "2.25"
     DEFAULT_GIT           = "2.45.2"
     DEFAULT_CRYSTAL       = "1.18.2"
-    DEFAULT_BQ2_BRANCH    = "codex-development"
-    DEFAULT_CODEX_TARGET  = Path["/usr/bin/codex"]
+    DEFAULT_BQ2_BRANCH    = "master"
 
     record PackageSpec,
       name : String,
@@ -112,11 +111,7 @@ module Bootstrap
                    @preserve_ownership_for_sources : Bool = false,
                    @preserve_ownership_for_rootfs : Bool = false,
                    @owner_uid : Int32? = nil,
-                   @owner_gid : Int32? = nil,
-                   @codex_bin : Path? = nil,
-                   @codex_url : URI? = nil,
-                   @codex_sha256 : String? = nil,
-                   @codex_target : Path = DEFAULT_CODEX_TARGET)
+                   @owner_gid : Int32? = nil)
       FileUtils.mkdir_p(@workspace)
       FileUtils.mkdir_p(cache_dir)
       FileUtils.mkdir_p(checksum_dir)
@@ -528,7 +523,6 @@ module Bootstrap
       FileUtils.mkdir_p(rootfs_dir / "workspace")
       FileUtils.mkdir_p(rootfs_dir / "var/lib")
       stage_sources if include_sources
-      stage_codex_binary
       rootfs_dir
     end
 
@@ -563,22 +557,6 @@ module Bootstrap
       end
     end
 
-    # Copy a host Codex binary into the rootfs workspace when configured.
-    def stage_codex_binary : Nil
-      return unless @codex_bin || @codex_url
-      source =
-        if @codex_bin
-          @codex_bin.not_nil!
-        else
-          download_and_verify(codex_package)
-        end
-      raise "Codex binary not found at #{source}" unless File.exists?(source)
-      target = rootfs_dir / normalize_rootfs_target(@codex_target)
-      FileUtils.mkdir_p(target.parent)
-      FileUtils.cp(source, target)
-      File.chmod(target, 0o755)
-    end
-
     private def bootstrap_source_branch : String
       ENV["BQ2_SOURCE_BRANCH"]? || DEFAULT_BQ2_BRANCH
     end
@@ -608,13 +586,6 @@ module Bootstrap
       value = path.to_s
       value = value[1..] if value.starts_with?("/")
       Path[value]
-    end
-
-    # Build a package spec for downloading the Codex binary.
-    private def codex_package : PackageSpec
-      url = @codex_url
-      raise "Codex URL is missing" unless url
-      PackageSpec.new("codex", "binary", url, sha256: @codex_sha256)
     end
 
     private def kernel_headers_arch : String
