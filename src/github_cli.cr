@@ -127,7 +127,7 @@ module Bootstrap
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 github-pr-create [options]") do |p|
         p.on("--repo REPO", "GitHub repo (owner/name). Defaults from repo/env when possible") { |val| repo = val }
         p.on("--title TITLE", "PR title") { |val| title = val }
-        p.on("--head BRANCH", "Head branch (e.g. codex/my-branch)") { |val| head = val }
+        p.on("--head BRANCH", "Head branch (e.g. feature/my-branch)") { |val| head = val }
         p.on("--base BRANCH", "Base branch (default: #{base})") { |val| base = val }
         p.on("--body TEXT", "PR body") { |val| body = val }
         p.on("--body-file PATH", "Read PR body from PATH") { |val| body_file = val }

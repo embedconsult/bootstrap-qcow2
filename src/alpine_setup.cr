@@ -37,16 +37,6 @@ module Bootstrap
       shards
     ]
 
-    # Extra packages needed to run Codex via `npx codex` inside Alpine.
-    CODEX_PACKAGES = %w[
-      nodejs-lts
-      npm
-    ]
-
-    CODEX_NPM_PACKAGES = %w[
-      @openai/codex
-    ]
-
     def self.write_resolv_conf(rootfs : Path, nameserver : String = DEFAULT_NAMESERVER) : Nil
       target = rootfs / "etc/resolv.conf"
       FileUtils.mkdir_p(target.parent)
@@ -57,26 +47,12 @@ module Bootstrap
       apk_add(SYSROOT_RUNNER_PACKAGES)
     end
 
-    def self.install_codex_packages(install_npm_global : Bool = true) : Nil
-      apk_add(CODEX_PACKAGES)
-      return unless install_npm_global
-      npm_install_global(CODEX_NPM_PACKAGES)
-    end
-
     def self.apk_add(packages : Array(String)) : Nil
       return if packages.empty?
       argv = ["add", "--no-cache"] + packages
       Log.info { "apk #{argv.join(" ")}" }
       status = Process.run("apk", argv, output: STDOUT, error: STDERR)
       raise "apk add failed (#{status.exit_code})" unless status.success?
-    end
-
-    def self.npm_install_global(packages : Array(String)) : Nil
-      return if packages.empty?
-      argv = ["i", "-g"] + packages
-      Log.info { "npm #{argv.join(" ")}" }
-      status = Process.run("npm", argv, output: STDOUT, error: STDERR)
-      raise "npm install failed (#{status.exit_code})" unless status.success?
     end
   end
 end
