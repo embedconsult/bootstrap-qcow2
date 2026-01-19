@@ -252,6 +252,8 @@ module Bootstrap
         first = read_pkt_line(io)
         if first
           clean = first.rstrip("\n")
+          clean = clean.split('\0', 2)[0] if clean.includes?('\0')
+          debug_log("receive-pack line=#{clean.inspect}")
           raise "git-receive-pack error: #{clean}" if clean.starts_with?("ERR ")
           if clean.starts_with?("unpack ") && clean != "unpack ok"
             raise "git-receive-pack failed: #{clean}"
@@ -259,13 +261,15 @@ module Bootstrap
         end
         while (line = read_pkt_line(io))
           clean = line.rstrip("\n")
+          clean = clean.split('\0', 2)[0] if clean.includes?('\0')
+          debug_log("receive-pack line=#{clean.inspect}")
           break if clean.empty?
           if clean.starts_with?("ok ")
             ref = clean[3..].strip
             statuses[ref] = nil
           elsif clean.starts_with?("ng ")
             parts = clean.split(" ", 3)
-            ref = parts[1]? || line
+            ref = parts[1]? || clean
             msg = parts[2]? || "push rejected"
             statuses[ref] = msg
           elsif clean.starts_with?("ERR ")
