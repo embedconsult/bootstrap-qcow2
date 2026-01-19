@@ -55,9 +55,13 @@ module Bootstrap
       Dir.cd(work_dir)
 
       env = {
-        "HOME"       => work_dir.to_s,
-        "CODEX_HOME" => (work_dir / ".codex").to_s,
-        "PATH"       => exec_path,
+        "HOME"               => work_dir.to_s,
+        "CODEX_HOME"         => (work_dir / ".codex").to_s,
+        "PATH"               => toolchain_path(exec_path),
+        "CRYSTAL_CACHE_DIR"  => "/tmp/crystal_cache",
+        "CC"                 => "clang -fuse-ld=lld",
+        "CXX"                => "clang++ -fuse-ld=lld",
+        "LD"                 => "ld.lld",
       }
       if api_key = ENV["OPENAI_API_KEY"]?
         env["OPENAI_API_KEY"] = api_key
@@ -95,6 +99,15 @@ module Bootstrap
       url = DEFAULT_CODEX_URL
       return nil unless url
       URI.parse(url)
+    end
+
+    # Prepend sysroot toolchain paths to an existing PATH string.
+    private def self.toolchain_path(path : String) : String
+      entries = path.split(":")
+      ["/opt/sysroot/bin", "/opt/sysroot/sbin"].reverse_each do |entry|
+        entries.unshift(entry) unless entries.includes?(entry)
+      end
+      entries.join(":")
     end
 
     # Download the Codex binary into the rootfs when requested.

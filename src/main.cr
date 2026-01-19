@@ -95,6 +95,7 @@ module Bootstrap
       Log.debug { "Entering namespace with rootfs=#{rootfs} command=#{command.join(" ")}" }
 
       SysrootNamespace.enter_rootfs(rootfs, extra_binds: extra_binds)
+      apply_toolchain_env_defaults
       Process.exec(command.first, command[1..])
     rescue ex : File::Error
       cmd = command || [] of String
@@ -110,6 +111,26 @@ module Bootstrap
     private def self.normalize_bind_target(value : String) : Path
       cleaned = value.starts_with?("/") ? value[1..] : value
       Path[cleaned]
+    end
+
+    # Ensure the sysroot toolchain defaults are available inside the namespace.
+    private def self.apply_toolchain_env_defaults : Nil
+      ENV["CRYSTAL_CACHE_DIR"] ||= "/tmp/crystal_cache"
+      ENV["CC"] ||= "clang -fuse-ld=lld"
+      ENV["CXX"] ||= "clang++ -fuse-ld=lld"
+      ENV["LD"] ||= "ld.lld"
+      ENV["PATH"] = prepend_path_entries(ENV["PATH"]?, ["/opt/sysroot/bin", "/opt/sysroot/sbin"])
+    end
+
+    # Prepend *entries* to *path* when missing.
+    private def self.prepend_path_entries(path : String?, entries : Array(String)) : String
+      effective = path || "/usr/bin:/bin"
+      segments = effective.split(":")
+      entries.reverse_each do |entry|
+        next if segments.includes?(entry)
+        segments.unshift(entry)
+      end
+      segments.join(":")
     end
 
     private def self.run_sysroot_status(args : Array(String)) : Int32
@@ -684,10 +705,18 @@ private def self.run_install(_args : Array(String)) : Int32
     github-pr-comment
     github-pr-create
   ]
+  deprecated = %w[
+    bq2-curl
+  ]
 
   FileUtils.mkdir_p(bin_dir)
   unless File.exists?(target)
     STDERR.puts "warning: #{target} is missing; run `shards build` first"
+  end
+
+  deprecated.each do |name|
+    link_path = bin_dir / name
+    File.delete(link_path) if File.symlink?(link_path) || File.exists?(link_path)
   end
 
   links.each do |name|
