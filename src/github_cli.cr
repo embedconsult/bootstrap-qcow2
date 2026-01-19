@@ -2,10 +2,10 @@ require "json"
 require "option_parser"
 require "path"
 require "./cli"
-require "./codex_utils"
+require "./github_utils"
 
 module Bootstrap
-  # GitHub-oriented CLI helpers built on `Bootstrap::CodexUtils`.
+  # GitHub-oriented CLI helpers built on `Bootstrap::GitHubUtils`.
   module GitHubCLI
     DEFAULT_BASE = "master"
 
@@ -57,7 +57,7 @@ module Bootstrap
       raise "--repo is required (could not infer it)" unless repo
       repo_name = repo.not_nil!
 
-      feedback = CodexUtils.fetch_pull_request_feedback(
+      feedback = GitHubUtils.fetch_pull_request_feedback(
         repo_name,
         pr_number.not_nil!,
         credentials_path: credentials_path,
@@ -101,7 +101,7 @@ module Bootstrap
       end
       raise "Missing comment body (use --body or --body-file)" unless body
 
-      url = CodexUtils.create_issue_comment(
+      url = GitHubUtils.create_issue_comment(
         repo_name,
         pr_number.not_nil!,
         body.not_nil!,
@@ -127,7 +127,7 @@ module Bootstrap
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 github-pr-create [options]") do |p|
         p.on("--repo REPO", "GitHub repo (owner/name). Defaults from repo/env when possible") { |val| repo = val }
         p.on("--title TITLE", "PR title") { |val| title = val }
-        p.on("--head BRANCH", "Head branch (e.g. codex/my-branch)") { |val| head = val }
+        p.on("--head BRANCH", "Head branch (e.g. feature/my-branch)") { |val| head = val }
         p.on("--base BRANCH", "Base branch (default: #{base})") { |val| base = val }
         p.on("--body TEXT", "PR body") { |val| body = val }
         p.on("--body-file PATH", "Read PR body from PATH") { |val| body_file = val }
@@ -145,7 +145,7 @@ module Bootstrap
       end
       body ||= ""
 
-      url = CodexUtils.create_pull_request(
+      url = GitHubUtils.create_pull_request(
         repo_name,
         title.not_nil!,
         head.not_nil!,

@@ -357,32 +357,6 @@ describe Bootstrap::SysrootBuilder do
     end
   end
 
-  if reason = SOCKET_BLOCKED_REASON
-    pending "stages a Codex binary from a URL (#{reason})" do
-    end
-  else
-    it "stages a Codex binary from a URL" do
-      with_tempdir do |dir|
-        tar_dir = dir / "tarroot"
-        FileUtils.mkdir_p(tar_dir)
-        File.write(tar_dir / "etc.txt", "config")
-        tarball = dir / "miniroot.tar"
-        Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
-
-        with_http_server("codex") do |url|
-          sha = Digest::SHA256.hexdigest("codex")
-          builder = StubBuilder.new(dir, codex_url: URI.parse(url), codex_sha256: sha)
-          builder.fake_tarball = tarball
-          rootfs = builder.prepare_rootfs(include_sources: false)
-
-          staged = rootfs / "usr/bin/codex"
-          File.exists?(staged).should be_true
-          File.read(staged).should eq "codex"
-        end
-      end
-    end
-  end
-
   it "generates a chroot tarball" do
     with_tempdir do |dir|
       tar_dir = dir / "tarroot"

@@ -1,6 +1,6 @@
 ---
 name: bootstrap-qcow2-check-pr-feedback
-description: Fetch and summarize GitHub PR feedback for bootstrap-qcow2 (issue comments, review comments, and reviews) using Bootstrap::CodexUtils, to manually check for new review notes after someone completes a PR review.
+description: Fetch and summarize GitHub PR feedback for bootstrap-qcow2 (issue comments, review comments, and reviews) using Bootstrap::GitHubUtils, to manually check for new review notes after someone completes a PR review.
 ---
 
 # Check PR feedback (manual trigger)

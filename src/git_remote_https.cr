@@ -1,5 +1,6 @@
 require "base64"
 require "http/client"
+require "path"
 require "uri"
 
 module Bootstrap
@@ -9,10 +10,16 @@ module Bootstrap
     MAX_REDIRECTS = 10
     # Git smart HTTP service name for fetch operations.
     SERVICE_NAME = "git-upload-pack"
+    # Git smart HTTP service name for push operations.
+    RECEIVE_SERVICE_NAME = "git-receive-pack"
     # Capabilities requested during upload-pack negotiation.
     REQUEST_CAPABILITIES = "thin-pack ofs-delta agent=bq2-git-remote-https"
+    # Capabilities requested during receive-pack negotiation.
+    PUSH_CAPABILITIES = "report-status agent=bq2-git-remote-https"
     # User-Agent string for outbound HTTP requests.
     USER_AGENT = "bq2-git-remote-https"
+    # 40-char zero object id used for ref creation/deletion.
+    ZERO_OID = "0" * 40
 
     # Run the git-remote-https helper with *args* and return a shell-style exit code.
     def self.run(args : Array(String)) : Int32
@@ -29,10 +36,13 @@ module Bootstrap
 
     # Streaming protocol session for a single remote.
     class Session
+      @credentials : Array(URI)
+
       def initialize(@remote_name : String, url : String)
         @base_url = url
         @refs = {} of String => String
         @refs_loaded = false
+        @credentials = read_credentials
       end
 
       # Main command loop for the remote-helper protocol.
@@ -49,6 +59,9 @@ module Bootstrap
           when line.starts_with?("fetch ")
             wants = read_fetch_requests(line)
             fetch_pack(wants)
+          when line.starts_with?("push ")
+            pushes = read_push_requests(line)
+            push_refs(pushes)
           when line == "quit"
             break
           else
@@ -62,6 +75,7 @@ module Bootstrap
       # Advertise supported helper capabilities.
       private def write_capabilities : Nil
         STDOUT.puts "fetch"
+        STDOUT.puts "push"
         STDOUT.puts "option"
         STDOUT.puts
       end
@@ -95,6 +109,48 @@ module Bootstrap
         wants
       end
 
+      private struct PushSpec
+        getter src : String?
+        getter dst : String
+        getter force : Bool
+
+        def initialize(@src : String?, @dst : String, @force : Bool)
+        end
+
+        def delete? : Bool
+          @src.nil? || @src.not_nil!.empty?
+        end
+      end
+
+      # Read push requests from stdin, starting with *first_line*.
+      private def read_push_requests(first_line : String) : Array(PushSpec)
+        requests = [] of PushSpec
+        line = first_line
+        loop do
+          break if line.empty?
+          parts = line.split(" ", 2)
+          raise "Invalid push request: #{line}" unless parts.size == 2
+          spec = parts[1]
+          force = false
+          if spec.starts_with?("+")
+            force = true
+            spec = spec[1..]
+          end
+          if spec.starts_with?(":")
+            dst = spec[1..]
+            requests << PushSpec.new(nil, dst, force)
+          else
+            src, dst = spec.split(":", 2)
+            dst = src if dst.nil?
+            requests << PushSpec.new(src, dst, force)
+          end
+          next_line = STDIN.gets
+          break unless next_line
+          line = next_line.rstrip("\n")
+        end
+        requests
+      end
+
       # Perform an upload-pack request for *wants* and stream the pack to stdout.
       private def fetch_pack(wants : Array(String)) : Nil
         raise "No fetch targets provided" if wants.empty?
@@ -104,6 +160,106 @@ module Bootstrap
         io = response.body_io
         discard_ack_packets(io)
         IO.copy(io, STDOUT)
+      end
+
+      private struct PushUpdate
+        getter old_oid : String
+        getter new_oid : String
+        getter refname : String
+
+        def initialize(@old_oid : String, @new_oid : String, @refname : String)
+        end
+      end
+
+      # Perform a receive-pack request for *requests* and emit helper status lines.
+      private def push_refs(requests : Array(PushSpec)) : Nil
+        raise "No push targets provided" if requests.empty?
+        load_refs unless @refs_loaded
+        updates = requests.map do |req|
+          old_oid = @refs[req.dst]? || ZERO_OID
+          new_oid = req.delete? ? ZERO_OID : resolve_local_oid(req.src.not_nil!)
+          PushUpdate.new(old_oid, new_oid, req.dst)
+        end
+        body = build_receive_pack_request(updates)
+        response = http_post_receive_pack(receive_pack_url, body)
+        raise "git-receive-pack failed with status #{response.status_code}" unless (200..299).includes?(response.status_code)
+        statuses = parse_receive_pack_status(response.body_io)
+        updates.each do |update|
+          if status = statuses[update.refname]?
+            if status
+              STDOUT.puts "error #{update.refname} #{status}"
+            else
+              STDOUT.puts "ok #{update.refname}"
+            end
+          else
+            STDOUT.puts "error #{update.refname} missing status"
+          end
+        end
+        STDOUT.puts
+      end
+
+      # Resolve a local ref name or object id to a 40-char SHA.
+      private def resolve_local_oid(ref : String) : String
+        output = IO::Memory.new
+        status = Process.run("git", ["rev-parse", "--verify", ref], output: output, error: STDERR)
+        raise "git rev-parse failed for #{ref}" unless status.success?
+        oid = output.to_s.strip
+        raise "Invalid oid for #{ref}: #{oid}" unless oid.size == 40
+        oid
+      end
+
+      # Build a stateless receive-pack request body for the ref updates.
+      private def build_receive_pack_request(updates : Array(PushUpdate)) : IO::Memory
+        body = IO::Memory.new
+        updates.each_with_index do |update, idx|
+          line = "#{update.old_oid} #{update.new_oid} #{update.refname}"
+          line += "\u0000#{PUSH_CAPABILITIES}" if idx == 0
+          line += "\n"
+          body << pkt_line(line)
+        end
+        body << "0000"
+        if updates.any? { |update| update.new_oid != ZERO_OID }
+          pack_io = build_pack_data
+          IO.copy(pack_io, body)
+        end
+        body.rewind
+        body
+      end
+
+      # Build a pack containing all local objects for transmission.
+      private def build_pack_data : IO::Memory
+        pack_io = IO::Memory.new
+        status = Process.run("git", ["pack-objects", "--stdout", "--all"], output: pack_io, error: STDERR)
+        raise "git pack-objects failed" unless status.success?
+        pack_io.rewind
+        pack_io
+      end
+
+      # Parse the receive-pack response into ref status results.
+      private def parse_receive_pack_status(io : IO) : Hash(String, String?)
+        statuses = {} of String => String?
+        first = read_pkt_line(io)
+        if first
+          raise "git-receive-pack error: #{first}" if first.starts_with?("ERR ")
+          if first.starts_with?("unpack ") && first != "unpack ok"
+            raise "git-receive-pack failed: #{first}"
+          end
+        end
+        while (line = read_pkt_line(io))
+          break if line.empty?
+          if line.starts_with?("ok ")
+            ref = line[3..].strip
+            statuses[ref] = nil
+          elsif line.starts_with?("ng ")
+            parts = line.split(" ", 3)
+            ref = parts[1]? || line
+            msg = parts[2]? || "push rejected"
+            statuses[ref] = msg
+          elsif line.starts_with?("ERR ")
+            raise "git-receive-pack error: #{line}"
+          end
+        end
+        statuses
       end
 
       # Build a stateless upload-pack request body for the requested object ids.
@@ -185,6 +341,12 @@ module Bootstrap
         "#{base}/#{SERVICE_NAME}"
       end
 
+      # Compose the receive-pack URL for the remote.
+      private def receive_pack_url : String
+        base = @base_url.chomp("/")
+        "#{base}/#{RECEIVE_SERVICE_NAME}"
+      end
+
       # Issue an HTTP GET with redirect support.
       private def http_get(url : String) : HTTP::Client::Response
         request_with_redirects("GET", url, nil)
@@ -198,10 +360,18 @@ module Bootstrap
         request_with_redirects("POST", url, body, headers: headers)
       end
 
+      # Issue an HTTP POST for receive-pack requests.
+      private def http_post_receive_pack(url : String, body : IO::Memory) : HTTP::Client::Response
+        headers = HTTP::Headers{
+          "Content-Type" => "application/x-git-receive-pack-request",
+        }
+        request_with_redirects("POST", url, body, headers: headers)
+      end
+
       # Execute a request with redirect handling.
       private def request_with_redirects(method : String,
                                          url : String,
-                                         body : String?,
+                                         body : String | IO | Nil,
                                          headers : HTTP::Headers? = nil) : HTTP::Client::Response
         redirects = 0
         current_url = url
@@ -213,6 +383,7 @@ module Bootstrap
           request_headers = current_headers || HTTP::Headers.new
           request_headers["User-Agent"] = USER_AGENT
           sanitized_url = apply_basic_auth(current_url, request_headers)
+          rewind_body(current_body)
           response = HTTP::Client.exec(current_method, sanitized_url, headers: request_headers, body: current_body)
           return response unless redirect?(response.status_code)
           raise "Redirect missing Location header" unless response.headers["Location"]?
@@ -221,6 +392,13 @@ module Bootstrap
           current_url = resolve_redirect(current_url, response.headers["Location"])
           current_method, current_body = redirect_method(current_method, current_body, response.status_code)
           redirects += 1
+        end
+      end
+
+      private def rewind_body(body : String | IO | Nil) : Nil
+        return unless body
+        if body.is_a?(IO)
+          body.rewind
         end
       end
 
@@ -238,7 +416,7 @@ module Bootstrap
       end
 
       # Normalize method/body changes for a redirect response.
-      private def redirect_method(method : String, body : String?, status : Int32) : {String, String?}
+      private def redirect_method(method : String, body : String | IO | Nil, status : Int32) : {String, String | IO | Nil}
         return {method, body} if status == 307 || status == 308
         return {"GET", nil} if status == 303 || method == "POST"
         {method, body}
@@ -249,6 +427,16 @@ module Bootstrap
         uri = URI.parse(url)
         user = uri.user
         pass = uri.password
+        if user && pass.nil?
+          if credential = credential_for(uri, user)
+            pass = credential.password
+          end
+        elsif user.nil?
+          if credential = credential_for(uri, nil)
+            user = credential.user
+            pass = credential.password
+          end
+        end
         if user
           token = "#{user}:#{pass || ""}"
           headers["Authorization"] = "Basic #{Base64.strict_encode(token)}"
@@ -256,6 +444,57 @@ module Bootstrap
           uri.password = nil
         end
         uri.to_s
+      end
+
+      # Read .git-credentials entries from known locations.
+      private def read_credentials : Array(URI)
+        credentials = [] of URI
+        credential_paths.each do |path|
+          next unless File.exists?(path)
+          File.read_lines(path).each do |line|
+            entry = line.strip
+            next if entry.empty? || entry.starts_with?("#")
+            begin
+              uri = URI.parse(entry)
+              next unless uri.user
+              credentials << uri
+            rescue
+              next
+            end
+          end
+        end
+        credentials
+      end
+
+      private def credential_paths : Array(Path)
+        paths = [] of Path
+        if home = ENV["HOME"]?
+          paths << (Path[home] / ".git-credentials")
+        end
+        work_creds = Path["/work/.git-credentials"]
+        paths << work_creds unless paths.includes?(work_creds)
+        paths
+      end
+
+      # Find the best matching credential entry for the target URI.
+      private def credential_for(target : URI, user : String?) : URI?
+        candidates = [] of URI
+        @credentials.each do |cred|
+          next unless cred.scheme == target.scheme
+          next unless cred.host == target.host
+          if cred.port && target.port && cred.port != target.port
+            next
+          end
+          if user && cred.user != user
+            next
+          end
+          if cred.path && !cred.path.empty?
+            target_path = target.path || ""
+            next unless target_path.starts_with?(cred.path)
+          end
+          candidates << cred
+        end
+        candidates.max_by { |cred| cred.path.try(&.size) || 0 }
       end
     end
   end
