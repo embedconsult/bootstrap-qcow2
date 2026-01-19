@@ -23,6 +23,16 @@ module Bootstrap
     ROOTFS_MARKER_PATH     = "/.bq2-rootfs"
     ROOTFS_ENV_FLAG        = "BQ2_ROOTFS"
 
+    # Returns true when a rootfs marker is present (env override or marker file).
+    def self.rootfs_marker_present? : Bool
+      if value = ENV[ROOTFS_ENV_FLAG]?
+        normalized = value.strip.downcase
+        return false if normalized.empty? || normalized == "0" || normalized == "false" || normalized == "no"
+        return true
+      end
+      File.exists?(ROOTFS_MARKER_PATH)
+    end
+
     # Raised when a command fails during a SystemRunner invocation.
     class CommandFailedError < Exception
       getter argv : Array(String)
@@ -424,7 +434,7 @@ module Bootstrap
                        state_path : String? = nil,
                        resume : Bool = true,
                        allow_outside_rootfs : Bool = false)
-      if !allow_outside_rootfs && phase.environment.starts_with?("rootfs-") && !File.exists?(ROOTFS_MARKER_PATH)
+      if !allow_outside_rootfs && phase.environment.starts_with?("rootfs-") && !rootfs_marker_present?
         raise "Refusing to run #{phase.name} (env=#{phase.environment}) outside the produced rootfs (missing #{ROOTFS_MARKER_PATH})"
       end
       Log.info { "Executing phase #{phase.name} (env=#{phase.environment}, workspace=#{phase.workspace})" }
@@ -513,11 +523,6 @@ module Bootstrap
         return rootfs_phase if rootfs_phase
       end
       plan.phases.first
-    end
-
-    private def self.rootfs_marker_present? : Bool
-      return true if ENV[ROOTFS_ENV_FLAG]?
-      File.exists?(ROOTFS_MARKER_PATH)
     end
 
     private def self.apply_rootfs_env_overrides(phases : Array(BuildPhase)) : Array(BuildPhase)

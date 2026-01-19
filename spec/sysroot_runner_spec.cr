@@ -142,10 +142,20 @@ describe Bootstrap::SysrootRunner do
       Bootstrap::BuildPhase.new(name: "two", description: "b", workspace: "/workspace", environment: "rootfs-system", install_prefix: "/usr", steps: steps),
     ])
 
-    runner = RecordingRunner.new
-    Bootstrap::SysrootRunner.run_plan(plan, runner)
-    runner.calls.size.should eq 1
-    runner.calls.first[:phase].should eq "one"
+    previous = ENV["BQ2_ROOTFS"]?
+    ENV["BQ2_ROOTFS"] = "0"
+    begin
+      runner = RecordingRunner.new
+      Bootstrap::SysrootRunner.run_plan(plan, runner)
+      runner.calls.size.should eq 1
+      runner.calls.first[:phase].should eq "one"
+    ensure
+      if previous
+        ENV["BQ2_ROOTFS"] = previous
+      else
+        ENV.delete("BQ2_ROOTFS")
+      end
+    end
   end
 
   it "defaults to the first rootfs phase when running inside the rootfs" do
