@@ -1,5 +1,6 @@
 require "base64"
 require "http/client"
+require "openssl/lib_ssl"
 require "path"
 require "uri"
 
@@ -20,6 +21,8 @@ module Bootstrap
     USER_AGENT = "bq2-git-remote-https"
     # 40-char zero object id used for ref creation/deletion.
     ZERO_OID = "0" * 40
+    # Enable debug logging when set to any non-empty value.
+    DEBUG_ENV = "BQ2_GIT_REMOTE_HTTPS_DEBUG"
 
     # Run the git-remote-https helper with *args* and return a shell-style exit code.
     def self.run(args : Array(String)) : Int32
@@ -37,12 +40,18 @@ module Bootstrap
     # Streaming protocol session for a single remote.
     class Session
       @credentials : Array(URI)
+      @debug : Bool
 
       def initialize(@remote_name : String, url : String)
         @base_url = url
         @refs = {} of String => String
         @refs_loaded = false
+        @debug = debug_enabled?
         @credentials = read_credentials
+        debug_log("remote=#{@remote_name} base_url=#{sanitize_url(@base_url)}")
+        debug_log("ssl libressl=#{LibSSL::LIBRESSL_VERSION} openssl=#{LibSSL::OPENSSL_VERSION}")
+        debug_log("ssl_cert_file=#{ENV["SSL_CERT_FILE"]?} ssl_cert_dir=#{ENV["SSL_CERT_DIR"]?}")
+        debug_log("credentials loaded=#{@credentials.size}")
       end
 
       # Main command loop for the remote-helper protocol.
@@ -384,12 +393,20 @@ module Bootstrap
           request_headers["User-Agent"] = USER_AGENT
           sanitized_url = apply_basic_auth(current_url, request_headers)
           rewind_body(current_body)
-          response = HTTP::Client.exec(current_method, sanitized_url, headers: request_headers, body: current_body)
+          debug_log("request #{current_method} #{sanitize_url(sanitized_url)} headers=#{debug_header_summary(request_headers)} body=#{debug_body_size(current_body)}")
+          response = begin
+            HTTP::Client.exec(current_method, sanitized_url, headers: request_headers, body: current_body)
+          rescue ex
+            debug_log("request failed: #{ex.class}: #{ex.message}")
+            raise ex
+          end
+          debug_log("response status=#{response.status_code}")
           return response unless redirect?(response.status_code)
           raise "Redirect missing Location header" unless response.headers["Location"]?
           raise "Too many redirects" if redirects >= MAX_REDIRECTS
 
           current_url = resolve_redirect(current_url, response.headers["Location"])
+          debug_log("redirect to #{sanitize_url(current_url)}")
           current_method, current_body = redirect_method(current_method, current_body, response.status_code)
           redirects += 1
         end
@@ -427,17 +444,21 @@ module Bootstrap
         uri = URI.parse(url)
         user = uri.user
         pass = uri.password
+        auth_source = "userinfo"
         if user && pass.nil?
           if credential = credential_for(uri, user)
             pass = credential.password
+            auth_source = "credentials"
           end
         elsif user.nil?
           if credential = credential_for(uri, nil)
             user = credential.user
             pass = credential.password
+            auth_source = "credentials"
           end
         end
         if user
+          debug_log("auth source=#{auth_source} user=#{user} host=#{uri.host}")
           token = "#{user}:#{pass || ""}"
           headers["Authorization"] = "Basic #{Base64.strict_encode(token)}"
           uri.user = nil
@@ -495,6 +516,52 @@ module Bootstrap
           candidates << cred
         end
         candidates.max_by { |cred| cred.path.try(&.size) || 0 }
+      end
+
+      private def debug_enabled? : Bool
+        value = ENV[DEBUG_ENV]?
+        !value.nil? && !value.empty?
+      end
+
+      private def debug_log(message : String) : Nil
+        return unless @debug
+        STDERR.puts "[git-remote-https] #{message}"
+      end
+
+      private def sanitize_url(url : String) : String
+        uri = URI.parse(url)
+        uri.user = nil
+        uri.password = nil
+        uri.to_s
+      rescue
+        url
+      end
+
+      private def debug_header_summary(headers : HTTP::Headers) : String
+        keys = [] of String
+        headers.each do |key, _value|
+          next if key.downcase == "authorization"
+          keys << key
+        end
+        keys.sort!
+        content_type = headers["Content-Type"]?
+        content_length = headers["Content-Length"]?
+        summary = "keys=#{keys.join(",")}"
+        summary += " content-type=#{content_type}" if content_type
+        summary += " content-length=#{content_length}" if content_length
+        summary
+      end
+
+      private def debug_body_size(body : String | IO | Nil) : String
+        return "none" unless body
+        case body
+        when String
+          body.bytesize.to_s
+        when IO::Memory
+          body.size.to_s
+        else
+          "stream"
+        end
       end
     end
   end

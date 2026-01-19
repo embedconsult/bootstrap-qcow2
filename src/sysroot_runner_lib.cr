@@ -21,6 +21,7 @@ module Bootstrap
     DEFAULT_REPORT_DIR     = "/var/lib/sysroot-build-reports"
     DEFAULT_STATE_PATH     = SysrootBuildState::DEFAULT_PATH
     ROOTFS_MARKER_PATH     = "/.bq2-rootfs"
+    ROOTFS_ENV_FLAG        = "BQ2_ROOTFS"
 
     # Raised when a command fails during a SystemRunner invocation.
     class CommandFailedError < Exception
@@ -403,6 +404,7 @@ module Bootstrap
                       resume : Bool = true,
                       allow_outside_rootfs : Bool = false)
       phases = selected_phases(plan, phase)
+      phases = apply_rootfs_env_overrides(phases) if rootfs_marker_present?
       phases = filter_phases_by_packages(phases, packages) if packages
       phases = filter_phases_by_state(phases, state) if resume && state
       if dry_run
@@ -496,11 +498,53 @@ module Bootstrap
     # Select phases for execution based on the optional phase selector.
     private def self.selected_phases(plan : BuildPlan, requested : String?) : Array(BuildPhase)
       raise "Build plan is empty" if plan.phases.empty?
-      return [plan.phases.first] unless requested
+      unless requested
+        return [default_phase(plan)]
+      end
       return plan.phases if requested == "all"
       matching = plan.phases.select { |phase| phase.name == requested }
       raise "Unknown build phase #{requested}" if matching.empty?
       matching
+    end
+
+    private def self.default_phase(plan : BuildPlan) : BuildPhase
+      if rootfs_marker_present?
+        rootfs_phase = plan.phases.find { |phase| phase.environment.starts_with?("rootfs-") }
+        return rootfs_phase if rootfs_phase
+      end
+      plan.phases.first
+    end
+
+    private def self.rootfs_marker_present? : Bool
+      return true if ENV[ROOTFS_ENV_FLAG]?
+      File.exists?(ROOTFS_MARKER_PATH)
+    end
+
+    private def self.apply_rootfs_env_overrides(phases : Array(BuildPhase)) : Array(BuildPhase)
+      overrides = native_rootfs_env
+      phases.map do |phase|
+        next phase unless phase.environment.starts_with?("rootfs-")
+        merged = phase.env.dup
+        overrides.each { |key, value| merged[key] = value }
+        BuildPhase.new(
+          name: phase.name,
+          description: phase.description,
+          workspace: phase.workspace,
+          environment: phase.environment,
+          install_prefix: phase.install_prefix,
+          destdir: phase.destdir,
+          env: merged,
+          steps: phase.steps,
+        )
+      end
+    end
+
+    private def self.native_rootfs_env : Hash(String, String)
+      {
+        "PATH" => "/usr/bin:/bin:/usr/sbin:/sbin",
+        "CC"   => "clang --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld",
+        "CXX"  => "clang++ --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -stdlib=libc++",
+      }
     end
 
     private def self.apply_overrides(plan : BuildPlan, path : String) : BuildPlan
