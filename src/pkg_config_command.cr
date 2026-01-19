@@ -27,7 +27,7 @@ module Bootstrap
       "libdir"     => "/usr/lib",
     }
 
-    private struct Options
+    private class Options
       property libs : Bool
       property cflags : Bool
       property exists : Bool
