@@ -4,11 +4,11 @@ require "uri"
 
 module Bootstrap
   # Minimal HTTP client with curl-like flags for internal tooling.
-  module Bq2Curl
+  module CurlCommand
     # Conservative default to avoid redirect loops; override with --max-redirects.
     DEFAULT_MAX_REDIRECTS = 10
 
-    # Run the bq2-curl command with *args* and return a shell-style exit code.
+    # Run the curl command with *args* and return a shell-style exit code.
     def self.run(args : Array(String)) : Int32
       output : Path? = nil
       method = "GET"
@@ -17,7 +17,7 @@ module Bootstrap
       headers = HTTP::Headers.new
       max_redirects = DEFAULT_MAX_REDIRECTS
 
-      parser, remaining, help = CLI.parse(args, "Usage: bq2-curl [options] URL") do |p|
+      parser, remaining, help = CLI.parse(args, "Usage: curl [options] URL") do |p|
         p.on("-o FILE", "--output=FILE", "Write response body to FILE") { |val| output = Path[val] }
         p.on("-I", "--head", "Issue a HEAD request and print response headers") { method = "HEAD" }
         p.on("-L", "--location", "Follow redirects") { follow_redirects = true }
@@ -43,9 +43,9 @@ module Bootstrap
         return 0
       end
 
-      if output
-        FileUtils.mkdir_p(output.parent) if output.parent
-        File.open(output, "w") { |io| IO.copy(response.body_io, io) }
+      if output_path = output
+        FileUtils.mkdir_p(output_path.parent)
+        File.open(output_path, "w") { |io| IO.copy(response.body_io, io) }
       else
         IO.copy(response.body_io, STDOUT)
       end

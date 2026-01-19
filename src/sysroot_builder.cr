@@ -770,6 +770,22 @@ module Bootstrap
               "-DOPENSSL_CRYPTO_LIBRARY=/usr/lib/libcrypto.so",
             ],
           },
+          extra_steps: [
+            BuildStep.new(
+              name: "bq2-symlinks",
+              strategy: "symlink",
+              workdir: "/",
+              configure_flags: [] of String,
+              patches: [] of String,
+              install_prefix: "/",
+              env: {
+                "LINK_0_SRC"  => "bq2",
+                "LINK_0_DEST" => "/usr/bin/curl",
+                "LINK_1_SRC"  => "bq2",
+                "LINK_1_DEST" => "/usr/bin/git-remote-https",
+              },
+            ),
+          ],
         ),
         PhaseSpec.new(
           name: "tools-from-system",

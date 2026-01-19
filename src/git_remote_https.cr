@@ -5,7 +5,7 @@ require "uri"
 module Bootstrap
   # Minimal Git remote helper for HTTPS fetch over the smart HTTP protocol.
   module GitRemoteHttps
-    # Limit redirects to avoid loops; matches bq2-curl defaults.
+    # Limit redirects to avoid loops; matches curl defaults.
     MAX_REDIRECTS = 10
     # Git smart HTTP service name for fetch operations.
     SERVICE_NAME = "git-upload-pack"
@@ -200,9 +200,9 @@ module Bootstrap
 
       # Execute a request with redirect handling.
       private def request_with_redirects(method : String,
-                                          url : String,
-                                          body : String?,
-                                          headers : HTTP::Headers? = nil) : HTTP::Client::Response
+                                         url : String,
+                                         body : String?,
+                                         headers : HTTP::Headers? = nil) : HTTP::Client::Response
         redirects = 0
         current_url = url
         current_method = method

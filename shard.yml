@@ -7,10 +7,6 @@ authors:
 targets:
   bq2:
     main: src/main.cr
-  bq2-curl:
-    main: src/main.cr
-  git-remote-https:
-    main: src/main.cr
 
 crystal: '>= 1.18.2'
 

@@ -25,6 +25,7 @@ These instructions apply to the entire repository unless overridden by a nested 
 ## Contribution guidelines
 - Favor readable, declarative Crystal code; prefer small, focused modules over sprawling scripts.
 - Avoid adding new shell scripts or Bash-centric tooling. If orchestration is required, implement it as Crystal CLI utilities.
+- Prefer the single busybox-style executable (`bq2`) with subcommands and symlinks over additional standalone binaries.
 - Keep dependency additions rare and justified in commit/PR context; prefer vendoring source or Crystal shards that align with the LLVM/Clang toolchain.
 - When touching build steps, prefer deterministic, offline-friendly workflows that keep generated artifacts reproducible.
 
