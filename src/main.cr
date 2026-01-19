@@ -6,7 +6,6 @@ require "./build_plan_utils"
 require "./sysroot_builder"
 require "./sysroot_namespace"
 require "./sysroot_runner_lib"
-require "./codex_namespace"
 require "./github_cli"
 
 module Bootstrap
@@ -23,7 +22,6 @@ module Bootstrap
       "sysroot-plan-write"      => ->(args : Array(String)) { run_sysroot_plan_write(args) },
       "sysroot-tarball"         => ->(args : Array(String)) { run_sysroot_tarball(args) },
       "sysroot-status"          => ->(args : Array(String)) { run_sysroot_status(args) },
-      "codex-namespace"         => ->(args : Array(String)) { run_codex_namespace(args) },
       "github-pr-feedback"      => ->(args : Array(String)) { run_github_pr_feedback(args) },
       "github-pr-comment"       => ->(args : Array(String)) { run_github_pr_comment(args) },
       "github-pr-create"        => ->(args : Array(String)) { run_github_pr_create(args) },
@@ -53,7 +51,6 @@ module Bootstrap
       puts "  sysroot-plan-write      Write a fresh build plan JSON"
       puts "  sysroot-tarball         Emit a prefix-free rootfs tarball"
       puts "  sysroot-status          Print current sysroot build phase"
-      puts "  codex-namespace         Run Codex inside a namespaced rootfs"
       puts "  github-pr-feedback      Fetch PR feedback as JSON"
       puts "  github-pr-comment       Post a PR conversation comment"
       puts "  github-pr-create        Create a GitHub pull request"
@@ -67,6 +64,7 @@ module Bootstrap
       extra_binds = [] of Tuple(Path, Path)
       command = [] of String
       enter_workspace_rootfs = false
+      codex_mode = false
       parser, remaining, help = CLI.parse(args, "Usage: bq2 sysroot-namespace [options] [-- command...]") do |p|
         p.on("--rootfs=PATH", "Path to the sysroot rootfs (default: #{rootfs})") { |val| rootfs = val }
         p.on("--workspace-rootfs", "Enter the generated rootfs at <rootfs>/workspace/rootfs (output of rootfs-from-sysroot)") { enter_workspace_rootfs = true }
@@ -77,10 +75,20 @@ module Bootstrap
           dst = normalize_bind_target(parts[1])
           extra_binds << {src, dst}
         end
+        p.on("--codex", "Bind ./codex/work to /work and default to /work/bin/codex") do
+          codex_mode = true
+        end
       end
       return CLI.print_help(parser) if help
 
-      command = remaining.empty? ? ["/bin/sh"] : remaining
+      if codex_mode
+        extra_binds << {Path["codex/work"].expand, normalize_bind_target("/work")}
+      end
+      command = if remaining.empty?
+                  codex_mode ? ["/work/bin/codex"] : ["/bin/sh"]
+                else
+                  remaining
+                end
       if enter_workspace_rootfs
         rootfs = (Path[rootfs].expand / "workspace" / "rootfs").to_s
       end
@@ -170,11 +178,6 @@ module Bootstrap
       owner_gid = nil
       write_tarball = true
       reuse_rootfs = false
-      codex_bin : Path? = nil
-      codex_url : URI? = nil
-      codex_sha256 : String? = nil
-      codex_target = Bootstrap::SysrootBuilder::DEFAULT_CODEX_TARGET
-      install_codex = false
       refresh_plan = false
       restage_sources = false
 
@@ -201,34 +204,12 @@ module Bootstrap
           preserve_ownership_for_rootfs = true
           owner_gid = val.to_i
         end
-        p.on("--codex", "Install the host codex binary into the rootfs (default target: #{codex_target})") do
-          install_codex = true
-        end
-        p.on("--codex-bin PATH", "Copy a host Codex binary into the rootfs workspace (default target: #{codex_target})") do |val|
-          codex_bin = Path[val].expand
-        end
-        p.on("--codex-url URL", "Download Codex using the sysroot builder fetcher") do |val|
-          codex_url = URI.parse(val)
-        end
-        p.on("--codex-sha256 SHA256", "Expected SHA256 for --codex-url") { |val| codex_sha256 = val }
-        p.on("--codex-target PATH", "Target path for --codex-bin/--codex-url inside the rootfs (default: #{codex_target})") do |val|
-          codex_target = Path[val]
-        end
         p.on("--no-tarball", "Prepare the chroot tree without writing a tarball") { write_tarball = false }
         p.on("--reuse-rootfs", "Reuse an existing prepared rootfs when present") { reuse_rootfs = true }
         p.on("--refresh-plan", "Rewrite the build plan inside an existing rootfs (requires --reuse-rootfs)") { refresh_plan = true }
         p.on("--restage-sources", "Extract missing sources into an existing rootfs /workspace (requires --reuse-rootfs)") { restage_sources = true }
       end
       return CLI.print_help(parser) if help
-
-      if install_codex && codex_bin.nil? && codex_url.nil?
-        if found = Process.find_executable("codex")
-          codex_bin = Path[found]
-        else
-          STDERR.puts "codex not found on PATH; pass --codex-bin or --codex-url instead"
-          return 1
-        end
-      end
 
       Log.info { "Sysroot builder log level=#{Log.for("").level} (env-configured)" }
       builder = SysrootBuilder.new(
@@ -242,11 +223,7 @@ module Bootstrap
         preserve_ownership_for_sources: preserve_ownership_for_sources,
         preserve_ownership_for_rootfs: preserve_ownership_for_rootfs,
         owner_uid: owner_uid,
-        owner_gid: owner_gid,
-        codex_bin: codex_bin,
-        codex_url: codex_url,
-        codex_sha256: codex_sha256,
-        codex_target: codex_target
+        owner_gid: owner_gid
       )
 
       if reuse_rootfs && builder.rootfs_ready?
@@ -256,7 +233,6 @@ module Bootstrap
           builder.stage_sources(skip_existing: true)
           puts "Staged missing sources into #{builder.rootfs_dir}/workspace"
         end
-        builder.stage_codex_binary if codex_bin || codex_url
         if refresh_plan
           builder.write_plan
           puts "Refreshed build plan at #{builder.plan_path}"
@@ -444,77 +420,6 @@ module Bootstrap
       0
     end
 
-    private def self.run_codex_namespace(args : Array(String)) : Int32
-      args = apply_codex_download_default(args)
-      rootfs = Path["data/sysroot/rootfs"]
-      alpine_setup = false
-      add_dirs = Bootstrap::CodexNamespace::DEFAULT_CODEX_ADD_DIRS.dup
-      codex_url : URI? = nil
-      codex_sha256 : String? = nil
-      codex_target = Bootstrap::CodexNamespace::DEFAULT_CODEX_TARGET
-      default_codex_url = Bootstrap::CodexNamespace.default_codex_url?.try(&.to_s) || "unknown"
-
-      parser, remaining, help = CLI.parse(args, "Usage: bq2 codex-namespace [options]") do |p|
-        p.on("-C DIR", "Rootfs directory for the command (default: #{rootfs})") { |dir| rootfs = Path[dir].expand }
-        p.on("--alpine", "Assume rootfs is Alpine and install runtime deps for Codex (node/npm/crystal)") { alpine_setup = true }
-        p.on("--no-default-add-dirs", "Do not pass the default Codex sandbox writable dirs (/var,/opt,/workspace)") { add_dirs.clear }
-        p.on("--add-dir PATH", "Add an extra writable dir for the Codex sandbox (repeatable)") { |dir| add_dirs << dir }
-        p.on("--codex-download URL", "Download Codex into the rootfs before running it (default: #{default_codex_url})") do |val|
-          codex_url = URI.parse(val)
-        end
-        p.on("--codex-sha256 SHA256", "Expected SHA256 for --codex-download") { |val| codex_sha256 = val }
-        p.on("--codex-target PATH", "Target path for --codex-download inside the rootfs (default: #{codex_target})") { |val| codex_target = Path[val] }
-      end
-      return CLI.print_help(parser) if help
-
-      unless remaining.empty?
-        STDERR.puts "Unexpected extra arguments: #{remaining.join(" ")}"
-        STDERR.puts "codex-namespace runs Codex; pass options only."
-        return 1
-      end
-
-      status = CodexNamespace.run(
-        rootfs: rootfs,
-        alpine_setup: alpine_setup,
-        add_dirs: add_dirs,
-        codex_url: codex_url,
-        codex_sha256: codex_sha256,
-        codex_target: codex_target
-      )
-      status.exit_code
-    rescue ex : SysrootNamespace::NamespaceError
-      STDERR.puts "Namespace setup failed: #{ex.message}"
-      1
-    rescue ex
-      STDERR.puts ex.message
-      1
-    end
-
-    private def self.apply_codex_download_default(args : Array(String)) : Array(String)
-      return args if args.empty?
-      expanded = [] of String
-      idx = 0
-      while idx < args.size
-        arg = args[idx]
-        if arg == "--codex-download"
-          next_arg = args[idx + 1]?
-          if next_arg.nil? || next_arg.starts_with?("-")
-            url = Bootstrap::CodexNamespace.default_codex_url?
-            raise "No default Codex URL for this architecture; pass --codex-download URL instead." unless url
-            expanded << "--codex-download=#{url}"
-          else
-            expanded << arg
-            expanded << next_arg
-            idx += 1
-          end
-        else
-          expanded << arg
-        end
-        idx += 1
-      end
-      expanded
-    end
-
     private def self.run_github_pr_feedback(args : Array(String)) : Int32
       GitHubCLI.run_pr_feedback(args)
     end
@@ -564,7 +469,6 @@ private def self.run_install(_args : Array(String)) : Int32
     sysroot-runner
     sysroot-plan-write
     sysroot-status
-    codex-namespace
     github-pr-feedback
     github-pr-comment
     github-pr-create
