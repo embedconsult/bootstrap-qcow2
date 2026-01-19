@@ -12,8 +12,8 @@ module Bootstrap
     DEFAULT_ROOTFS         = Path["data/sysroot/rootfs"]
     DEFAULT_CODEX_ADD_DIRS = [
       "/var",
-      "/opt",
       "/workspace",
+      "/opt",
     ]
     DEFAULT_CODEX_URL = {% if flag?(:aarch64) || flag?(:arm64) %}
                           "https://github.com/openai/codex/releases/download/rust-v0.87.0/codex-aarch64-unknown-linux-gnu.tar.gz"
@@ -69,7 +69,7 @@ module Bootstrap
         AlpineSetup.install_codex_packages
       end
 
-      codex_args = [] of String
+      codex_args = ["-C", work_dir.to_s] of String
       add_dirs.each do |dir|
         codex_args << "--add-dir"
         codex_args << dir

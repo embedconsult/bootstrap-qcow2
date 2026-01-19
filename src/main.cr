@@ -15,6 +15,7 @@ module Bootstrap
   module Main
     COMMANDS = {
       "--install"               => ->(args : Array(String)) { run_install(args) },
+      "--all"                   => ->(args : Array(String)) { run_all(args) },
       "default"                 => ->(args : Array(String)) { run_default(args) },
       "sysroot-builder"         => ->(args : Array(String)) { run_sysroot_builder(args) },
       "sysroot-namespace"       => ->(args : Array(String)) { run_sysroot_namespace(args) },
@@ -45,7 +46,8 @@ module Bootstrap
       puts "Usage:"
       puts "  bq2 <command> [options] [-- command args]\n\nCommands:"
       puts "  --install               Create CLI symlinks in ./bin"
-      puts "  (default)               Build sysroot and enter shell inside it"
+      puts "  --all                   Build the full rootfs and capture bq2-rootfs-#{Bootstrap::VERSION}.tar.gz"
+      puts "  (default)               Show this message"
       puts "  sysroot-builder         Build sysroot tarball or directory"
       puts "  sysroot-namespace       Enter a namespaced rootfs and exec a command"
       puts "  sysroot-namespace-check Check host namespace prerequisites"
@@ -278,6 +280,119 @@ module Bootstrap
       0
     end
 
+    # Build a sysroot, run the full build plan, and archive the produced rootfs tarball.
+    private def self.run_all(args : Array(String)) : Int32
+      workspace = Path["data/sysroot"]
+      architecture = SysrootBuilder::DEFAULT_ARCH
+      branch = SysrootBuilder::DEFAULT_BRANCH
+      base_version = SysrootBuilder::DEFAULT_BASE_VERSION
+      base_rootfs_path : Path? = nil
+      use_system_tar_for_sources = false
+      use_system_tar_for_rootfs = false
+      preserve_ownership_for_sources = false
+      preserve_ownership_for_rootfs = false
+      owner_uid = nil
+      owner_gid = nil
+      repo_root = Path["."].expand
+
+      parser, _remaining, help = CLI.parse(args, "Usage: bq2 --all [options]") do |p|
+        p.on("-w DIR", "--workspace=DIR", "Sysroot workspace directory (default: #{workspace})") { |val| workspace = Path[val] }
+        p.on("-a ARCH", "--arch=ARCH", "Target architecture (default: #{architecture})") { |val| architecture = val }
+        p.on("-b BRANCH", "--branch=BRANCH", "Source branch/release tag (default: #{branch})") { |val| branch = val }
+        p.on("-v VERSION", "--base-version=VERSION", "Base rootfs version/tag (default: #{base_version})") { |val| base_version = val }
+        p.on("--base-rootfs PATH", "Use a local rootfs tarball instead of downloading the Alpine minirootfs") { |val| base_rootfs_path = Path[val].expand }
+        p.on("--system-tar-sources", "Use system tar to extract all staged source archives") { use_system_tar_for_sources = true }
+        p.on("--system-tar-rootfs", "Use system tar to extract the base rootfs") { use_system_tar_for_rootfs = true }
+        p.on("--preserve-ownership-sources", "Apply ownership metadata when extracting source archives") { preserve_ownership_for_sources = true }
+        p.on("--no-preserve-ownership-sources", "Skip applying ownership metadata for source archives") { preserve_ownership_for_sources = false }
+        p.on("--preserve-ownership-rootfs", "Apply ownership metadata for the base rootfs") { preserve_ownership_for_rootfs = true }
+        p.on("--owner-uid=UID", "Override extracted file owner uid (implies ownership preservation)") do |val|
+          preserve_ownership_for_sources = true
+          preserve_ownership_for_rootfs = true
+          owner_uid = val.to_i
+        end
+        p.on("--owner-gid=GID", "Override extracted file owner gid (implies ownership preservation)") do |val|
+          preserve_ownership_for_sources = true
+          preserve_ownership_for_rootfs = true
+          owner_gid = val.to_i
+        end
+        p.on("--repo-root PATH", "Path to the bootstrap-qcow2 repo (default: #{repo_root})") { |val| repo_root = Path[val].expand }
+      end
+      return CLI.print_help(parser) if help
+
+      builder = SysrootBuilder.new(
+        workspace: workspace,
+        architecture: architecture,
+        branch: branch,
+        base_version: base_version,
+        base_rootfs_path: base_rootfs_path,
+        use_system_tar_for_sources: use_system_tar_for_sources,
+        use_system_tar_for_rootfs: use_system_tar_for_rootfs,
+        preserve_ownership_for_sources: preserve_ownership_for_sources,
+        preserve_ownership_for_rootfs: preserve_ownership_for_rootfs,
+        owner_uid: owner_uid,
+        owner_gid: owner_gid,
+      )
+
+      chroot_path = builder.generate_chroot(include_sources: true)
+      puts "Prepared chroot directory at #{chroot_path}"
+
+      unless File.exists?(repo_root / "shard.yml")
+        if exe = Process.executable_path
+          candidate = Path[exe].expand.parent.parent
+          repo_root = candidate if File.exists?(candidate / "shard.yml")
+        end
+      end
+
+      unless File.exists?(repo_root / "shard.yml")
+        STDERR.puts "Unable to locate repo root at #{repo_root}; pass --repo-root from the bootstrap-qcow2 checkout."
+        return 1
+      end
+
+      bq2_path = repo_root / "bin" / "bq2"
+      unless File.exists?(bq2_path)
+        STDERR.puts "Expected #{bq2_path}; run shards build && ./bin/bq2 --install before invoking --all."
+        return 1
+      end
+
+      bind_spec = "#{repo_root}:#{repo_root}"
+      status = Process.run(
+        bq2_path.to_s,
+        [
+          "sysroot-namespace",
+          "--rootfs",
+          builder.rootfs_dir.to_s,
+          "--bind",
+          bind_spec,
+          "--",
+          bq2_path.to_s,
+          "sysroot-runner",
+          "--phase",
+          "all",
+        ],
+        input: STDIN,
+        output: STDOUT,
+        error: STDERR,
+      )
+
+      unless status.success?
+        STDERR.puts "sysroot-runner failed with exit code #{status.exit_code}"
+        return status.exit_code
+      end
+
+      produced_tarball = builder.rootfs_dir / "workspace" / "bq-rootfs.tar.gz"
+      unless File.exists?(produced_tarball)
+        STDERR.puts "Expected rootfs tarball missing at #{produced_tarball}"
+        return 1
+      end
+
+      output = builder.sources_dir / "bq2-rootfs-#{Bootstrap::VERSION}.tar.gz"
+      FileUtils.mkdir_p(output.parent)
+      FileUtils.cp(produced_tarball, output)
+      puts "Generated rootfs tarball at #{output}"
+      0
+    end
+
     private def self.run_sysroot_namespace_check(args : Array(String)) : Int32
       proc_root = Path["/proc"]
       filesystems_path = Path["/proc/filesystems"]
@@ -457,7 +572,7 @@ module Bootstrap
       parser, remaining, help = CLI.parse(args, "Usage: bq2 codex-namespace [options]") do |p|
         p.on("-C DIR", "Rootfs directory for the command (default: #{rootfs})") { |dir| rootfs = Path[dir].expand }
         p.on("--alpine", "Assume rootfs is Alpine and install runtime deps for Codex (node/npm/crystal)") { alpine_setup = true }
-        p.on("--no-default-add-dirs", "Do not pass the default Codex sandbox writable dirs (/var,/opt,/workspace)") { add_dirs.clear }
+        p.on("--no-default-add-dirs", "Do not pass the default Codex sandbox writable dirs (/var,/workspace,/opt)") { add_dirs.clear }
         p.on("--add-dir PATH", "Add an extra writable dir for the Codex sandbox (repeatable)") { |dir| add_dirs << dir }
         p.on("--codex-download URL", "Download Codex into the rootfs before running it (default: #{default_codex_url})") do |val|
           codex_url = URI.parse(val)
@@ -527,26 +642,8 @@ module Bootstrap
       GitHubCLI.run_pr_create(args)
     end
 
-    private def self.run_default(_args : Array(String)) : Int32
-      workspace = Path["data/sysroot"]
-      puts "Sysroot builder log level=#{Log.for("").level} (env-configured)"
-      builder = SysrootBuilder.new(
-        workspace: workspace,
-        architecture: SysrootBuilder::DEFAULT_ARCH,
-        branch: SysrootBuilder::DEFAULT_BRANCH,
-        base_version: SysrootBuilder::DEFAULT_BASE_VERSION,
-        use_system_tar_for_sources: false,
-        use_system_tar_for_rootfs: false,
-        preserve_ownership_for_sources: false,
-        preserve_ownership_for_rootfs: false,
-      )
-      chroot_path = builder.generate_chroot(include_sources: true)
-      puts "Prepared chroot directory at #{chroot_path}"
-
-      AlpineSetup.write_resolv_conf(chroot_path)
-      SysrootNamespace.enter_rootfs(chroot_path.to_s)
-      AlpineSetup.install_sysroot_runner_packages
-      0
+    private def self.run_default(args : Array(String)) : Int32
+      run_help(args)
     end
   end
 end

@@ -42,6 +42,7 @@ module Bootstrap
     DEFAULT_M4            = "1.4.19"
     DEFAULT_GNU_MAKE      = "4.4.1"
     DEFAULT_ZLIB          = "1.3.1"
+    DEFAULT_CURL          = "8.10.1"
     DEFAULT_LINUX         = "6.12.38"
     DEFAULT_PCRE2         = "10.44"
     DEFAULT_LIBATOMIC_OPS = "7.8.2"
@@ -220,6 +221,13 @@ module Bootstrap
           phases: ["sysroot-from-alpine", "rootfs-from-sysroot", "system-from-sysroot"],
         ),
         PackageSpec.new("libressl", DEFAULT_LIBRESSL, URI.parse("https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-#{DEFAULT_LIBRESSL}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
+        PackageSpec.new(
+          "curl",
+          DEFAULT_CURL,
+          URI.parse("https://curl.se/download/curl-#{DEFAULT_CURL}.tar.gz"),
+          configure_flags: ["--with-openssl=/usr"],
+          phases: ["system-from-sysroot"],
+        ),
         PackageSpec.new(
           "cmake",
           DEFAULT_CMAKE,
@@ -782,8 +790,9 @@ module Bootstrap
           package_allowlist: nil,
           env_overrides: {
             "git" => {
-              "MAKEFLAGS"  => "-e",
-              "NO_GETTEXT" => "1",
+              "MAKEFLAGS"   => "-e",
+              "NO_GETTEXT"  => "1",
+              "CURL_CONFIG" => "/usr/bin/curl-config",
             },
           },
         ),
