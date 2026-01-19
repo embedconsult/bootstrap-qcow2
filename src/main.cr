@@ -6,6 +6,9 @@ require "./build_plan_utils"
 require "./sysroot_builder"
 require "./sysroot_namespace"
 require "./sysroot_runner_lib"
+require "./curl_command"
+require "./pkg_config_command"
+require "./git_remote_https"
 require "./github_cli"
 
 module Bootstrap
@@ -15,7 +18,10 @@ module Bootstrap
     COMMANDS = {
       "--install"               => ->(args : Array(String)) { run_install(args) },
       "--all"                   => ->(args : Array(String)) { run_all(args) },
+      "curl"                    => ->(args : Array(String)) { run_curl(args) },
+      "pkg-config"              => ->(args : Array(String)) { run_pkg_config(args) },
       "default"                 => ->(args : Array(String)) { run_default(args) },
+      "git-remote-https"        => ->(args : Array(String)) { run_git_remote_https(args) },
       "sysroot-builder"         => ->(args : Array(String)) { run_sysroot_builder(args) },
       "sysroot-namespace"       => ->(args : Array(String)) { run_sysroot_namespace(args) },
       "sysroot-namespace-check" => ->(args : Array(String)) { run_sysroot_namespace_check(args) },
@@ -45,6 +51,8 @@ module Bootstrap
       puts "  bq2 <command> [options] [-- command args]\n\nCommands:"
       puts "  --install               Create CLI symlinks in ./bin"
       puts "  --all                   Build the full rootfs and capture bq2-rootfs-#{Bootstrap::VERSION}.tar.gz"
+      puts "  curl                    Minimal HTTP client helper"
+      puts "  pkg-config              Minimal pkg-config helper"
       puts "  (default)               Show this message"
       puts "  sysroot-builder         Build sysroot tarball or directory"
       puts "  sysroot-namespace       Enter a namespaced rootfs and exec a command"
@@ -53,6 +61,7 @@ module Bootstrap
       puts "  sysroot-plan-write      Write a fresh build plan JSON"
       puts "  sysroot-tarball         Emit a prefix-free rootfs tarball"
       puts "  sysroot-status          Print current sysroot build phase"
+      puts "  git-remote-https        HTTPS remote helper for Git"
       puts "  github-pr-feedback      Fetch PR feedback as JSON"
       puts "  github-pr-comment       Post a PR conversation comment"
       puts "  github-pr-create        Create a GitHub pull request"
@@ -97,6 +106,7 @@ module Bootstrap
       Log.debug { "Entering namespace with rootfs=#{rootfs} command=#{command.join(" ")}" }
 
       SysrootNamespace.enter_rootfs(rootfs, extra_binds: extra_binds)
+      apply_toolchain_env_defaults
       Process.exec(command.first, command[1..])
     rescue ex : File::Error
       cmd = command || [] of String
@@ -112,6 +122,26 @@ module Bootstrap
     private def self.normalize_bind_target(value : String) : Path
       cleaned = value.starts_with?("/") ? value[1..] : value
       Path[cleaned]
+    end
+
+    # Ensure the sysroot toolchain defaults are available inside the namespace.
+    private def self.apply_toolchain_env_defaults : Nil
+      ENV["CRYSTAL_CACHE_DIR"] ||= "/tmp/crystal_cache"
+      ENV["CC"] ||= "clang -fuse-ld=lld"
+      ENV["CXX"] ||= "clang++ -fuse-ld=lld"
+      ENV["LD"] ||= "ld.lld"
+      ENV["PATH"] = prepend_path_entries(ENV["PATH"]?, ["/opt/sysroot/bin", "/opt/sysroot/sbin"])
+    end
+
+    # Prepend *entries* to *path* when missing.
+    private def self.prepend_path_entries(path : String?, entries : Array(String)) : String
+      effective = path || "/usr/bin:/bin"
+      segments = effective.split(":")
+      entries.reverse_each do |entry|
+        next if segments.includes?(entry)
+        segments.unshift(entry)
+      end
+      segments.join(":")
     end
 
     private def self.run_sysroot_status(args : Array(String)) : Int32
@@ -254,6 +284,21 @@ module Bootstrap
         puts "Prepared chroot directory at #{chroot_path}"
       end
       0
+    end
+
+    # Run the internal curl helper.
+    private def self.run_curl(args : Array(String)) : Int32
+      CurlCommand.run(args)
+    end
+
+    # Run the minimal pkg-config helper.
+    private def self.run_pkg_config(args : Array(String)) : Int32
+      PkgConfigCommand.run(args)
+    end
+
+    # Run the Git HTTPS remote helper.
+    private def self.run_git_remote_https(args : Array(String)) : Int32
+      GitRemoteHttps.run(args)
     end
 
     # Build a sysroot, run the full build plan, and archive the produced rootfs tarball.
@@ -566,6 +611,9 @@ private def self.run_install(_args : Array(String)) : Int32
     sysroot-runner
     sysroot-plan-write
     sysroot-status
+    curl
+    pkg-config
+    git-remote-https
     github-pr-feedback
     github-pr-comment
     github-pr-create

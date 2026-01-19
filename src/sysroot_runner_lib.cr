@@ -104,6 +104,25 @@ module Bootstrap
               idx += 1
             end
             raise "prepare-rootfs wrote no files" unless wrote
+          when "symlink"
+            idx = 0
+            linked = false
+            loop do
+              src_key = "LINK_#{idx}_SRC"
+              dest_key = "LINK_#{idx}_DEST"
+              source = step.env[src_key]?
+              dest = step.env[dest_key]?
+              break unless source || dest
+              raise "symlink requires #{src_key}" unless source
+              raise "symlink requires #{dest_key}" unless dest
+              target = destdir ? "#{destdir}#{dest}" : dest
+              FileUtils.mkdir_p(File.dirname(target))
+              FileUtils.rm_rf(target) if File.exists?(target) || File.symlink?(target)
+              File.symlink(source, target)
+              linked = true
+              idx += 1
+            end
+            raise "symlink wrote no links" unless linked
           when "remove-tree"
             raise "remove-tree requires step.install_prefix (path to remove)" unless step.install_prefix
             remove_root = destdir ? "#{destdir}#{install_prefix}" : install_prefix

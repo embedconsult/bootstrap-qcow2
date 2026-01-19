@@ -42,7 +42,6 @@ module Bootstrap
     DEFAULT_M4            = "1.4.19"
     DEFAULT_GNU_MAKE      = "4.4.1"
     DEFAULT_ZLIB          = "1.3.1"
-    DEFAULT_CURL          = "8.10.1"
     DEFAULT_LINUX         = "6.12.38"
     DEFAULT_PCRE2         = "10.44"
     DEFAULT_LIBATOMIC_OPS = "7.8.2"
@@ -221,7 +220,7 @@ module Bootstrap
           bootstrap_source_branch,
           URI.parse("https://github.com/embedconsult/bootstrap-qcow2/archive/refs/heads/#{bootstrap_source_branch}.tar.gz"),
           strategy: "crystal",
-          phases: ["sysroot-from-alpine"],
+          phases: ["sysroot-from-alpine", "system-from-sysroot"],
         ),
         PackageSpec.new("m4", DEFAULT_M4, URI.parse("https://ftp.gnu.org/gnu/m4/m4-#{DEFAULT_M4}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
         PackageSpec.new("musl", DEFAULT_MUSL, URI.parse("https://musl.libc.org/releases/musl-#{DEFAULT_MUSL}.tar.gz"), phases: ["sysroot-from-alpine", "rootfs-from-sysroot"]),
@@ -250,13 +249,6 @@ module Bootstrap
           phases: ["sysroot-from-alpine", "rootfs-from-sysroot", "system-from-sysroot"],
         ),
         PackageSpec.new("libressl", DEFAULT_LIBRESSL, URI.parse("https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-#{DEFAULT_LIBRESSL}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
-        PackageSpec.new(
-          "curl",
-          DEFAULT_CURL,
-          URI.parse("https://curl.se/download/curl-#{DEFAULT_CURL}.tar.gz"),
-          configure_flags: ["--with-openssl=/usr"],
-          phases: ["system-from-sysroot"],
-        ),
         PackageSpec.new(
           "cmake",
           DEFAULT_CMAKE,
@@ -623,13 +615,6 @@ module Bootstrap
       sources_dir / "bq2-rootfs-#{Bootstrap::VERSION}.tar.gz"
     end
 
-    # Normalize a rootfs target path to be relative to the rootfs directory.
-    private def normalize_rootfs_target(path : Path) : Path
-      value = path.to_s
-      value = value[1..] if value.starts_with?("/")
-      Path[value]
-    end
-
     private def kernel_headers_arch : String
       case @architecture
       when "aarch64", "arm64"
@@ -785,6 +770,24 @@ module Bootstrap
               "-DOPENSSL_CRYPTO_LIBRARY=/usr/lib/libcrypto.so",
             ],
           },
+          extra_steps: [
+            BuildStep.new(
+              name: "bq2-symlinks",
+              strategy: "symlink",
+              workdir: "/",
+              configure_flags: [] of String,
+              patches: [] of String,
+              install_prefix: "/",
+              env: {
+                "LINK_0_SRC"  => "bq2",
+                "LINK_0_DEST" => "/usr/bin/curl",
+                "LINK_1_SRC"  => "bq2",
+                "LINK_1_DEST" => "/usr/bin/git-remote-https",
+                "LINK_2_SRC"  => "bq2",
+                "LINK_2_DEST" => "/usr/bin/pkg-config",
+              },
+            ),
+          ],
         ),
         PhaseSpec.new(
           name: "tools-from-system",
@@ -797,9 +800,8 @@ module Bootstrap
           package_allowlist: nil,
           env_overrides: {
             "git" => {
-              "MAKEFLAGS"   => "-e",
-              "NO_GETTEXT"  => "1",
-              "CURL_CONFIG" => "/usr/bin/curl-config",
+              "MAKEFLAGS"  => "-e",
+              "NO_GETTEXT" => "1",
             },
           },
         ),

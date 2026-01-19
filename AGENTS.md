@@ -20,11 +20,11 @@ These instructions apply to the entire repository unless overridden by a nested 
 - No synthetic device nodes: /dev/null, /dev/zero, /dev/random, /dev/urandom (and /dev/tty when present) must be bind-mountable and writable inside the user namespace; nodev must not block these binds. If running in a container, provide /dev as tmpfs with dev,nosuid,exec (e.g., Docker: `--tmpfs /dev:rw,exec,dev,nosuid` plus device passthrough or `--privileged --security-opt seccomp=unconfined` to drop nodev).
 - Single namespace strategy: we always bind host devices (no synthetic nodes, no tmpfs /dev fallback). If binds fail, preflight will pend specs and raise clear NamespaceErrors; fix the host/runtime rather than adding workarounds.
 - Ensure `/dev` inside the container is dev-enabled.
-- Codex-assisted iteration uses `bq2 codex-namespace`, which bind-mounts host `./codex/work` into `/work` by default; `/workspace` should come from the rootfs itself. For namespace setup we now follow the LFS kernfs pattern: bind-mount host `/dev` recursively, mount proc/sys inside the namespace, and keep a single path rather than synthesizing /dev.
 
 ## Contribution guidelines
 - Favor readable, declarative Crystal code; prefer small, focused modules over sprawling scripts.
 - Avoid adding new shell scripts or Bash-centric tooling. If orchestration is required, implement it as Crystal CLI utilities.
+- Prefer the single busybox-style executable (`bq2`) with subcommands and symlinks over additional standalone binaries.
 - Keep dependency additions rare and justified in commit/PR context; prefer vendoring source or Crystal shards that align with the LLVM/Clang toolchain.
 - When touching build steps, prefer deterministic, offline-friendly workflows that keep generated artifacts reproducible.
 
@@ -57,8 +57,7 @@ See `codex/skills/bootstrap-qcow2-build-plan-iteration/SKILL.md` for Codex-orien
      - Failure reports (append-only): `/var/lib/sysroot-build-reports/*.json` (host path: `data/sysroot/rootfs/var/lib/sysroot-build-reports/*.json`)
 4. Enter the rootfs:
    - Manual shell: `./bin/sysroot-namespace --rootfs data/sysroot/rootfs -- /bin/sh`
-   - Codex-assisted iteration: `./bin/bq2 codex-namespace` (binds host `./codex/work` into `/work` by default; saves/resumes the last Codex session via `/work/.codex-session-id`).
-   - Note: steps 1–4 are typically performed manually to launch the iteration environment; Codex iteration usually begins at step 5 or step 7 depending on the prompt.
+   - Note: steps 1–4 are typically performed manually to launch the iteration environment.
 5. Confirm you are inside the intended rootfs before iterating:
    - `test -f /var/lib/sysroot-build-state.json && cat /var/lib/sysroot-build-state.json`
    - `test -f /var/lib/sysroot-build-plan.json`

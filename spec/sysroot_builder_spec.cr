@@ -211,7 +211,7 @@ describe Bootstrap::SysrootBuilder do
       builder = StubBuilder.new(dir)
       builder.override_packages = [pkg, musl, busybox, linux_headers]
       plan = builder.build_plan
-      plan.phases.map(&.name).should eq ["sysroot-from-alpine", "rootfs-from-sysroot", "finalize-rootfs"]
+      plan.phases.map(&.name).should eq ["sysroot-from-alpine", "rootfs-from-sysroot", "system-from-sysroot", "finalize-rootfs"]
       sysroot_phase = plan.phases.first
       sysroot_phase.install_prefix.should eq "/opt/sysroot"
       sysroot_phase.destdir.should be_nil
@@ -245,7 +245,7 @@ describe Bootstrap::SysrootBuilder do
       plan_path = builder.write_plan
       File.exists?(plan_path).should be_true
       plan = Bootstrap::BuildPlan.from_json(File.read(plan_path))
-      plan.phases.map(&.name).should eq ["sysroot-from-alpine", "rootfs-from-sysroot", "finalize-rootfs"]
+      plan.phases.map(&.name).should eq ["sysroot-from-alpine", "rootfs-from-sysroot", "system-from-sysroot", "finalize-rootfs"]
     end
   end
 
