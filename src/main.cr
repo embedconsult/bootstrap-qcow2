@@ -7,6 +7,8 @@ require "./sysroot_builder"
 require "./sysroot_namespace"
 require "./sysroot_runner_lib"
 require "./codex_namespace"
+require "./bq2_curl"
+require "./git_remote_https"
 require "./github_cli"
 
 module Bootstrap
@@ -16,7 +18,9 @@ module Bootstrap
     COMMANDS = {
       "--install"               => ->(args : Array(String)) { run_install(args) },
       "--all"                   => ->(args : Array(String)) { run_all(args) },
+      "bq2-curl"                => ->(args : Array(String)) { run_bq2_curl(args) },
       "default"                 => ->(args : Array(String)) { run_default(args) },
+      "git-remote-https"        => ->(args : Array(String)) { run_git_remote_https(args) },
       "sysroot-builder"         => ->(args : Array(String)) { run_sysroot_builder(args) },
       "sysroot-namespace"       => ->(args : Array(String)) { run_sysroot_namespace(args) },
       "sysroot-namespace-check" => ->(args : Array(String)) { run_sysroot_namespace_check(args) },
@@ -47,6 +51,7 @@ module Bootstrap
       puts "  bq2 <command> [options] [-- command args]\n\nCommands:"
       puts "  --install               Create CLI symlinks in ./bin"
       puts "  --all                   Build the full rootfs and capture bq2-rootfs-#{Bootstrap::VERSION}.tar.gz"
+      puts "  bq2-curl                Minimal HTTP client helper"
       puts "  (default)               Show this message"
       puts "  sysroot-builder         Build sysroot tarball or directory"
       puts "  sysroot-namespace       Enter a namespaced rootfs and exec a command"
@@ -56,6 +61,7 @@ module Bootstrap
       puts "  sysroot-tarball         Emit a prefix-free rootfs tarball"
       puts "  sysroot-status          Print current sysroot build phase"
       puts "  codex-namespace         Run Codex inside a namespaced rootfs"
+      puts "  git-remote-https        HTTPS remote helper for Git"
       puts "  github-pr-feedback      Fetch PR feedback as JSON"
       puts "  github-pr-comment       Post a PR conversation comment"
       puts "  github-pr-create        Create a GitHub pull request"
@@ -278,6 +284,16 @@ module Bootstrap
         puts "Prepared chroot directory at #{chroot_path}"
       end
       0
+    end
+
+    # Run the internal bq2-curl helper.
+    private def self.run_bq2_curl(args : Array(String)) : Int32
+      Bq2Curl.run(args)
+    end
+
+    # Run the Git HTTPS remote helper.
+    private def self.run_git_remote_https(args : Array(String)) : Int32
+      GitRemoteHttps.run(args)
     end
 
     # Build a sysroot, run the full build plan, and archive the produced rootfs tarball.
