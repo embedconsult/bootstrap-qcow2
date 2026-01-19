@@ -54,6 +54,5 @@ module Bootstrap
       status = Process.run("apk", argv, output: STDOUT, error: STDERR)
       raise "apk add failed (#{status.exit_code})" unless status.success?
     end
-
   end
 end
