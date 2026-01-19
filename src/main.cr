@@ -146,6 +146,9 @@ module Bootstrap
       return CLI.print_help(parser) if help
 
       rootfs_dir = rootfs
+      if rootfs_dir.nil? && (ENV[SysrootRunner::ROOTFS_ENV_FLAG]? || File.exists?(SysrootRunner::ROOTFS_MARKER_PATH))
+        rootfs_dir = "/"
+      end
       rootfs_dir ||= File.join(workspace, "rootfs")
       resolved_state_path = state_path
       resolved_state_path ||= File.join(rootfs_dir, "var/lib/sysroot-build-state.json")
