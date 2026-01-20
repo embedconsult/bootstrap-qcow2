@@ -691,10 +691,11 @@ module Bootstrap
       begin
         decision = SysrootAllResume.new(builder).decide
         puts(decision.log_message)
-        puts "Hint: run ./bin/bq2 --all --resume to continue from this stage."
+        puts "\nHint: run ./bin/bq2 --all --resume to continue from this stage."
       rescue error
-        puts "Resume decision unavailable: #{error.message}"
+        puts "\nResume decision unavailable: #{error.message}"
       end
+      puts "\n"
       run_help(args)
     end
   end
