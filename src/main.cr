@@ -76,6 +76,7 @@ module Bootstrap
       command = [] of String
       enter_workspace_rootfs = false
       codex_mode = false
+      run_alpine_setup = false
       parser, remaining, help = CLI.parse(args, "Usage: bq2 sysroot-namespace [options] [-- command...]") do |p|
         p.on("--rootfs=PATH", "Path to the sysroot rootfs (default: #{rootfs})") { |val| rootfs = val }
         p.on("--workspace-rootfs", "Enter the generated rootfs at <rootfs>/workspace/rootfs (output of rootfs-from-sysroot)") { enter_workspace_rootfs = true }
@@ -85,6 +86,9 @@ module Bootstrap
           src = Path[parts[0]].expand
           dst = normalize_bind_target(parts[1])
           extra_binds << {src, dst}
+        end
+        p.on("--alpine-setup", "Install Alpine packages needed to replay the sysroot build plan") do
+          run_alpine_setup = true
         end
         p.on("--codex", "Bind ./codex/work to /work and default to /work/bin/codex") do
           codex_mode = true
@@ -107,6 +111,7 @@ module Bootstrap
 
       SysrootNamespace.enter_rootfs(rootfs, extra_binds: extra_binds)
       apply_toolchain_env_defaults
+      AlpineSetup.install_sysroot_runner_packages if run_alpine_setup
       Process.exec(command.first, command[1..])
     rescue ex : File::Error
       cmd = command || [] of String
@@ -379,17 +384,30 @@ module Bootstrap
         return 1
       end
 
+      AlpineSetup.write_resolv_conf(builder.rootfs_dir)
+
       bind_spec = "#{repo_root}:#{repo_root}"
+      crystal_path = "/usr/bin/crystal"
+      main_path = repo_root / "src" / "main.cr"
+      default_rootfs_path = builder.sources_dir / "bq2-rootfs-#{Bootstrap::VERSION}.tar.gz"
+      rootfs_tarball = base_rootfs_path || (File.exists?(default_rootfs_path) ? default_rootfs_path : nil)
+      use_alpine_setup = rootfs_tarball.nil? || !bq2_rootfs_tarball?(rootfs_tarball)
+      namespace_args = [
+        "sysroot-namespace",
+        "--rootfs",
+        builder.rootfs_dir.to_s,
+        "--bind",
+        bind_spec,
+      ]
+      namespace_args << "--alpine-setup" if use_alpine_setup
+      namespace_args << "--"
       status = Process.run(
         bq2_path.to_s,
-        [
-          "sysroot-namespace",
-          "--rootfs",
-          builder.rootfs_dir.to_s,
-          "--bind",
-          bind_spec,
+        namespace_args + [
+          crystal_path,
+          "run",
+          main_path.to_s,
           "--",
-          bq2_path.to_s,
           "sysroot-runner",
           "--phase",
           "all",
@@ -463,6 +481,11 @@ module Bootstrap
         end
       end
       1
+    end
+
+    # Return true when *path* looks like a bootstrap-qcow2 rootfs tarball.
+    private def self.bq2_rootfs_tarball?(path : Path) : Bool
+      File.basename(path.to_s).starts_with?("bq2-rootfs")
     end
 
     private def self.run_sysroot_runner(args : Array(String)) : Int32
