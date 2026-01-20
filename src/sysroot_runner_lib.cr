@@ -187,7 +187,10 @@ module Bootstrap
               FileUtils.rm_rf(stage2_build_dir) if Dir.exists?(stage2_build_dir)
             end
 
-            stage1_flags = step.configure_flags.reject { |flag| flag.starts_with?("-DLLVM_ENABLE_LIBCXX=") }
+            stage1_flags = step.configure_flags.reject { |flag| flag.starts_with?("-DLLVM_ENABLE_LIBCXX=") } + [
+              "-DCMAKE_C_COMPILER=clang",
+              "-DCMAKE_CXX_COMPILER=clang++",
+            ]
             run_cmd(["cmake", "-S", source_dir, "-B", stage1_build_dir, "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + stage1_flags, env: env)
             run_cmd(["cmake", "--build", stage1_build_dir, "-j#{cpus}"], env: env)
             install_env = destdir ? env.merge({"DESTDIR" => destdir}) : env
