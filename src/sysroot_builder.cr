@@ -104,7 +104,12 @@ module Bootstrap
       extra_urls : Array(URI) = [] of URI do
       # Prefer a filename that includes the package name for clarity.
       def filename : String
-        basename = File.basename(url.path)
+        filename_for(url)
+      end
+
+      # Return the preferred filename for an arbitrary *uri*.
+      def filename_for(uri : URI) : String
+        basename = File.basename(uri.path)
         basename.includes?(name) ? basename : "#{name}-#{basename}"
       end
 
@@ -165,6 +170,20 @@ module Bootstrap
     # Directory containing downloaded source archives.
     def sources_dir : Path
       @workspace / "sources"
+    end
+
+    # Return the expected archive paths for all configured packages.
+    def expected_source_archives : Array(Path)
+      packages.flat_map do |pkg|
+        pkg.all_urls.map { |uri| sources_dir / pkg.filename_for(uri) }
+      end
+    end
+
+    # Return the expected archive paths that are missing from the source cache.
+    def missing_source_archives : Array(Path)
+      expected_source_archives.reject do |path|
+        File.exists?(path) && File.size(path) > 0
+      end
     end
 
     # Directory containing the extracted rootfs.

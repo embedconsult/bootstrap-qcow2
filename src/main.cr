@@ -4,6 +4,7 @@ require "./alpine_setup"
 require "./cli"
 require "./build_plan_utils"
 require "./sysroot_builder"
+require "./sysroot_all_resume"
 require "./sysroot_namespace"
 require "./sysroot_runner_lib"
 require "./curl_command"
@@ -101,7 +102,11 @@ module Bootstrap
         command = ["/work/bin/codex", "--add-dir", "/var", "--add-dir", "/opt", "--add-dir", "/workspace", "-C", "/work"]
         ENV["HOME"] = "/work"
       else
-        command = remaining
+        if remaining.empty?
+          command = ["/bin/sh"]
+        else
+          command = remaining.not_nil!
+        end
       end
       if enter_workspace_rootfs
         rootfs = (Path[rootfs].expand / "workspace" / "rootfs").to_s
@@ -322,6 +327,7 @@ module Bootstrap
       owner_uid = nil
       owner_gid = nil
       repo_root = Path["."].expand
+      resume = false
 
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 --all [options]") do |p|
         p.on("-w DIR", "--workspace=DIR", "Sysroot workspace directory (default: #{workspace})") { |val| workspace = Path[val] }
@@ -345,6 +351,7 @@ module Bootstrap
           owner_gid = val.to_i
         end
         p.on("--repo-root PATH", "Path to the bootstrap-qcow2 repo (default: #{repo_root})") { |val| repo_root = Path[val].expand }
+        p.on("--resume", "Resume the --all workflow from the earliest incomplete stage") { resume = true }
       end
       return CLI.print_help(parser) if help
 
@@ -361,9 +368,6 @@ module Bootstrap
         owner_uid: owner_uid,
         owner_gid: owner_gid,
       )
-
-      chroot_path = builder.generate_chroot(include_sources: true)
-      puts "Prepared chroot directory at #{chroot_path}"
 
       unless File.exists?(repo_root / "shard.yml")
         if exe = Process.executable_path
@@ -383,56 +387,75 @@ module Bootstrap
         return 1
       end
 
-      bind_spec = "#{repo_root}:#{repo_root}"
-      crystal_path = "/usr/bin/crystal"
-      main_path = repo_root / "src" / "main.cr"
       default_rootfs_path = builder.sources_dir / "bq2-rootfs-#{Bootstrap::VERSION}.tar.gz"
       rootfs_tarball = base_rootfs_path || (File.exists?(default_rootfs_path) ? default_rootfs_path : nil)
       use_bq2_rootfs = rootfs_tarball ? bq2_rootfs_tarball?(rootfs_tarball) : false
-      builder.stage_sources(skip_existing: true)
-      puts "Restaged missing sources into #{builder.rootfs_dir}/workspace"
-      AlpineSetup.write_resolv_conf(builder.rootfs_dir)
       use_alpine_setup = rootfs_tarball.nil? || !use_bq2_rootfs
-      namespace_args = [
-        "sysroot-namespace",
-        "--rootfs",
-        builder.rootfs_dir.to_s,
-        "--bind",
-        bind_spec,
-      ]
-      namespace_args << "--alpine-setup" if use_alpine_setup
-      namespace_args << "--"
-      status = Process.run(
-        bq2_path.to_s,
-        namespace_args + [
-          crystal_path,
-          "run",
-          main_path.to_s,
-          "--",
-          "sysroot-runner",
-          "--phase",
-          "all",
-        ],
-        input: STDIN,
-        output: STDOUT,
-        error: STDERR,
-      )
 
-      unless status.success?
-        STDERR.puts "sysroot-runner failed with exit code #{status.exit_code}"
-        return status.exit_code
+      stages = SysrootAllResume::STAGE_ORDER
+      start_stage = "download-sources"
+      resume_phase : String? = nil
+      resume_step : String? = nil
+      if resume
+        decision = SysrootAllResume.new(builder).decide
+        Log.info { decision.log_message }
+        return 0 if decision.stage == "complete"
+        start_stage = decision.stage
+        resume_phase = decision.resume_phase
+        resume_step = decision.resume_step
       end
 
-      produced_tarball = builder.rootfs_dir / "workspace" / "bq-rootfs.tar.gz"
-      unless File.exists?(produced_tarball)
+      start_index = stages.index(start_stage)
+      raise "Unknown resume stage #{start_stage}" unless start_index
+
+      stages[start_index..].each do |stage|
+        case stage
+        when "download-sources"
+          builder.download_sources
+        when "plan-write"
+          chroot_path = builder.generate_chroot(include_sources: true)
+          puts "Prepared chroot directory at #{chroot_path}"
+        when "sysroot-runner"
+          builder.stage_sources(skip_existing: true)
+          puts "Restaged missing sources into #{builder.rootfs_dir}/workspace"
+          AlpineSetup.write_resolv_conf(builder.rootfs_dir)
+          status = run_sysroot_command(
+            bq2_path,
+            builder,
+            repo_root,
+            use_alpine_setup,
+            ["sysroot-runner", "--phase", "all"],
+          )
+          unless status.success?
+            STDERR.puts "sysroot-runner failed with exit code #{status.exit_code}"
+            return status.exit_code
+          end
+        when "rootfs-tarball"
+          if File.exists?(builder.rootfs_dir / "workspace" / "bq-rootfs.tar.gz")
+            Log.info { "Rootfs tarball already present; skipping finalize-rootfs" }
+          else
+            status = run_sysroot_command(
+              bq2_path,
+              builder,
+              repo_root,
+              use_alpine_setup,
+              ["sysroot-tarball"],
+            )
+            unless status.success?
+              STDERR.puts "sysroot-tarball failed with exit code #{status.exit_code}"
+              return status.exit_code
+            end
+          end
+          break
+        end
+      end
+
+      unless copy_rootfs_tarball(builder)
+        produced_tarball = builder.rootfs_dir / "workspace" / "bq-rootfs.tar.gz"
         STDERR.puts "Expected rootfs tarball missing at #{produced_tarball}"
+        STDERR.puts "Resume hint: #{resume_phase}/#{resume_step}" if resume_phase || resume_step
         return 1
       end
-
-      output = builder.sources_dir / "bq2-rootfs-#{Bootstrap::VERSION}.tar.gz"
-      FileUtils.mkdir_p(output.parent)
-      FileUtils.cp(produced_tarball, output)
-      puts "Generated rootfs tarball at #{output}"
       0
     end
 
@@ -487,6 +510,49 @@ module Bootstrap
     # Return true when *path* looks like a bootstrap-qcow2 rootfs tarball.
     private def self.bq2_rootfs_tarball?(path : Path) : Bool
       File.basename(path.to_s).starts_with?("bq2-rootfs")
+    end
+
+    # Run a bq2 subcommand inside the sysroot namespace.
+    private def self.run_sysroot_command(bq2_path : Path,
+                                         builder : SysrootBuilder,
+                                         repo_root : Path,
+                                         use_alpine_setup : Bool,
+                                         command : Array(String)) : Process::Status
+      bind_spec = "#{repo_root}:#{repo_root}"
+      crystal_path = "/usr/bin/crystal"
+      main_path = repo_root / "src" / "main.cr"
+      namespace_args = [
+        "sysroot-namespace",
+        "--rootfs",
+        builder.rootfs_dir.to_s,
+        "--bind",
+        bind_spec,
+      ]
+      namespace_args << "--alpine-setup" if use_alpine_setup
+      namespace_args << "--"
+      Process.run(
+        bq2_path.to_s,
+        namespace_args + [
+          crystal_path,
+          "run",
+          main_path.to_s,
+          "--",
+        ] + command,
+        input: STDIN,
+        output: STDOUT,
+        error: STDERR,
+      )
+    end
+
+    # Copy the produced rootfs tarball into the workspace source cache.
+    private def self.copy_rootfs_tarball(builder : SysrootBuilder) : Bool
+      produced_tarball = builder.rootfs_dir / "workspace" / "bq-rootfs.tar.gz"
+      return false unless File.exists?(produced_tarball)
+      output = builder.sources_dir / "bq2-rootfs-#{Bootstrap::VERSION}.tar.gz"
+      FileUtils.mkdir_p(output.parent)
+      FileUtils.cp(produced_tarball, output)
+      puts "Generated rootfs tarball at #{output}"
+      true
     end
 
     private def self.run_sysroot_runner(args : Array(String)) : Int32
@@ -620,6 +686,15 @@ module Bootstrap
     end
 
     private def self.run_default(args : Array(String)) : Int32
+      workspace = Path["data/sysroot"]
+      builder = SysrootBuilder.new(workspace: workspace)
+      begin
+        decision = SysrootAllResume.new(builder).decide
+        puts(decision.log_message)
+        puts "Hint: run ./bin/bq2 --all --resume to continue from this stage."
+      rescue error
+        puts "Resume decision unavailable: #{error.message}"
+      end
       run_help(args)
     end
   end
