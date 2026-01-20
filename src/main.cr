@@ -691,6 +691,26 @@ module Bootstrap
       begin
         decision = SysrootAllResume.new(builder).decide
         puts(decision.log_message)
+        if decision.stage == "sysroot-runner" && (state_path = decision.state_path)
+          state = SysrootBuildState.load(state_path.to_s)
+          if state.retrying_last_failure?(decision.resume_phase, decision.resume_step)
+            puts "\nResume details: retrying last failed step."
+            if (overrides = state.overrides_contents)
+              puts "overrides_path=#{state.overrides_path}"
+              puts overrides
+            else
+              puts "overrides_path=(none)"
+            end
+            if (report_path = state.failure_report_path)
+              puts "failure_report_path=#{report_path}"
+              if (report = state.failure_report_contents)
+                puts report
+              end
+            else
+              puts "failure_report_path=(none)"
+            end
+          end
+        end
         puts "\nHint: run ./bin/bq2 --all --resume to continue from this stage."
       rescue error
         puts "\nResume decision unavailable: #{error.message}"

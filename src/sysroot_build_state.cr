@@ -186,6 +186,54 @@ module Bootstrap
       self.invalidation_reason = "Build plan/overrides changed; cleared completed steps"
     end
 
+    # Return true when the resume step matches the most recent failure.
+    def retrying_last_failure?(phase : String?, step : String?) : Bool
+      return false unless phase && step
+      failure = progress.last_failure
+      return false unless failure
+      failure.phase == phase && failure.step == step
+    end
+
+    # Read the overrides JSON contents if the file exists.
+    def overrides_contents : String?
+      path = overrides_path
+      return nil unless path && File.exists?(path)
+      File.read(path)
+    end
+
+    # Determine the most relevant failure report path, if any.
+    def failure_report_path : String?
+      if (failure = progress.last_failure)
+        report_path = failure.report_path
+        return report_path if report_path && File.exists?(report_path)
+      end
+
+      reports_dir = report_dir
+      return nil unless reports_dir && Dir.exists?(reports_dir)
+
+      latest_path = nil
+      latest_mtime = Time::UNIX_EPOCH
+      Dir.each_child(reports_dir) do |entry|
+        next unless entry.ends_with?(".json")
+        path = File.join(reports_dir, entry)
+        next unless File.file?(path)
+        mtime = File.info(path).modification_time
+        if latest_path.nil? || mtime > latest_mtime
+          latest_path = path
+          latest_mtime = mtime
+        end
+      end
+
+      latest_path
+    end
+
+    # Read the most recent failure report JSON if available.
+    def failure_report_contents : String?
+      path = failure_report_path
+      return nil unless path && File.exists?(path)
+      File.read(path)
+    end
+
     # Minimal step reference used for progress tracking.
     struct StepRef
       include JSON::Serializable
