@@ -31,20 +31,20 @@ module Bootstrap
                      @state_path : Path? = nil)
       end
 
-      # Return a one-line log message summarizing the decision.
+      # Return a log message summarizing the decision.
       def log_message : String
-        message = "Resume decision: stage=#{stage} (#{reason})"
+        message = "Resume decision:\n stage=#{stage} (#{reason})"
         if resume_phase
-          message = "#{message} phase=#{resume_phase}"
+          message = "#{message}\n phase=#{resume_phase}"
         end
         if resume_step
-          message = "#{message} step=#{resume_step}"
+          message = "#{message}\n step=#{resume_step}"
         end
         if state_path
-          message = "#{message} state=#{state_path}"
+          message = "#{message}\n state=#{state_path}"
         end
         if plan_path
-          message = "#{message} plan=#{plan_path}"
+          message = "#{message}\n plan=#{plan_path}"
         end
         message
       end
