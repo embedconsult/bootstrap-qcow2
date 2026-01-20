@@ -46,7 +46,12 @@ module Bootstrap
     def self.enter_workspace_rootfs! : Nil
       return unless workspace_rootfs_present?
       Log.info { "Entering workspace rootfs at #{WORKSPACE_ROOTFS_PATH}" }
-      SysrootNamespace.enter_rootfs(WORKSPACE_ROOTFS_PATH)
+      extra_binds = [] of Tuple(Path, Path)
+      workspace_path = Path["/workspace"]
+      if Dir.exists?(workspace_path)
+        extra_binds << {workspace_path, workspace_path}
+      end
+      SysrootNamespace.enter_rootfs(WORKSPACE_ROOTFS_PATH, extra_binds: extra_binds)
     end
 
     # Raised when a command fails during a SystemRunner invocation.
