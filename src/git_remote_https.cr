@@ -59,6 +59,8 @@ module Bootstrap
         while line = STDIN.gets
           line = line.rstrip("\n")
           case
+          when line.empty?
+            next
           when line == "capabilities"
             write_capabilities
           when line.starts_with?("option ")
@@ -166,7 +168,7 @@ module Bootstrap
         body = build_upload_pack_request(wants)
         response = http_post(upload_pack_url, body)
         raise "git-upload-pack failed with status #{response.status_code}" unless (200..299).includes?(response.status_code)
-        io = response.body_io
+        io = response_body_io(response)
         discard_ack_packets(io)
         IO.copy(io, STDOUT)
       end
@@ -192,7 +194,7 @@ module Bootstrap
         body = build_receive_pack_request(updates)
         response = http_post_receive_pack(receive_pack_url, body)
         raise "git-receive-pack failed with status #{response.status_code}" unless (200..299).includes?(response.status_code)
-        statuses = parse_receive_pack_status(response.body_io)
+        statuses = parse_receive_pack_status(response_body_io(response))
         updates.each do |update|
           if status = statuses[update.refname]?
             if status
@@ -249,23 +251,29 @@ module Bootstrap
         statuses = {} of String => String?
         first = read_pkt_line(io)
         if first
-          raise "git-receive-pack error: #{first}" if first.starts_with?("ERR ")
-          if first.starts_with?("unpack ") && first != "unpack ok"
-            raise "git-receive-pack failed: #{first}"
+          clean = first.rstrip("\n")
+          clean = clean.split('\0', 2)[0] if clean.includes?('\0')
+          debug_log("receive-pack line=#{clean.inspect}")
+          raise "git-receive-pack error: #{clean}" if clean.starts_with?("ERR ")
+          if clean.starts_with?("unpack ") && clean != "unpack ok"
+            raise "git-receive-pack failed: #{clean}"
           end
         end
         while (line = read_pkt_line(io))
-          break if line.empty?
-          if line.starts_with?("ok ")
-            ref = line[3..].strip
+          clean = line.rstrip("\n")
+          clean = clean.split('\0', 2)[0] if clean.includes?('\0')
+          debug_log("receive-pack line=#{clean.inspect}")
+          break if clean.empty?
+          if clean.starts_with?("ok ")
+            ref = clean[3..].strip
             statuses[ref] = nil
-          elsif line.starts_with?("ng ")
-            parts = line.split(" ", 3)
-            ref = parts[1]? || line
+          elsif clean.starts_with?("ng ")
+            parts = clean.split(" ", 3)
+            ref = parts[1]? || clean
             msg = parts[2]? || "push rejected"
             statuses[ref] = msg
-          elsif line.starts_with?("ERR ")
-            raise "git-receive-pack error: #{line}"
+          elsif clean.starts_with?("ERR ")
+            raise "git-receive-pack error: #{clean}"
           end
         end
         statuses
@@ -287,7 +295,7 @@ module Bootstrap
       private def load_refs : Nil
         response = http_get(info_refs_url)
         raise "info/refs failed with status #{response.status_code}" unless (200..299).includes?(response.status_code)
-        io = response.body_io
+        io = response_body_io(response)
         first = read_pkt_line(io)
         if first && first.starts_with?("# service=#{SERVICE_NAME}")
           read_pkt_line(io) # flush
@@ -417,6 +425,10 @@ module Bootstrap
         if body.is_a?(IO)
           body.rewind
         end
+      end
+
+      private def response_body_io(response : HTTP::Client::Response) : IO
+        response.body_io? || IO::Memory.new(response.body)
       end
 
       # True if *status* is an HTTP redirect response code.

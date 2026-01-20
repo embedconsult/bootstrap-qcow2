@@ -4,20 +4,21 @@ module Bootstrap
     VERSION      = "0.29.2"
     LIB_DIRS     = ["/usr/lib", "/usr/lib64", "/opt/sysroot/lib", "/opt/sysroot/lib64"]
     INCLUDE_DIRS = ["/usr/include", "/opt/sysroot/include"]
+    DEBUG_ENV    = "BQ2_PKG_CONFIG_DEBUG"
     PKG_LIBS     = {
-      "libssl"    => ["-lssl", "-lcrypto"],
-      "openssl"   => ["-lssl", "-lcrypto"],
-      "libcrypto" => ["-lcrypto"],
-      "crypto"    => ["-lcrypto"],
-      "bdw-gc"    => ["-lgc"],
+      "libssl"     => ["-lssl", "-lcrypto"],
+      "openssl"    => ["-lssl", "-lcrypto"],
+      "libcrypto"  => ["-lcrypto"],
+      "crypto"     => ["-lcrypto"],
+      "bdw-gc"     => ["-lgc"],
       "libpcre2-8" => ["-lpcre2-8"],
     }
     PKG_VERSIONS = {
-      "libssl"    => "3.8.2",
-      "openssl"   => "3.8.2",
-      "libcrypto" => "3.8.2",
-      "crypto"    => "3.8.2",
-      "bdw-gc"    => "8.2.6",
+      "libssl"     => "3.8.2",
+      "openssl"    => "3.8.2",
+      "libcrypto"  => "3.8.2",
+      "crypto"     => "3.8.2",
+      "bdw-gc"     => "8.2.6",
       "libpcre2-8" => "10.44",
     }
     PKG_VARIABLES = {
@@ -26,7 +27,7 @@ module Bootstrap
       "libdir"     => "/usr/lib",
     }
 
-    private struct Options
+    private class Options
       property libs : Bool
       property cflags : Bool
       property exists : Bool
@@ -58,9 +59,12 @@ module Bootstrap
 
     def self.run(args : Array(String)) : Int32
       options = Options.new
+      debug_log("args=#{args.inspect}") if debug_enabled?
       begin
+        preflight_options(args, options)
         packages = [] of String
         parse_args(args, options, packages)
+        debug_log("options=#{options.inspect} packages=#{packages.inspect}") if debug_enabled?
 
         if options.show_help
           print_help
@@ -115,58 +119,76 @@ module Bootstrap
         end
         puts outputs.join(" ")
         0
-    rescue ex
-      STDERR.puts ex.message unless options.silence
-      1
-    end
+      rescue ex
+        STDERR.puts ex.message unless options.silence
+        1
+      end
     end
 
     private def self.parse_args(args : Array(String), options : Options, packages : Array(String)) : Nil
       idx = 0
       while idx < args.size
         arg = args[idx]
-        case arg
-        when "--libs"
+        if arg == "--libs"
           options.libs = true
-        when "--cflags"
+        elsif arg == "--cflags"
           options.cflags = true
-        when "--exists"
+        elsif arg == "--exists"
           options.exists = true
-        when "--modversion"
+        elsif arg == "--modversion"
           options.modversion = true
-        when "--libs-only-l"
+        elsif arg == "--libs-only-l"
           options.libs_only_l = true
-        when "--libs-only-L"
+        elsif arg == "--libs-only-L"
           options.libs_only_L = true
-        when "--cflags-only-I"
+        elsif arg == "--cflags-only-I"
           options.cflags_only_I = true
-        when "--variable"
+        elsif arg == "--variable"
           idx += 1
           options.variable = args[idx]?
           if options.variable.nil? || options.variable.not_nil!.empty?
             options.unknown_options << "--variable"
           end
+        elsif arg.starts_with?("--variable=")
+          options.variable = arg.split("=", 2)[1]? || ""
+        elsif arg == "--silence-errors" || arg == "--silence"
+          options.silence = true
+        elsif arg == "--print-errors"
+          # Ignored; we always print errors unless --silence-errors was given.
+        elsif arg == "--static"
+          # Ignored; libs are always reported as dynamic linker flags.
+        elsif arg == "--version"
+          options.show_version = true
+        elsif arg == "-h" || arg == "--help"
+          options.show_help = true
+        elsif arg.starts_with?("-")
+          options.unknown_options << arg
         else
-          if arg.starts_with?("--variable=")
-            options.variable = arg.split("=", 2)[1]? || ""
-          elsif arg == "--silence-errors" || arg == "--silence"
-            options.silence = true
-          elsif arg == "--print-errors"
-            # Ignored; we always print errors unless --silence-errors was given.
-          elsif arg == "--static"
-            # Ignored; libs are always reported as dynamic linker flags.
-          elsif arg == "--version"
-            options.show_version = true
-          elsif arg == "-h" || arg == "--help"
-            options.show_help = true
-          elsif arg.starts_with?("-")
-            options.unknown_options << arg
-          else
-            packages << arg
-          end
+          packages << arg
         end
         idx += 1
       end
+    end
+
+    private def self.preflight_options(args : Array(String), options : Options) : Nil
+      if args.includes?("--modversion")
+        options.modversion = true
+      end
+      if args.includes?("--version")
+        options.show_version = true
+      end
+      if var_arg = args.find { |arg| arg.starts_with?("--variable=") }
+        options.variable = var_arg.split("=", 2)[1]? || ""
+      end
+    end
+
+    private def self.debug_enabled? : Bool
+      value = ENV[DEBUG_ENV]?
+      !value.nil? && !value.empty?
+    end
+
+    private def self.debug_log(message : String) : Nil
+      STDERR.puts "[pkg-config] #{message}"
     end
 
     private def self.split_packages(packages : Array(String)) : {Array(String), Array(String)}

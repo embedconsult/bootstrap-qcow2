@@ -191,12 +191,22 @@ describe Bootstrap::SysrootRunner do
       steps: [] of Bootstrap::BuildStep,
     )
     runner = RecordingRunner.new
+    previous = ENV["BQ2_ROOTFS"]?
+    ENV["BQ2_ROOTFS"] = "0"
 
-    expect_raises(Exception, /Refusing to run/) do
-      Bootstrap::SysrootRunner.run_phase(phase, runner, report_dir: nil)
+    begin
+      expect_raises(Exception, /Refusing to run/) do
+        Bootstrap::SysrootRunner.run_phase(phase, runner, report_dir: nil)
+      end
+
+      Bootstrap::SysrootRunner.run_phase(phase, runner, report_dir: nil, allow_outside_rootfs: true)
+    ensure
+      if previous
+        ENV["BQ2_ROOTFS"] = previous
+      else
+        ENV.delete("BQ2_ROOTFS")
+      end
     end
-
-    Bootstrap::SysrootRunner.run_phase(phase, runner, report_dir: nil, allow_outside_rootfs: true)
   end
 
   it "raises when a requested phase does not exist" do
