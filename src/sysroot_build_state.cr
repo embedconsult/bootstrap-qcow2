@@ -194,28 +194,42 @@ module Bootstrap
       failure.phase == phase && failure.step == step
     end
 
+    # Resolve a rootfs-absolute *path* based on the location of *state_path*.
+    def resolve_rootfs_path(path : String, state_path : String?) : String
+      return path unless path.starts_with?("/") && state_path
+      rootfs_root = Path[state_path].expand.parent.parent.parent
+      (rootfs_root / path.lchop("/")).to_s
+    end
+
     # Read the overrides JSON contents if the file exists.
-    def overrides_contents : String?
+    def overrides_contents(state_path : String? = nil) : String?
       path = overrides_path
-      return nil unless path && File.exists?(path)
-      File.read(path)
+      return nil unless path
+      resolved = resolve_rootfs_path(path, state_path)
+      return nil unless File.exists?(resolved)
+      File.read(resolved)
     end
 
     # Determine the most relevant failure report path, if any.
-    def failure_report_path : String?
+    def failure_report_path(state_path : String? = nil) : String?
       if (failure = progress.last_failure)
         report_path = failure.report_path
-        return report_path if report_path && File.exists?(report_path)
+        if report_path
+          resolved = resolve_rootfs_path(report_path, state_path)
+          return resolved if File.exists?(resolved)
+        end
       end
 
       reports_dir = report_dir
-      return nil unless reports_dir && Dir.exists?(reports_dir)
+      return nil unless reports_dir
+      resolved_reports_dir = resolve_rootfs_path(reports_dir, state_path)
+      return nil unless Dir.exists?(resolved_reports_dir)
 
       latest_path = nil
       latest_mtime = Time::UNIX_EPOCH
-      Dir.each_child(reports_dir) do |entry|
+      Dir.each_child(resolved_reports_dir) do |entry|
         next unless entry.ends_with?(".json")
-        path = File.join(reports_dir, entry)
+        path = File.join(resolved_reports_dir, entry)
         next unless File.file?(path)
         mtime = File.info(path).modification_time
         if latest_path.nil? || mtime > latest_mtime
@@ -228,8 +242,8 @@ module Bootstrap
     end
 
     # Read the most recent failure report JSON if available.
-    def failure_report_contents : String?
-      path = failure_report_path
+    def failure_report_contents(state_path : String? = nil) : String?
+      path = failure_report_path(state_path)
       return nil unless path && File.exists?(path)
       File.read(path)
     end

@@ -695,15 +695,15 @@ module Bootstrap
           state = SysrootBuildState.load(state_path.to_s)
           if state.retrying_last_failure?(decision.resume_phase, decision.resume_step)
             puts "\nResume details: retrying last failed step."
-            if (overrides = state.overrides_contents)
+            if (overrides = state.overrides_contents(state_path.to_s))
               puts "overrides_path=#{state.overrides_path}"
               puts overrides
             else
               puts "overrides_path=(none)"
             end
-            if (report_path = state.failure_report_path)
+            if (report_path = state.failure_report_path(state_path.to_s))
               puts "failure_report_path=#{report_path}"
-              if (report = state.failure_report_contents)
+              if (report = state.failure_report_contents(state_path.to_s))
                 puts report
               end
             else
