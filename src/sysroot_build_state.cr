@@ -103,6 +103,19 @@ module Bootstrap
       state
     end
 
+    # Return the SHA256 hex digest for *path*, or nil when the file is missing.
+    def self.digest_for?(path : String) : String?
+      return nil unless File.exists?(path)
+      digest = Digest::SHA256.new
+      File.open(path) do |file|
+        buffer = Bytes.new(8192)
+        while (read = file.read(buffer)) > 0
+          digest.update(buffer[0, read])
+        end
+      end
+      digest.final.hexstring
+    end
+
     # Persist the state JSON to disk.
     def save(path : String = DEFAULT_PATH) : Nil
       FileUtils.mkdir_p(Path[path].parent)
@@ -152,8 +165,8 @@ module Bootstrap
     def reconcile_inputs! : Nil
       previous_plan = plan_digest
       previous_overrides = overrides_digest
-      current_plan = digest_for?(plan_path)
-      current_overrides = overrides_path ? digest_for?(overrides_path.not_nil!) : nil
+      current_plan = self.class.digest_for?(plan_path)
+      current_overrides = overrides_path ? self.class.digest_for?(overrides_path.not_nil!) : nil
 
       self.plan_digest = current_plan
       self.overrides_digest = current_overrides
@@ -171,18 +184,6 @@ module Bootstrap
       progress.last_failure = nil
       self.invalidated_at = Time.utc.to_s
       self.invalidation_reason = "Build plan/overrides changed; cleared completed steps"
-    end
-
-    private def digest_for?(path : String) : String?
-      return nil unless File.exists?(path)
-      digest = Digest::SHA256.new
-      File.open(path) do |file|
-        buffer = Bytes.new(8192)
-        while (read = file.read(buffer)) > 0
-          digest.update(buffer[0, read])
-        end
-      end
-      digest.final.hexstring
     end
 
     # Minimal step reference used for progress tracking.
