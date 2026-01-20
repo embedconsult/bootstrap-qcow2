@@ -187,9 +187,11 @@ module Bootstrap
               FileUtils.rm_rf(stage2_build_dir) if Dir.exists?(stage2_build_dir)
             end
 
+            stage1_cc = env["CC"]? || Process.find_executable("clang") || "clang"
+            stage1_cxx = env["CXX"]? || Process.find_executable("clang++") || "clang++"
             stage1_flags = step.configure_flags.reject { |flag| flag.starts_with?("-DLLVM_ENABLE_LIBCXX=") } + [
-              "-DCMAKE_C_COMPILER=clang",
-              "-DCMAKE_CXX_COMPILER=clang++",
+              "-DCMAKE_C_COMPILER=#{stage1_cc}",
+              "-DCMAKE_CXX_COMPILER=#{stage1_cxx}",
             ]
             run_cmd(["cmake", "-S", source_dir, "-B", stage1_build_dir, "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + stage1_flags, env: env)
             run_cmd(["cmake", "--build", stage1_build_dir, "-j#{cpus}"], env: env)
