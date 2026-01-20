@@ -213,6 +213,7 @@ module Bootstrap
           URI.parse("https://github.com/crystal-lang/shards/archive/refs/tags/v#{DEFAULT_SHARDS}.tar.gz"),
           strategy: "crystal-build",
           configure_flags: ["-o", "bin/shards", "src/shards.cr"],
+          build_directory: "shards-#{DEFAULT_SHARDS}",
           phases: ["sysroot-from-alpine", "system-from-sysroot"],
         ),
         PackageSpec.new(
