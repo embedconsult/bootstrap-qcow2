@@ -384,14 +384,18 @@ module Bootstrap
         return 1
       end
 
-      AlpineSetup.write_resolv_conf(builder.rootfs_dir)
-
       bind_spec = "#{repo_root}:#{repo_root}"
       crystal_path = "/usr/bin/crystal"
       main_path = repo_root / "src" / "main.cr"
       default_rootfs_path = builder.sources_dir / "bq2-rootfs-#{Bootstrap::VERSION}.tar.gz"
       rootfs_tarball = base_rootfs_path || (File.exists?(default_rootfs_path) ? default_rootfs_path : nil)
-      use_alpine_setup = rootfs_tarball.nil? || !bq2_rootfs_tarball?(rootfs_tarball)
+      use_bq2_rootfs = rootfs_tarball ? bq2_rootfs_tarball?(rootfs_tarball) : false
+      if use_bq2_rootfs
+        builder.stage_sources(skip_existing: true)
+        puts "Restaged missing sources into #{builder.rootfs_dir}/workspace"
+      end
+      AlpineSetup.write_resolv_conf(builder.rootfs_dir)
+      use_alpine_setup = rootfs_tarball.nil? || !use_bq2_rootfs
       namespace_args = [
         "sysroot-namespace",
         "--rootfs",
