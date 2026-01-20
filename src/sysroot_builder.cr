@@ -672,7 +672,7 @@ module Bootstrap
               "LDFLAGS"  => "-L#{sysroot_prefix}/lib",
             },
             "zlib" => {
-              "LDSHARED" => "#{sysroot_env["CC"]} -shared -Wl,-soname,libz.so.1",
+              "LDSHARED" => "#{sysroot_env["CC"]} -shared -Wl,-soname,libz.so.1 -Wl,--version-script,libz.map",
             },
           },
         ),
@@ -760,7 +760,7 @@ module Bootstrap
           package_allowlist: nil,
           env_overrides: {
             "zlib" => {
-              "LDSHARED" => "#{rootfs_env["CC"]} -shared -Wl,-soname,libz.so.1",
+              "LDSHARED" => "#{rootfs_env["CC"]} -shared -Wl,-soname,libz.so.1 -Wl,--version-script,libz.map",
             },
           },
           configure_overrides: {
