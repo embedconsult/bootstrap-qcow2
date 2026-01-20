@@ -98,12 +98,11 @@ module Bootstrap
 
       if codex_mode
         extra_binds << {Path["codex/work"].expand, normalize_bind_target("/work")}
+        command = ["/work/bin/codex", "--add-dir", "/var", "--add-dir", "/opt", "--add-dir", "/workspace", "-C", "/work"]
+        ENV["HOME"] = "/work"
+      else
+        command = remaining
       end
-      command = if remaining.empty?
-                  codex_mode ? ["/work/bin/codex"] : ["/bin/sh"]
-                else
-                  remaining
-                end
       if enter_workspace_rootfs
         rootfs = (Path[rootfs].expand / "workspace" / "rootfs").to_s
       end
