@@ -228,6 +228,9 @@ module Bootstrap
               run_cmd(["install", "-m", "0755", artifact, "#{bin_prefix}/bin/"], env: env)
             end
           when "crystal-build"
+            if File.exists?("shard.yml")
+              run_cmd(["shards", "install"], env: env)
+            end
             run_cmd(["crystal", "build"] + step.configure_flags, env: env)
             bin_prefix = destdir ? "#{destdir}#{install_prefix}" : install_prefix
             run_cmd(["install", "-d", "#{bin_prefix}/bin"], env: env)
