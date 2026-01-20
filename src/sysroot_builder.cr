@@ -54,7 +54,7 @@ module Bootstrap
     DEFAULT_FOSSIL        = "2.25"
     DEFAULT_GIT           = "2.45.2"
     DEFAULT_CRYSTAL       = "1.18.2"
-    DEFAULT_BQ2_BRANCH    = "master"
+    DEFAULT_BQ2_BRANCH    = "my-fixes"
     # Source: https://letsencrypt.org/certs/isrgrootx1.pem
     ISRG_ROOT_X1_PEM = <<-'PEM'
       -----BEGIN CERTIFICATE-----
