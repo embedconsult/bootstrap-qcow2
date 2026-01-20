@@ -8,6 +8,7 @@ require "time"
 require "./build_plan"
 require "./build_plan_reader"
 require "./build_plan_overrides"
+require "./sysroot_namespace"
 require "./sysroot_build_state"
 
 module Bootstrap
@@ -22,6 +23,9 @@ module Bootstrap
     DEFAULT_STATE_PATH     = SysrootBuildState::DEFAULT_PATH
     ROOTFS_MARKER_PATH     = "/.bq2-rootfs"
     ROOTFS_ENV_FLAG        = "BQ2_ROOTFS"
+    # Default rootfs output directory from SysrootBuilder.phase_specs.
+    WORKSPACE_ROOTFS_PATH        = "/workspace/rootfs"
+    WORKSPACE_ROOTFS_MARKER_PATH = "#{WORKSPACE_ROOTFS_PATH}#{ROOTFS_MARKER_PATH}"
 
     # Returns true when a rootfs marker is present (env override or marker file).
     def self.rootfs_marker_present? : Bool
@@ -31,6 +35,18 @@ module Bootstrap
         return true
       end
       File.exists?(ROOTFS_MARKER_PATH)
+    end
+
+    # Returns true when the workspace rootfs has been created.
+    def self.workspace_rootfs_present? : Bool
+      File.exists?(WORKSPACE_ROOTFS_MARKER_PATH)
+    end
+
+    # Enter the workspace rootfs when the marker is present.
+    def self.enter_workspace_rootfs! : Nil
+      return unless workspace_rootfs_present?
+      Log.info { "Entering workspace rootfs at #{WORKSPACE_ROOTFS_PATH}" }
+      SysrootNamespace.enter_rootfs(WORKSPACE_ROOTFS_PATH)
     end
 
     # Raised when a command fails during a SystemRunner invocation.
@@ -458,6 +474,9 @@ module Bootstrap
                        state_path : String? = nil,
                        resume : Bool = true,
                        allow_outside_rootfs : Bool = false)
+      if !allow_outside_rootfs && phase.environment.starts_with?("rootfs-") && !rootfs_marker_present?
+        enter_workspace_rootfs! if workspace_rootfs_present?
+      end
       if !allow_outside_rootfs && phase.environment.starts_with?("rootfs-") && !rootfs_marker_present?
         raise "Refusing to run #{phase.name} (env=#{phase.environment}) outside the produced rootfs (missing #{ROOTFS_MARKER_PATH})"
       end
