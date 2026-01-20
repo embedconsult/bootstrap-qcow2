@@ -703,7 +703,7 @@ module Bootstrap
               "LDFLAGS"  => "-L#{sysroot_prefix}/lib",
             },
             "libxml2" => libxml2_env,
-            "zlib" => {
+            "zlib"    => {
               "LDSHARED" => "#{sysroot_env["CC"]} -shared -Wl,-soname,libz.so.1 -Wl,--version-script,libz.map",
             },
           },
@@ -795,7 +795,7 @@ module Bootstrap
           package_allowlist: nil,
           env_overrides: {
             "libxml2" => libxml2_env,
-            "zlib" => {
+            "zlib"    => {
               "LDSHARED" => "#{rootfs_env["CC"]} -shared -Wl,-soname,libz.so.1 -Wl,--version-script,libz.map",
             },
           },
@@ -838,9 +838,9 @@ module Bootstrap
           package_allowlist: nil,
           env_overrides: {
             "git" => {
-              "MAKEFLAGS" => "-e",
+              "MAKEFLAGS"  => "-e",
               "NO_GETTEXT" => "1",
-              "NO_TCLTK" => "1",
+              "NO_TCLTK"   => "1",
             },
           },
         ),
