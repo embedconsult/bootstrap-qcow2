@@ -32,7 +32,7 @@ module Bootstrap
       zlib-dev
       pcre2-dev
       gc-dev
-      libyaml-dev
+      yaml-dev
       perl
       python3
       shards
