@@ -351,7 +351,23 @@ module Bootstrap
       private def effective_env(phase : BuildPhase, step : BuildStep) : Hash(String, String)
         merged = phase.env.dup
         step.env.each { |key, value| merged[key] = value }
-        merged
+        ensure_sysroot_ld_library_path(merged)
+      end
+
+      private def ensure_sysroot_ld_library_path(env : Hash(String, String)) : Hash(String, String)
+        sysroot_bin = "/opt/sysroot/bin"
+        sysroot_lib = "/opt/sysroot/lib"
+        path = env["PATH"]?
+        return env unless path && path.includes?(sysroot_bin)
+        current = env["LD_LIBRARY_PATH"]?
+        if current
+          parts = current.split(':')
+          return env if parts.includes?(sysroot_lib)
+          env["LD_LIBRARY_PATH"] = "#{sysroot_lib}:#{current}"
+        else
+          env["LD_LIBRARY_PATH"] = sysroot_lib
+        end
+        env
       end
     end
 
