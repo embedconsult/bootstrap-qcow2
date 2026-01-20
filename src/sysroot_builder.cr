@@ -660,6 +660,18 @@ module Bootstrap
       profile_content = rootfs_profile_content
       resolv_conf_content = rootfs_resolv_conf_content
       hosts_content = rootfs_hosts_content
+      libxml2_env = {
+        "CPPFLAGS" => "-I#{sysroot_prefix}/include",
+        "LDFLAGS"  => "-L#{sysroot_prefix}/lib",
+      }
+      libxml2_cmake_flags = [
+        "-DLIBXML2_WITH_ZLIB=ON",
+        "-DZLIB_LIBRARY=#{sysroot_prefix}/lib/libz.so",
+        "-DZLIB_INCLUDE_DIR=#{sysroot_prefix}/include",
+        "-DIconv_INCLUDE_DIR=#{sysroot_prefix}/include",
+        "-DIconv_LIBRARY=#{sysroot_prefix}/lib/libiconv.so",
+        "-DIconv_IS_BUILT_IN=OFF",
+      ]
       musl_arch = case @architecture
                   when "aarch64", "arm64"
                     "aarch64"
@@ -690,9 +702,13 @@ module Bootstrap
               "CPPFLAGS" => "-I#{sysroot_prefix}/include",
               "LDFLAGS"  => "-L#{sysroot_prefix}/lib",
             },
+            "libxml2" => libxml2_env,
             "zlib" => {
               "LDSHARED" => "#{sysroot_env["CC"]} -shared -Wl,-soname,libz.so.1 -Wl,--version-script,libz.map",
             },
+          },
+          configure_overrides: {
+            "libxml2" => libxml2_cmake_flags,
           },
         ),
         PhaseSpec.new(
@@ -778,6 +794,7 @@ module Bootstrap
           env: rootfs_env,
           package_allowlist: nil,
           env_overrides: {
+            "libxml2" => libxml2_env,
             "zlib" => {
               "LDSHARED" => "#{rootfs_env["CC"]} -shared -Wl,-soname,libz.so.1 -Wl,--version-script,libz.map",
             },
@@ -789,6 +806,7 @@ module Bootstrap
               "-DOPENSSL_SSL_LIBRARY=/usr/lib/libssl.so",
               "-DOPENSSL_CRYPTO_LIBRARY=/usr/lib/libcrypto.so",
             ],
+            "libxml2" => libxml2_cmake_flags,
           },
           extra_steps: [
             BuildStep.new(
@@ -820,8 +838,9 @@ module Bootstrap
           package_allowlist: nil,
           env_overrides: {
             "git" => {
-              "MAKEFLAGS"  => "-e",
+              "MAKEFLAGS" => "-e",
               "NO_GETTEXT" => "1",
+              "NO_TCLTK" => "1",
             },
           },
         ),
