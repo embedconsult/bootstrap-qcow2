@@ -104,9 +104,9 @@ module Bootstrap
       Decision.new("sysroot-runner", "plan present but state is missing", plan_path: plan_path)
     end
 
-    # Return true when a rootfs tarball exists in either workspace location.
+    # Return true when the cached rootfs tarball exists in the sources directory.
     def tarball_present? : Bool
-      File.exists?(rootfs_tarball_path) || File.exists?(output_tarball_path)
+      File.exists?(output_tarball_path)
     end
 
     # Find the next incomplete step in the build plan for the given *state*.
