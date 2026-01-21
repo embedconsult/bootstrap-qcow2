@@ -5,6 +5,8 @@ require "./sysroot_builder"
 module Bootstrap
   # Determines the earliest resume stage for `bq2 --all --resume`.
   class SysrootAllResume
+    ROOTFS_MARKER_NAME        = ".bq2-rootfs"
+    WORKSPACE_ROOTFS_RELATIVE = Path["workspace/rootfs"]
     # Ordered stage list for the --all workflow.
     STAGE_ORDER = [
       "download-sources",
@@ -62,6 +64,15 @@ module Bootstrap
                    @state_path : Path = builder.rootfs_dir / "var/lib/sysroot-build-state.json",
                    @rootfs_tarball_path : Path = builder.rootfs_dir / "workspace" / "bq-rootfs.tar.gz",
                    @output_tarball_path : Path = builder.sources_dir / "bq2-rootfs-#{Bootstrap::VERSION}.tar.gz")
+      workspace_rootfs_dir = builder.rootfs_dir / WORKSPACE_ROOTFS_RELATIVE
+      if File.exists?(workspace_rootfs_dir / ROOTFS_MARKER_NAME)
+        candidate_plan = workspace_rootfs_dir / "var/lib/sysroot-build-plan.json"
+        candidate_state = workspace_rootfs_dir / "var/lib/sysroot-build-state.json"
+        if File.exists?(candidate_plan)
+          @plan_path = candidate_plan
+          @state_path = candidate_state
+        end
+      end
     end
 
     # Determine the earliest incomplete stage for `--all --resume`.
@@ -87,7 +98,7 @@ module Bootstrap
         state = SysrootBuildState.load(state_path.to_s)
         plan_digest = SysrootBuildState.digest_for?(plan_path.to_s)
         if plan_digest.nil? || state.plan_digest != plan_digest
-          raise "Ambiguous resume state: plan digest mismatch between #{plan_path} and #{state_path}"
+          return Decision.new("sysroot-runner", "plan digest mismatch; ignoring state", plan_path: plan_path)
         end
 
         next_phase, next_step = next_incomplete_step(plan, state)
