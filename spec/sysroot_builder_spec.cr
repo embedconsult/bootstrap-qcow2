@@ -135,6 +135,28 @@ describe Bootstrap::SysrootBuilder do
     phases.should eq ["sysroot-from-alpine", "crystal-from-sysroot", "rootfs-from-sysroot", "system-from-sysroot", "tools-from-system", "crystal-from-system", "finalize-rootfs"]
   end
 
+  it "seeds rootfs profile, CA bundle, and final musl loader path" do
+    builder = Bootstrap::SysrootBuilder.new(Path["/tmp/work"])
+    sysroot_phase = builder.phase_specs.find(&.name.==("sysroot-from-alpine")).not_nil!
+    sysroot_zlib_env = sysroot_phase.env_overrides["zlib"]
+    sysroot_zlib_env["CFLAGS"].should contain("-fPIC")
+    rootfs_phase = builder.phase_specs.find(&.name.==("rootfs-from-sysroot")).not_nil!
+    prepare_step = rootfs_phase.extra_steps.find(&.name.==("prepare-rootfs")).not_nil!
+    profile = prepare_step.env["FILE_1_CONTENT"]
+    profile.should contain("SSL_CERT_FILE=\"/etc/ssl/certs/ca-certificates.crt\"")
+    profile.should contain("LANG=C.UTF-8")
+    ca_bundle = prepare_step.env["FILE_4_CONTENT"]
+    ca_bundle.should contain("BEGIN CERTIFICATE")
+
+    system_phase = builder.phase_specs.find(&.name.==("system-from-sysroot")).not_nil!
+    system_zlib_env = system_phase.env_overrides["zlib"]
+    system_zlib_env["CFLAGS"].should contain("-fPIC")
+
+    finalize_phase = builder.phase_specs.find(&.name.==("finalize-rootfs")).not_nil!
+    final_ld_step = finalize_phase.extra_steps.find(&.name.==("musl-ld-path-final")).not_nil!
+    final_ld_step.env["CONTENT"].should eq "/lib:/usr/lib\n"
+  end
+
   it "computes hashes" do
     with_tempdir do |dir|
       path = dir / "data.txt"
