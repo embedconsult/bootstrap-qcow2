@@ -104,8 +104,6 @@ module Bootstrap
         ENV["HOME"] = "/work"
         Log.info { "codex-mode: codex_workdir=#{codex_workdir} command=#{command.join(" ")}" }
         STDERR.puts "codex-mode: codex_workdir=#{codex_workdir}"
-        STDERR.puts "codex-mode: codex_bind=#{codex_bind}"
-        STDERR.puts "codex-mode: codex_executable=#{codex_executable} exists=#{File.exists?(codex_executable)}"
         STDERR.puts "codex-mode: command=#{command.join(" ")}"
       else
         if remaining.empty?
