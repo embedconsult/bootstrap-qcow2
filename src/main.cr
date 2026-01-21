@@ -101,9 +101,13 @@ module Bootstrap
         # TODO: if there isn't a git checkout in codex/work/bootstrap-qcow2, make one
         codex_workdir = "codex/work/bootstrap-qcow2"
         FileUtils.mkdir_p(codex_workdir)
-        extra_binds << {Path["codex/work"].expand, normalize_bind_target("/work")}
+        codex_bind = Path["codex/work"].expand
+        extra_binds << {codex_bind, normalize_bind_target("/work")}
         command = ["/work/bin/codex", "--add-dir", "/var", "--add-dir", "/opt", "--add-dir", "/workspace", "-C", codex_workdir]
         ENV["HOME"] = "/work"
+        Log.info do
+          "codex-mode: codex_workdir=#{codex_workdir} codex_bind=#{codex_bind} command=#{command.join(" ")}"
+        end
       else
         if remaining.empty?
           command = ["/bin/sh"]
@@ -122,11 +126,19 @@ module Bootstrap
           return 1
         end
       end
-      Log.debug { "Entering namespace with rootfs=#{rootfs_value} command=#{command.join(" ")}" }
+      Log.info do
+        bind_summary = extra_binds.map { |(src, dst)| "#{src}:#{dst}" }.join(", ")
+        "Entering namespace with rootfs=#{rootfs_value} command=#{command.join(" ")} binds=[#{bind_summary}]"
+      end
+      unless Dir.exists?(rootfs_value)
+        Log.error { "Rootfs path does not exist: #{rootfs_value}" }
+        return 1
+      end
 
       SysrootNamespace.enter_rootfs(rootfs_value, extra_binds: extra_binds)
       apply_toolchain_env_defaults
       AlpineSetup.install_sysroot_runner_packages if run_alpine_setup
+      Log.info { "Executing command: #{command.join(" ")}" }
       Process.exec(command.first, command[1..])
     rescue ex : File::Error
       cmd = command || [] of String
