@@ -103,6 +103,10 @@ module Bootstrap
         command = ["/bin/sh", "--login", "/work/bin/codex", "--add-dir", "/var", "--add-dir", "/opt", "--add-dir", "/workspace", "-C", codex_workdir]
         ENV["HOME"] = "/work"
         Log.info { "codex-mode: codex_workdir=#{codex_workdir} command=#{command.join(" ")}" }
+        STDERR.puts "codex-mode: codex_workdir=#{codex_workdir}"
+        STDERR.puts "codex-mode: codex_bind=#{codex_bind}"
+        STDERR.puts "codex-mode: codex_executable=#{codex_executable} exists=#{File.exists?(codex_executable)}"
+        STDERR.puts "codex-mode: command=#{command.join(" ")}"
       else
         if remaining.empty?
           command = ["/bin/sh", "--login"]
@@ -120,8 +124,12 @@ module Bootstrap
         bind_summary = extra_binds.map { |(src, dst)| "#{src}:#{dst}" }.join(", ")
         "Entering namespace with rootfs=#{rootfs_value} command=#{command.join(" ")} binds=[#{bind_summary}]"
       end
+      STDERR.puts "Entering namespace with rootfs=#{rootfs_value}"
+      STDERR.puts "Bind mounts: #{extra_binds.map { |(src, dst)| "#{src}:#{dst}" }.join(", ")}"
+      STDERR.puts "Command: #{command.join(" ")}"
       unless Dir.exists?(rootfs_value)
         Log.error { "Rootfs path does not exist: #{rootfs_value}" }
+        STDERR.puts "Rootfs path does not exist: #{rootfs_value}"
         return 1
       end
 
@@ -129,6 +137,7 @@ module Bootstrap
       apply_toolchain_env_defaults
       AlpineSetup.install_sysroot_runner_packages if run_alpine_setup
       Log.info { "Executing command: #{command.join(" ")}" }
+      STDERR.puts "Executing command: #{command.join(" ")}"
       Process.exec(command.first, command[1..])
     rescue ex : File::Error
       cmd = command || [] of String
@@ -138,6 +147,9 @@ module Bootstrap
       Log.error do
         "Process exec failed for #{cmd.join(" ")} (cwd=#{cwd}, rootfs=#{rootfs}, executable=#{executable}, exists=#{exec_exists}): #{ex.message}"
       end
+      STDERR.puts "Process exec failed for #{cmd.join(" ")}"
+      STDERR.puts "cwd=#{cwd} rootfs=#{rootfs} executable=#{executable} exists=#{exec_exists}"
+      STDERR.puts "error=#{ex.message}"
       raise ex
     end
 
