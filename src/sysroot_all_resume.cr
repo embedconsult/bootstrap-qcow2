@@ -98,7 +98,7 @@ module Bootstrap
         state = SysrootBuildState.load(state_path.to_s)
         plan_digest = SysrootBuildState.digest_for?(plan_path.to_s)
         if plan_digest.nil? || state.plan_digest != plan_digest
-          raise "Ambiguous resume state: plan digest mismatch between #{plan_path} and #{state_path}"
+          return Decision.new("sysroot-runner", "plan digest mismatch; ignoring state", plan_path: plan_path)
         end
 
         next_phase, next_step = next_incomplete_step(plan, state)
