@@ -112,22 +112,30 @@ module Bootstrap
         end
       end
       if enter_workspace_rootfs
-        rootfs = (Path[rootfs].expand / "workspace" / "rootfs").to_s
-        unless Dir.exists?(rootfs)
-          STDERR.puts "Workspace rootfs missing at #{rootfs}."
+        rootfs = (Path[rootfs.not_nil!].expand / "workspace" / "rootfs").to_s
+      end
+      rootfs_value = rootfs.not_nil!
+      if enter_workspace_rootfs
+        unless Dir.exists?(rootfs_value)
+          STDERR.puts "Workspace rootfs missing at #{rootfs_value}."
           STDERR.puts "Run ./bin/bq2 --all --resume or ./bin/sysroot-runner --phase rootfs-from-sysroot to generate it."
           return 1
         end
       end
-      Log.debug { "Entering namespace with rootfs=#{rootfs} command=#{command.join(" ")}" }
+      Log.debug { "Entering namespace with rootfs=#{rootfs_value} command=#{command.join(" ")}" }
 
-      SysrootNamespace.enter_rootfs(rootfs, extra_binds: extra_binds)
+      SysrootNamespace.enter_rootfs(rootfs_value, extra_binds: extra_binds)
       apply_toolchain_env_defaults
       AlpineSetup.install_sysroot_runner_packages if run_alpine_setup
       Process.exec(command.first, command[1..])
     rescue ex : File::Error
       cmd = command || [] of String
-      Log.error { "Process exec failed for #{cmd.join(" ")}: #{ex.message}" }
+      executable = cmd.first?
+      cwd = Dir.current
+      exec_exists = executable ? File.exists?(executable) : false
+      Log.error do
+        "Process exec failed for #{cmd.join(" ")} (cwd=#{cwd}, rootfs=#{rootfs}, executable=#{executable}, exists=#{exec_exists}): #{ex.message}"
+      end
       raise ex
     end
 
