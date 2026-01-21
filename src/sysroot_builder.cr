@@ -765,10 +765,7 @@ module Bootstrap
           env_overrides: {
             "libxml2" => libxml2_env,
             "zlib"    => {
-<<<<<<< HEAD
-=======
               "CFLAGS"   => "-fPIC",
->>>>>>> origin/codex-development
               "LDSHARED" => "#{rootfs_env["CC"]} -shared -Wl,-soname,libz.so.1 -Wl,--version-script,libz.map",
             },
           },
