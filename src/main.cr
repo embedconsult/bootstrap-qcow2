@@ -160,22 +160,12 @@ module Bootstrap
 
     # Ensure the sysroot toolchain defaults are available inside the namespace.
     private def self.apply_toolchain_env_defaults : Nil
-      ENV["CRYSTAL_CACHE_DIR"] ||= "/tmp/crystal_cache"
-      ENV["CC"] ||= "clang -fuse-ld=lld"
-      ENV["CXX"] ||= "clang++ -fuse-ld=lld"
-      ENV["LD"] ||= "ld.lld"
-      ENV["PATH"] = prepend_path_entries(ENV["PATH"]?, ["/opt/sysroot/bin", "/opt/sysroot/sbin"])
-    end
-
-    # Prepend *entries* to *path* when missing.
-    private def self.prepend_path_entries(path : String?, entries : Array(String)) : String
-      effective = path || "/usr/bin:/bin"
-      segments = effective.split(":")
-      entries.reverse_each do |entry|
-        next if segments.includes?(entry)
-        segments.unshift(entry)
-      end
-      segments.join(":")
+      ENV["CRYSTAL_CACHE_DIR"] = "/tmp/crystal_cache"
+      ENV["SSL_CERT_FILE"] = "/etc/ssl/certs/ca-certificates.crt"
+      ENV["CC"] = "clang -fuse-ld=lld"
+      ENV["CXX"] = "clang++ -fuse-ld=lld"
+      ENV["LD"] = "ld.lld"
+      ENV["PATH"] = "/opt/sysroot/bin:/opt/sysroot/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
     end
 
     private def self.run_sysroot_status(args : Array(String)) : Int32
