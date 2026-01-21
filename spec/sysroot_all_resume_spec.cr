@@ -100,7 +100,7 @@ describe Bootstrap::SysrootAllResume do
     end
   end
 
-  it "refuses to resume when the plan digest does not match the state" do
+  it "ignores state when the plan digest does not match" do
     with_tempdir do |dir|
       builder = Bootstrap::SysrootBuilder.new(workspace: dir)
       populate_sources(builder)
@@ -111,9 +111,10 @@ describe Bootstrap::SysrootAllResume do
       state.plan_digest = "deadbeef"
       state.save(state_path.to_s)
 
-      expect_raises(Exception, /plan digest mismatch/) do
-        Bootstrap::SysrootAllResume.new(builder).decide
-      end
+      decision = Bootstrap::SysrootAllResume.new(builder).decide
+      decision.stage.should eq("sysroot-runner")
+      decision.state_path.should be_nil
+      decision.plan_path.should eq(plan_path)
     end
   end
 
