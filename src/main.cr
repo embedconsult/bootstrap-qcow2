@@ -113,6 +113,11 @@ module Bootstrap
       end
       if enter_workspace_rootfs
         rootfs = (Path[rootfs].expand / "workspace" / "rootfs").to_s
+        unless Dir.exists?(rootfs)
+          STDERR.puts "Workspace rootfs missing at #{rootfs}."
+          STDERR.puts "Run ./bin/bq2 --all --resume or ./bin/sysroot-runner --phase rootfs-from-sysroot to generate it."
+          return 1
+        end
       end
       Log.debug { "Entering namespace with rootfs=#{rootfs} command=#{command.join(" ")}" }
 
