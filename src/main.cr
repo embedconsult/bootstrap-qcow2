@@ -103,6 +103,7 @@ module Bootstrap
         ENV["HOME"] = "/work"
         STDERR.puts "codex-mode: command=#{command.join(" ")}"
       else
+        ENV["HOME"] = "/root"
         if remaining.empty?
           command = ["/bin/sh", "--login"]
         else
