@@ -634,7 +634,7 @@ module Bootstrap
       }
       libxml2_cmake_flags = [
         "-DLIBXML2_WITH_ZLIB=ON",
-        "-DZLIB_LIBRARY=#{sysroot_prefix}/lib/libz.so",
+        "-DZLIB_LIBRARY=#{sysroot_prefix}/lib/libz.so.1",
         "-DZLIB_INCLUDE_DIR=#{sysroot_prefix}/include",
         "-DIconv_INCLUDE_DIR=#{sysroot_prefix}/include",
         "-DIconv_LIBRARY=#{sysroot_prefix}/lib/libiconv.so",
