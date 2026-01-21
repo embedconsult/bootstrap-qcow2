@@ -101,9 +101,18 @@ module Bootstrap
         # TODO: if there isn't a git checkout in codex/work/bootstrap-qcow2, make one
         codex_workdir = "codex/work/bootstrap-qcow2"
         FileUtils.mkdir_p(codex_workdir)
-        extra_binds << {Path["codex/work"].expand, normalize_bind_target("/work")}
+        codex_bind = Path["codex/work"].expand
+        codex_executable = codex_bind / "bin/codex"
+        extra_binds << {codex_bind, normalize_bind_target("/work")}
         command = ["/work/bin/codex", "--add-dir", "/var", "--add-dir", "/opt", "--add-dir", "/workspace", "-C", codex_workdir]
         ENV["HOME"] = "/work"
+        Log.info do
+          "codex-mode: codex_workdir=#{codex_workdir} codex_bind=#{codex_bind} command=#{command.join(" ")}"
+        end
+        STDERR.puts "codex-mode: codex_workdir=#{codex_workdir}"
+        STDERR.puts "codex-mode: codex_bind=#{codex_bind}"
+        STDERR.puts "codex-mode: codex_executable=#{codex_executable} exists=#{File.exists?(codex_executable)}"
+        STDERR.puts "codex-mode: command=#{command.join(" ")}"
       else
         if remaining.empty?
           command = ["/bin/sh"]
@@ -112,17 +121,46 @@ module Bootstrap
         end
       end
       if enter_workspace_rootfs
-        rootfs = (Path[rootfs].expand / "workspace" / "rootfs").to_s
+        rootfs = (Path[rootfs.not_nil!].expand / "workspace" / "rootfs").to_s
       end
-      Log.debug { "Entering namespace with rootfs=#{rootfs} command=#{command.join(" ")}" }
+      rootfs_value = rootfs.not_nil!
+      if enter_workspace_rootfs
+        unless Dir.exists?(rootfs_value)
+          STDERR.puts "Workspace rootfs missing at #{rootfs_value}."
+          STDERR.puts "Run ./bin/bq2 --all --resume or ./bin/sysroot-runner --phase rootfs-from-sysroot to generate it."
+          return 1
+        end
+      end
+      Log.info do
+        bind_summary = extra_binds.map { |(src, dst)| "#{src}:#{dst}" }.join(", ")
+        "Entering namespace with rootfs=#{rootfs_value} command=#{command.join(" ")} binds=[#{bind_summary}]"
+      end
+      STDERR.puts "Entering namespace with rootfs=#{rootfs_value}"
+      STDERR.puts "Bind mounts: #{extra_binds.map { |(src, dst)| "#{src}:#{dst}" }.join(", ")}"
+      STDERR.puts "Command: #{command.join(" ")}"
+      unless Dir.exists?(rootfs_value)
+        Log.error { "Rootfs path does not exist: #{rootfs_value}" }
+        STDERR.puts "Rootfs path does not exist: #{rootfs_value}"
+        return 1
+      end
 
-      SysrootNamespace.enter_rootfs(rootfs, extra_binds: extra_binds)
+      SysrootNamespace.enter_rootfs(rootfs_value, extra_binds: extra_binds)
       apply_toolchain_env_defaults
       AlpineSetup.install_sysroot_runner_packages if run_alpine_setup
+      Log.info { "Executing command: #{command.join(" ")}" }
+      STDERR.puts "Executing command: #{command.join(" ")}"
       Process.exec(command.first, command[1..])
     rescue ex : File::Error
       cmd = command || [] of String
-      Log.error { "Process exec failed for #{cmd.join(" ")}: #{ex.message}" }
+      executable = cmd.first?
+      cwd = Dir.current
+      exec_exists = executable ? File.exists?(executable) : false
+      Log.error do
+        "Process exec failed for #{cmd.join(" ")} (cwd=#{cwd}, rootfs=#{rootfs}, executable=#{executable}, exists=#{exec_exists}): #{ex.message}"
+      end
+      STDERR.puts "Process exec failed for #{cmd.join(" ")}"
+      STDERR.puts "cwd=#{cwd} rootfs=#{rootfs} executable=#{executable} exists=#{exec_exists}"
+      STDERR.puts "error=#{ex.message}"
       raise ex
     end
 

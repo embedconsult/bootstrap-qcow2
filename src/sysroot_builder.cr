@@ -950,9 +950,10 @@ module Bootstrap
       cc = "#{sysroot_prefix}/bin/clang --target=#{target} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld"
       cxx = "#{sysroot_prefix}/bin/clang++ --target=#{target} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -nostdinc++ -isystem #{libcxx_include} -isystem #{libcxx_target_include} -nostdlib++ -stdlib=libc++ -L#{libcxx_libdir} -L#{sysroot_prefix}/lib -Wl,--start-group -lc++ -lc++abi -lunwind -Wl,--end-group"
       {
-        "PATH" => "#{sysroot_prefix}/bin:#{sysroot_prefix}/sbin:/usr/bin:/bin",
-        "CC"   => cc,
-        "CXX"  => cxx,
+        "PATH"            => "#{sysroot_prefix}/bin:#{sysroot_prefix}/sbin:/usr/bin:/bin",
+        "CC"              => cc,
+        "CXX"             => cxx,
+        "LD_LIBRARY_PATH" => "#{sysroot_prefix}/lib:#{libcxx_libdir}",
       }
     end
 
