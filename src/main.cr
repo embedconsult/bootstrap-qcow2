@@ -75,12 +75,10 @@ module Bootstrap
       rootfs = "data/sysroot/rootfs"
       extra_binds = [] of Tuple(Path, Path)
       command = [] of String
-      enter_workspace_rootfs = false
       codex_mode = false
       run_alpine_setup = false
       parser, remaining, help = CLI.parse(args, "Usage: bq2 sysroot-namespace [options] [-- command...]") do |p|
         p.on("--rootfs=PATH", "Path to the sysroot rootfs (default: #{rootfs})") { |val| rootfs = val }
-        p.on("--workspace-rootfs", "Enter the generated rootfs at <rootfs>/workspace/rootfs (output of rootfs-from-sysroot)") { enter_workspace_rootfs = true }
         p.on("--bind=SRC:DST", "Bind-mount SRC into DST inside the rootfs (repeatable; DST is inside rootfs)") do |val|
           parts = val.split(":", 2)
           raise "Expected --bind=SRC:DST" unless parts.size == 2
@@ -101,30 +99,22 @@ module Bootstrap
         # TODO: if there isn't a git checkout in codex/work/bootstrap-qcow2, make one
         codex_workdir = "codex/work/bootstrap-qcow2"
         FileUtils.mkdir_p(codex_workdir)
-        codex_bind = Path["codex/work"].expand
-        extra_binds << {codex_bind, normalize_bind_target("/work")}
-        command = ["/work/bin/codex", "--add-dir", "/var", "--add-dir", "/opt", "--add-dir", "/workspace", "-C", codex_workdir]
+        extra_binds << {Path[codex_workdir], Path["/work"]}
+        command = ["/bin/sh", "--login", "/work/bin/codex", "--add-dir", "/var", "--add-dir", "/opt", "--add-dir", "/workspace", "-C", codex_workdir]
         ENV["HOME"] = "/work"
-        Log.info do
-          "codex-mode: codex_workdir=#{codex_workdir} codex_bind=#{codex_bind} command=#{command.join(" ")}"
-        end
+        Log.info { "codex-mode: codex_workdir=#{codex_workdir} command=#{command.join(" ")}" }
       else
         if remaining.empty?
-          command = ["/bin/sh"]
+          command = ["/bin/sh", "--login"]
         else
           command = remaining.not_nil!
         end
       end
-      if enter_workspace_rootfs
-        rootfs = (Path[rootfs.not_nil!].expand / "workspace" / "rootfs").to_s
-      end
       rootfs_value = rootfs.not_nil!
-      if enter_workspace_rootfs
-        unless Dir.exists?(rootfs_value)
-          STDERR.puts "Workspace rootfs missing at #{rootfs_value}."
-          STDERR.puts "Run ./bin/bq2 --all --resume or ./bin/sysroot-runner --phase rootfs-from-sysroot to generate it."
-          return 1
-        end
+      unless Dir.exists?(rootfs_value)
+        STDERR.puts "Workspace rootfs missing at #{rootfs_value}."
+        STDERR.puts "Run ./bin/bq2 --all to generate it."
+        return 1
       end
       Log.info do
         bind_summary = extra_binds.map { |(src, dst)| "#{src}:#{dst}" }.join(", ")
