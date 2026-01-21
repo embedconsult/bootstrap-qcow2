@@ -160,6 +160,30 @@ module Bootstrap
             remove_root = destdir ? "#{destdir}#{install_prefix}" : install_prefix
             raise "Refusing to remove #{remove_root}" if remove_root == "/" || remove_root.empty?
             FileUtils.rm_rf(remove_root)
+          when "remove-paths"
+            idx = 0
+            removed = false
+            loop do
+              path_key = "PATH_#{idx}"
+              path = step.env[path_key]?
+              break unless path
+              target = destdir ? "#{destdir}#{path}" : path
+              raise "Refusing to remove #{target}" if target == "/" || target.empty?
+              FileUtils.rm_rf(target) if File.exists?(target) || File.symlink?(target)
+              removed = true
+              idx += 1
+            end
+            raise "remove-paths removed no paths" unless removed
+          when "clean-dir"
+            raise "clean-dir requires step.install_prefix (path to clean)" unless step.install_prefix
+            clean_root = destdir ? "#{destdir}#{install_prefix}" : install_prefix
+            raise "Refusing to clean #{clean_root}" if clean_root == "/" || clean_root.empty?
+            if Dir.exists?(clean_root)
+              Dir.each(clean_root) do |entry|
+                next if entry == "." || entry == ".."
+                FileUtils.rm_rf(File.join(clean_root, entry))
+              end
+            end
           when "tarball"
             output = step.install_prefix
             raise "tarball requires step.install_prefix (output path)" unless output

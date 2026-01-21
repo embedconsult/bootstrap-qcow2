@@ -224,7 +224,18 @@ describe Bootstrap::SysrootBuilder do
       rootfs_phase.steps.map(&.name).should eq ["musl", "busybox", "linux-headers", "musl-ld-path", "prepare-rootfs", "sysroot"]
 
       finalize_phase = plan.phases.find(&.name.==("finalize-rootfs")).not_nil!
-      finalize_phase.steps.map(&.name).should eq ["strip-sysroot", "rootfs-tarball"]
+      finalize_phase.steps.map(&.name).should eq [
+        "strip-sysroot",
+        "remove-rootfs-docs",
+        "remove-rootfs-manpages",
+        "remove-rootfs-infopages",
+        "remove-rootfs-help",
+        "remove-rootfs-gtk-doc",
+        "remove-cmake-help",
+        "remove-llvm-extras",
+        "clean-rootfs-tmp",
+        "rootfs-tarball",
+      ]
     end
   end
 
