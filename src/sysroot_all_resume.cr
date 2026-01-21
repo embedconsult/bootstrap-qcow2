@@ -66,8 +66,12 @@ module Bootstrap
                    @output_tarball_path : Path = builder.sources_dir / "bq2-rootfs-#{Bootstrap::VERSION}.tar.gz")
       workspace_rootfs_dir = builder.rootfs_dir / WORKSPACE_ROOTFS_RELATIVE
       if File.exists?(workspace_rootfs_dir / ROOTFS_MARKER_NAME)
-        @plan_path = workspace_rootfs_dir / "var/lib/sysroot-build-plan.json"
-        @state_path = workspace_rootfs_dir / "var/lib/sysroot-build-state.json"
+        candidate_plan = workspace_rootfs_dir / "var/lib/sysroot-build-plan.json"
+        candidate_state = workspace_rootfs_dir / "var/lib/sysroot-build-state.json"
+        if File.exists?(candidate_plan)
+          @plan_path = candidate_plan
+          @state_path = candidate_state
+        end
       end
     end
 
