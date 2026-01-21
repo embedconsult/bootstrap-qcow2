@@ -97,13 +97,10 @@ module Bootstrap
 
       if codex_mode
         # TODO: if there isn't a git checkout in codex/work/bootstrap-qcow2, make one
-        codex_workdir = "codex/work/bootstrap-qcow2"
-        FileUtils.mkdir_p(codex_workdir)
-        extra_binds << {Path[codex_workdir], Path["/work"]}
-        command = ["/bin/sh", "--login", "/work/bin/codex", "--add-dir", "/var", "--add-dir", "/opt", "--add-dir", "/workspace", "-C", codex_workdir]
+        FileUtils.mkdir_p("codex/work/bootstrap-qcow2")
+        extra_binds << {Path["codex/work"], Path["/work"]}
+        command = ["/bin/sh", "--login", "-c", "/work/bin/codex --add-dir /var --add-dir /opt --add-dir /workspace -C /work/bootstrap-qcow2 -s workspace-write"]
         ENV["HOME"] = "/work"
-        Log.info { "codex-mode: codex_workdir=#{codex_workdir} command=#{command.join(" ")}" }
-        STDERR.puts "codex-mode: codex_workdir=#{codex_workdir}"
         STDERR.puts "codex-mode: command=#{command.join(" ")}"
       else
         if remaining.empty?
