@@ -5,6 +5,8 @@ require "./sysroot_builder"
 module Bootstrap
   # Determines the earliest resume stage for `bq2 --all --resume`.
   class SysrootAllResume
+    ROOTFS_MARKER_NAME        = ".bq2-rootfs"
+    WORKSPACE_ROOTFS_RELATIVE = Path["workspace/rootfs"]
     # Ordered stage list for the --all workflow.
     STAGE_ORDER = [
       "download-sources",
@@ -62,6 +64,11 @@ module Bootstrap
                    @state_path : Path = builder.rootfs_dir / "var/lib/sysroot-build-state.json",
                    @rootfs_tarball_path : Path = builder.rootfs_dir / "workspace" / "bq-rootfs.tar.gz",
                    @output_tarball_path : Path = builder.sources_dir / "bq2-rootfs-#{Bootstrap::VERSION}.tar.gz")
+      workspace_rootfs_dir = builder.rootfs_dir / WORKSPACE_ROOTFS_RELATIVE
+      if File.exists?(workspace_rootfs_dir / ROOTFS_MARKER_NAME)
+        @plan_path = workspace_rootfs_dir / "var/lib/sysroot-build-plan.json"
+        @state_path = workspace_rootfs_dir / "var/lib/sysroot-build-state.json"
+      end
     end
 
     # Determine the earliest incomplete stage for `--all --resume`.
