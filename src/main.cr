@@ -100,6 +100,9 @@ module Bootstrap
         FileUtils.mkdir_p("codex/work/bootstrap-qcow2")
         extra_binds << {Path["codex/work"], Path["/work"]}
         command = ["/bin/sh", "--login", "-c", "/work/bin/codex --add-dir /var --add-dir /opt --add-dir /workspace -C /work/bootstrap-qcow2 -s workspace-write"]
+        unless remaining.empty?
+          command.concat remaining.not_nil!
+        end
         ENV["HOME"] = "/work"
         STDERR.puts "codex-mode: command=#{command.join(" ")}"
       else
