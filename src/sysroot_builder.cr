@@ -977,7 +977,7 @@ module Bootstrap
     # Persist the build plan JSON into the chroot at /var/lib/sysroot-build-plan.json.
     def write_plan(plan : BuildPlan = build_plan) : Path
       FileUtils.mkdir_p(self.plan_path.parent)
-      File.write(self.plan_path, plan.to_json)
+      File.write(self.plan_path, plan.to_pretty_json)
       self.plan_path
     end
 

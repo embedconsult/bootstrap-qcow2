@@ -644,7 +644,7 @@ module Bootstrap
       plan = Bootstrap::BuildPlanUtils.rewrite_workspace_root(plan, workspace_root) if workspace_root != Bootstrap::BuildPlanUtils::DEFAULT_WORKSPACE_ROOT
 
       FileUtils.mkdir_p(File.dirname(output))
-      File.write(output, plan.to_json)
+      File.write(output, plan.to_pretty_json)
       puts "Wrote build plan to #{output}"
       0
     end
