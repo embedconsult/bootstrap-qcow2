@@ -263,7 +263,7 @@ module Bootstrap
           strategy: "llvm-libcxx",
           configure_flags: [
             "-DCMAKE_BUILD_TYPE=Release",
-            "-DLLVM_TARGETS_TO_BUILD=AArch64",
+            "-DLLVM_TARGETS_TO_BUILD=#{llvm_targets_to_build}",
             "-DLLVM_HOST_TRIPLE=#{sysroot_triple}",
             "-DLLVM_DEFAULT_TARGET_TRIPLE=#{sysroot_triple}",
             "-DLLVM_ENABLE_PROJECTS=clang;lld;compiler-rt",
@@ -297,7 +297,10 @@ module Bootstrap
             "-DLIBCXXABI_ENABLE_STATIC=ON",
             "-DLIBCXXABI_INCLUDE_TESTS=OFF",
           ],
-          patches: ["#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/smallvector-include-cstdint.patch"],
+          patches: [
+            "#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/smallvector-include-cstdint.patch",
+            "#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/cmake-guard-cxx-compiler-id.patch",
+          ],
           phases: ["sysroot-from-alpine", "system-from-sysroot"],
         ),
         PackageSpec.new("bdwgc", DEFAULT_BDWGC, URI.parse("https://github.com/ivmai/bdwgc/releases/download/v#{DEFAULT_BDWGC}/gc-#{DEFAULT_BDWGC}.tar.gz"), build_directory: "gc-#{DEFAULT_BDWGC}", phases: ["sysroot-from-alpine", "system-from-sysroot"]),
@@ -612,6 +615,17 @@ module Bootstrap
       else
         @architecture
       end
+    end
+
+    private def llvm_targets_to_build : String
+      # Ensure the stage1 Clang supports the host target for runtime configure
+      # checks while keeping AArch64 as the primary target.
+      targets = ["AArch64"]
+      case @architecture
+      when "x86_64", "amd64"
+        targets << "X86"
+      end
+      targets.uniq.join(";")
     end
 
     # Define the multi-phase build in an LFS-inspired style:

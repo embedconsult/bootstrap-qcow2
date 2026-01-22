@@ -130,6 +130,16 @@ describe Bootstrap::SysrootBuilder do
     names.should contain("llvm-project")
   end
 
+  it "builds LLVM for the host target while keeping AArch64 enabled" do
+    x86_builder = Bootstrap::SysrootBuilder.new(Path["/tmp/work"], "x86_64", "edge", "edge")
+    x86_pkg = x86_builder.packages.find(&.name.==("llvm-project")).not_nil!
+    x86_pkg.configure_flags.should contain("-DLLVM_TARGETS_TO_BUILD=AArch64;X86")
+
+    arm_builder = Bootstrap::SysrootBuilder.new(Path["/tmp/work"], "arm64", "edge", "edge")
+    arm_pkg = arm_builder.packages.find(&.name.==("llvm-project")).not_nil!
+    arm_pkg.configure_flags.should contain("-DLLVM_TARGETS_TO_BUILD=AArch64")
+  end
+
   it "lists build phase names" do
     phases = Bootstrap::SysrootBuilder.new.phase_specs.map(&.name)
     phases.should eq ["sysroot-from-alpine", "crystal-from-sysroot", "rootfs-from-sysroot", "system-from-sysroot", "tools-from-system", "crystal-from-system", "finalize-rootfs"]
