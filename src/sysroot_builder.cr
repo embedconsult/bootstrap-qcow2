@@ -620,7 +620,7 @@ module Bootstrap
     def phase_specs : Array(PhaseSpec)
       sysroot_prefix = "/opt/sysroot"
       rootfs_destdir = "/workspace/rootfs"
-      rootfs_tarball = "/workspace/bq2-rootfs.tar.gz"
+      rootfs_tarball = "/workspace/bq2-rootfs-#{Bootstrap::VERSION}.tar.gz"
       sysroot_triple = sysroot_target_triple
       sysroot_env = sysroot_phase_env(sysroot_prefix)
       rootfs_env = rootfs_phase_env(sysroot_prefix)
