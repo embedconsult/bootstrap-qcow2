@@ -263,7 +263,7 @@ module Bootstrap
           strategy: "llvm-libcxx",
           configure_flags: [
             "-DCMAKE_BUILD_TYPE=Release",
-            "-DLLVM_TARGETS_TO_BUILD=AArch64",
+            "-DLLVM_TARGETS_TO_BUILD=AArch64;X86",
             "-DLLVM_HOST_TRIPLE=#{sysroot_triple}",
             "-DLLVM_DEFAULT_TARGET_TRIPLE=#{sysroot_triple}",
             "-DLLVM_ENABLE_PROJECTS=clang;lld;compiler-rt",
