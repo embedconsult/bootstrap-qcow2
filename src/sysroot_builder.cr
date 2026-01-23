@@ -354,7 +354,6 @@ module Bootstrap
           "git",
           DEFAULT_GIT,
           URI.parse("https://www.kernel.org/pub/software/scm/git/git-#{DEFAULT_GIT}.tar.gz"),
-          env_overrides: {"NO_DOCS" => "1"},
           phases: ["tools-from-system"],
         ),
       ]
@@ -830,6 +829,7 @@ module Bootstrap
           env_overrides: {
             "git" => {
               "MAKEFLAGS"  => "-e",
+              "NO_DOCS"    => "1",
               "NO_GETTEXT" => "1",
               "NO_TCLTK"   => "1",
             },
