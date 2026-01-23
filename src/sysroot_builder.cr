@@ -339,8 +339,8 @@ module Bootstrap
         ),
         PackageSpec.new(
           "bootstrap-qcow2",
-          bootstrap_source_branch,
-          URI.parse("https://github.com/embedconsult/bootstrap-qcow2/archive/refs/heads/#{bootstrap_source_branch}.tar.gz"),
+          bootstrap_source_version,
+          URI.parse("https://github.com/embedconsult/bootstrap-qcow2/archive/refs/heads/#{bootstrap_source_version}.tar.gz"),
           strategy: "crystal",
           phases: ["system-from-sysroot"],
         ),
