@@ -133,6 +133,7 @@ module Bootstrap
         return 1
       end
 
+      ENV["HOME"] = "/root"
       SysrootNamespace.enter_rootfs(rootfs_value, extra_binds: extra_binds)
       apply_toolchain_env_defaults
       AlpineSetup.install_sysroot_runner_packages if run_alpine_setup
