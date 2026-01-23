@@ -54,7 +54,7 @@ module Bootstrap
     DEFAULT_FOSSIL        = "2.25"
     DEFAULT_GIT           = "2.45.2"
     DEFAULT_CRYSTAL       = "1.18.2"
-    DEFAULT_BQ2_BRANCH    = "my-fixes"
+    DEFAULT_BQ2           = "0.0.1"
     # Source: https://curl.se/ca/cacert.pem (Mozilla CA certificate bundle).
     CA_BUNDLE_PEM = {{ read_file("#{__DIR__}/../data/ca-bundle/ca-certificates.crt") }}
 
@@ -191,7 +191,7 @@ module Bootstrap
     # Each PackageSpec can carry optional configure flags or a custom build
     # directory name when upstream archives use non-standard layouts.
     def packages : Array(PackageSpec)
-      bootstrap_repo_dir = "/workspace/bootstrap-qcow2-#{bootstrap_source_branch}"
+      bootstrap_repo_dir = "/workspace/bootstrap-qcow2-#{bootstrap_source_version}"
       sysroot_triple = sysroot_target_triple
       [
         PackageSpec.new(
@@ -205,8 +205,8 @@ module Bootstrap
         ),
         PackageSpec.new(
           "bootstrap-qcow2",
-          bootstrap_source_branch,
-          URI.parse("https://github.com/embedconsult/bootstrap-qcow2/archive/refs/heads/#{bootstrap_source_branch}.tar.gz"),
+          bootstrap_source_version,
+          URI.parse("https://github.com/embedconsult/bootstrap-qcow2/archive/refs/heads/#{bootstrap_source_version}.tar.gz"),
           strategy: "crystal",
           phases: ["system-from-sysroot"],
         ),
@@ -582,8 +582,8 @@ module Bootstrap
       end
     end
 
-    private def bootstrap_source_branch : String
-      ENV["BQ2_SOURCE_BRANCH"]? || DEFAULT_BQ2_BRANCH
+    private def bootstrap_source_version : String
+      ENV["BQ2_SOURCE_BRANCH"]? || DEFAULT_BQ2
     end
 
     # Resolve the base rootfs tarball, favoring a local override when provided.
@@ -603,7 +603,7 @@ module Bootstrap
 
     # Returns the default local rootfs tarball path when present.
     private def default_base_rootfs_path : Path?
-      sources_dir / "bq2-rootfs-#{Bootstrap::VERSION}.tar.gz"
+      sources_dir / "bq2-rootfs-#{bootstrap_source_version}.tar.gz"
     end
 
     private def kernel_headers_arch : String
@@ -621,10 +621,10 @@ module Bootstrap
     # 1. build a complete sysroot from sources using Alpine's seed environment
     # 2. validate the sysroot by using it as the toolchain when assembling a rootfs
     def phase_specs : Array(PhaseSpec)
-      bootstrap_repo_dir = "/workspace/bootstrap-qcow2-#{bootstrap_source_branch}"
+      bootstrap_repo_dir = "/workspace/bootstrap-qcow2-#{bootstrap_source_version}"
       sysroot_prefix = "/opt/sysroot"
       rootfs_destdir = "/workspace/rootfs"
-      rootfs_tarball = "/workspace/bq2-rootfs-#{Bootstrap::VERSION}.tar.gz"
+      rootfs_tarball = "/workspace/bq2-rootfs-#{bootstrap_source_version}.tar.gz"
       sysroot_triple = sysroot_target_triple
       sysroot_env = sysroot_phase_env(sysroot_prefix)
       rootfs_env = rootfs_phase_env(sysroot_prefix)
@@ -880,7 +880,7 @@ module Bootstrap
 
     # Return the os-release contents for the generated rootfs.
     private def rootfs_os_release_content : String
-      version = Bootstrap::VERSION
+      version = bootstrap_source_version
       lines = [
         "NAME=\"bootstrap-qcow2\"",
         "ID=bootstrap-qcow2",
