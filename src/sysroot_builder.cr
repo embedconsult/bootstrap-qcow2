@@ -247,7 +247,7 @@ module Bootstrap
           strategy: "llvm-libcxx",
           configure_flags: [
             "-DCMAKE_BUILD_TYPE=Release",
-            "-DLLVM_TARGETS_TO_BUILD=AArch64",
+            "-DLLVM_TARGETS_TO_BUILD=AArch64;X86",
             "-DLLVM_HOST_TRIPLE=#{sysroot_triple}",
             "-DLLVM_DEFAULT_TARGET_TRIPLE=#{sysroot_triple}",
             "-DLLVM_ENABLE_PROJECTS=clang;lld;compiler-rt",
@@ -281,7 +281,10 @@ module Bootstrap
             "-DLIBCXXABI_ENABLE_STATIC=ON",
             "-DLIBCXXABI_INCLUDE_TESTS=OFF",
           ],
-          patches: ["#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/smallvector-include-cstdint.patch"],
+          patches: [
+            "#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/smallvector-include-cstdint.patch",
+            "#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/cmake-guard-cxx-compiler-id.patch",
+          ],
           phases: ["sysroot-from-alpine", "system-from-sysroot"],
         ),
         PackageSpec.new("bdwgc", DEFAULT_BDWGC, URI.parse("https://github.com/ivmai/bdwgc/releases/download/v#{DEFAULT_BDWGC}/gc-#{DEFAULT_BDWGC}.tar.gz"), build_directory: "gc-#{DEFAULT_BDWGC}", phases: ["sysroot-from-alpine", "system-from-sysroot"]),
@@ -618,6 +621,7 @@ module Bootstrap
     # 1. build a complete sysroot from sources using Alpine's seed environment
     # 2. validate the sysroot by using it as the toolchain when assembling a rootfs
     def phase_specs : Array(PhaseSpec)
+      bootstrap_repo_dir = "/workspace/bootstrap-qcow2-#{bootstrap_source_branch}"
       sysroot_prefix = "/opt/sysroot"
       rootfs_destdir = "/workspace/rootfs"
       rootfs_tarball = "/workspace/bq2-rootfs-#{Bootstrap::VERSION}.tar.gz"
@@ -680,6 +684,9 @@ module Bootstrap
               "LDFLAGS"           => "-L#{sysroot_prefix}/lib/#{sysroot_triple} -L#{sysroot_prefix}/lib",
               "LIBRARY_PATH"      => "#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
             },
+            "shards"  => {
+              "SHARDS_CACHE_PATH" => "/tmp/shards-cache",
+            },
             "bootstrap-qcow2" => {
               "CRYSTAL"         => "/usr/bin/crystal",
               "SHARDS"          => "/usr/bin/shards",
@@ -691,6 +698,11 @@ module Bootstrap
           },
           configure_overrides: {
             "libxml2" => libxml2_cmake_flags,
+          },
+          patch_overrides: {
+            "llvm-project" => [
+              "#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/x86-mctargetdesc-include-cstdint.patch",
+            ],
           },
         ),
         PhaseSpec.new(
