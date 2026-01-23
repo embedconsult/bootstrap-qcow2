@@ -6,3 +6,7 @@ This file tracks technical-debt tasks that should be handled in-repo (Crystal-fi
 - Decide whether build failure reports should optionally capture per-step stdout/stderr (and how to bound storage) to better support build-plan iteration and back-annotation.
 - Simplify the host-side `bq2` build so it doesn't require the current cross-compile/`clang` link workaround (capture the needed env/linker defaults in code or tooling). Working command:
   `CC="clang -fuse-ld=lld" LD=ld.lld CLANG="clang++ -fuse-ld=lld" crystal build --cross-compile --static --target=aarch64-alpine-linux-musl src/main.cr -o bin/bq2; clang -stdlib=libc++ --rtlib=compiler-rt -fuse-ld=lld bin/bq2.o -o bin/bq2 -L/usr/lib -lssl -lcrypto -lz -lpcre2-8 -lgc -lrt -lunwind -lm`
+- Refactor the build plan so all functional phases (sysroot seed, sysroot build, system rebuild, rootfs packaging, etc) are explicit `BuildPlan` phases, eliminating side paths like `SysrootResumeAll` that bypass the plan/state model.
+- Move dependency fetching for Crystal/Shards into a dedicated download phase that pre-populates the shard cache inside the rootfs, so `shards install` never requires network during build phases.
+- Remove legacy build plan compatibility and related conditional logic in `SysrootRunner`/`SysrootResumeAll`, assuming plan format v1+ only.
+- Document the intended phase boundaries and artifacts (inputs/outputs) in `SysrootBuilder.phase_specs` to keep resumption deterministic and fully reproducible.
