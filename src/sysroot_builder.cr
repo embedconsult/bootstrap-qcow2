@@ -54,7 +54,7 @@ module Bootstrap
     DEFAULT_FOSSIL        = "2.25"
     DEFAULT_GIT           = "2.45.2"
     DEFAULT_CRYSTAL       = "1.18.2"
-    DEFAULT_BQ2           = "0.0.1"
+    DEFAULT_BQ2           = "0.0.3"
     # Source: https://curl.se/ca/cacert.pem (Mozilla CA certificate bundle).
     CA_BUNDLE_PEM = {{ read_file("#{__DIR__}/../data/ca-bundle/ca-certificates.crt") }}
 
@@ -340,7 +340,7 @@ module Bootstrap
         PackageSpec.new(
           "bootstrap-qcow2",
           bootstrap_source_version,
-          URI.parse("https://github.com/embedconsult/bootstrap-qcow2/archive/refs/heads/#{bootstrap_source_version}.tar.gz"),
+          URI.parse("https://github.com/embedconsult/bootstrap-qcow2/archive/refs/tags/#{bootstrap_source_version}.tar.gz"),
           strategy: "crystal",
           phases: ["system-from-sysroot"],
         ),
