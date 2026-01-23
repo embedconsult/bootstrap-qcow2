@@ -101,9 +101,10 @@ module Bootstrap
         extra_binds << {Path["codex/work"], Path["/work"]}
         command = ["/bin/sh", "--login", "-c", "/work/bin/codex --add-dir /var --add-dir /opt --add-dir /workspace -C /work/bootstrap-qcow2 -s workspace-write"]
         unless remaining.empty?
-          command.concat remaining.not_nil!
+          command[-1] = [command[-1], remaining.join(" ")].join(" ")
         end
         ENV["HOME"] = "/work"
+        ENV["CODEX_HOME"] = "/work/.codex"
         STDERR.puts "codex-mode: command=#{command.join(" ")}"
       else
         ENV["HOME"] = "/root"
