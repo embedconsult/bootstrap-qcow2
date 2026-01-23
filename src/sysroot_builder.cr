@@ -886,7 +886,7 @@ module Bootstrap
               "-DOPENSSL_SSL_LIBRARY=/usr/lib/libssl.so",
               "-DOPENSSL_CRYPTO_LIBRARY=/usr/lib/libcrypto.so",
             ],
-            "libxml2"      => libxml2_cmake_flags,
+            "libxml2" => libxml2_cmake_flags,
           },
           extra_steps: [
             BuildStep.new(
