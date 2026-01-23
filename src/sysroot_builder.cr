@@ -654,7 +654,7 @@ module Bootstrap
             "libxml2" => libxml2_env,
             "zlib"    => {
               "CFLAGS"   => "-fPIC",
-              "LDSHARED" => "#{sysroot_env["CC"]} -shared -Wl,-soname,libz.so.1 -Wl,--version-script,libz.map",
+              "LDSHARED" => "#{sysroot_env["CC"]} -shared -Wl,-soname,libz.so.1 -Wl,--version-script,zlib.map",
             },
           },
           configure_overrides: {
