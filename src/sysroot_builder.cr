@@ -194,22 +194,6 @@ module Bootstrap
       bootstrap_repo_dir = "/workspace/bootstrap-qcow2-#{bootstrap_source_branch}"
       sysroot_triple = sysroot_target_triple
       [
-        PackageSpec.new(
-          "shards",
-          DEFAULT_SHARDS,
-          URI.parse("https://github.com/crystal-lang/shards/archive/refs/tags/v#{DEFAULT_SHARDS}.tar.gz"),
-          strategy: "crystal-build",
-          configure_flags: ["-o", "bin/shards", "src/shards.cr"],
-          build_directory: "shards-#{DEFAULT_SHARDS}",
-          phases: ["system-from-sysroot"],
-        ),
-        PackageSpec.new(
-          "bootstrap-qcow2",
-          bootstrap_source_branch,
-          URI.parse("https://github.com/embedconsult/bootstrap-qcow2/archive/refs/heads/#{bootstrap_source_branch}.tar.gz"),
-          strategy: "crystal",
-          phases: ["system-from-sysroot"],
-        ),
         PackageSpec.new("m4", DEFAULT_M4, URI.parse("https://ftp.gnu.org/gnu/m4/m4-#{DEFAULT_M4}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
         PackageSpec.new("musl", DEFAULT_MUSL, URI.parse("https://musl.libc.org/releases/musl-#{DEFAULT_MUSL}.tar.gz"), phases: ["sysroot-from-alpine", "rootfs-from-sysroot"]),
         PackageSpec.new(
@@ -319,6 +303,30 @@ module Bootstrap
         PackageSpec.new("libyaml", DEFAULT_LIBYAML, URI.parse("https://pyyaml.org/download/libyaml/yaml-#{DEFAULT_LIBYAML}.tar.gz"), build_directory: "yaml-#{DEFAULT_LIBYAML}", phases: ["sysroot-from-alpine", "system-from-sysroot"]),
         PackageSpec.new("libffi", DEFAULT_LIBFFI, URI.parse("https://github.com/libffi/libffi/releases/download/v#{DEFAULT_LIBFFI}/libffi-#{DEFAULT_LIBFFI}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
         PackageSpec.new(
+          "crystal",
+          DEFAULT_CRYSTAL,
+          URI.parse("https://github.com/crystal-lang/crystal/archive/refs/tags/#{DEFAULT_CRYSTAL}.tar.gz"),
+          strategy: "crystal-compiler",
+          patches: ["#{bootstrap_repo_dir}/patches/crystal-#{DEFAULT_CRYSTAL}/use-libcxx.patch"],
+          phases: ["sysroot-from-alpine", "system-from-sysroot"],
+        ),
+        PackageSpec.new(
+          "shards",
+          DEFAULT_SHARDS,
+          URI.parse("https://github.com/crystal-lang/shards/archive/refs/tags/v#{DEFAULT_SHARDS}.tar.gz"),
+          strategy: "crystal-build",
+          configure_flags: ["-o", "bin/shards", "src/shards.cr"],
+          build_directory: "shards-#{DEFAULT_SHARDS}",
+          phases: ["sysroot-from-alpine", "system-from-sysroot"],
+        ),
+        PackageSpec.new(
+          "bootstrap-qcow2",
+          bootstrap_source_branch,
+          URI.parse("https://github.com/embedconsult/bootstrap-qcow2/archive/refs/heads/#{bootstrap_source_branch}.tar.gz"),
+          strategy: "crystal",
+          phases: ["system-from-sysroot"],
+        ),
+        PackageSpec.new(
           "fossil",
           DEFAULT_FOSSIL,
           URI.parse("https://www.fossil-scm.org/home/tarball/fossil-src-#{DEFAULT_FOSSIL}.tar.gz"),
@@ -329,14 +337,6 @@ module Bootstrap
           DEFAULT_GIT,
           URI.parse("https://www.kernel.org/pub/software/scm/git/git-#{DEFAULT_GIT}.tar.gz"),
           phases: ["tools-from-system"],
-        ),
-        PackageSpec.new(
-          "crystal",
-          DEFAULT_CRYSTAL,
-          URI.parse("https://github.com/crystal-lang/crystal/archive/refs/tags/#{DEFAULT_CRYSTAL}.tar.gz"),
-          strategy: "crystal-compiler",
-          patches: ["#{bootstrap_repo_dir}/patches/crystal-#{DEFAULT_CRYSTAL}/use-libcxx.patch"],
-          phases: ["crystal-from-sysroot", "crystal-from-system"],
         ),
       ]
     end
@@ -660,45 +660,38 @@ module Bootstrap
           env: sysroot_env,
           package_allowlist: nil,
           env_overrides: {
+            "cmake" => {
+              "CPPFLAGS" => "-I#{sysroot_prefix}/include",
+              "LDFLAGS"  => "-L#{sysroot_prefix}/lib",
+            },
+            "zlib" => {
+              "CFLAGS"   => "-fPIC",
+              "LDSHARED" => "#{sysroot_env["CC"]} -shared -Wl,-soname,libz.so.1 -Wl,--version-script,libz.map",
+            },
+            "libxml2" => libxml2_env,
+            "crystal" => {
+              "CRYSTAL_CACHE_DIR" => "/tmp/crystal_cache",
+              "CRYSTAL"           => "/usr/bin/crystal",
+              "SHARDS"            => "/usr/bin/shards",
+              "LLVM_CONFIG"       => "#{sysroot_prefix}/bin/llvm-config",
+              "CC"                => "#{sysroot_prefix}/bin/clang++ --target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -stdlib=libc++",
+              "CXX"               => "#{sysroot_prefix}/bin/clang++ --target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -stdlib=libc++",
+              "CPPFLAGS"          => "-I#{sysroot_prefix}/include",
+              "LDFLAGS"           => "-L#{sysroot_prefix}/lib/#{sysroot_triple} -L#{sysroot_prefix}/lib",
+              "LIBRARY_PATH"      => "#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
+            },
             "bootstrap-qcow2" => {
+              "CRYSTAL"         => "/usr/bin/crystal",
+              "SHARDS"          => "/usr/bin/shards",
               "CPPFLAGS"        => "-I#{sysroot_prefix}/include",
               "LDFLAGS"         => "-L#{sysroot_prefix}/lib",
               "LIBRARY_PATH"    => "#{sysroot_prefix}/lib",
               "PKG_CONFIG_PATH" => "#{sysroot_prefix}/lib/pkgconfig",
             },
-            "cmake" => {
-              "CPPFLAGS" => "-I#{sysroot_prefix}/include",
-              "LDFLAGS"  => "-L#{sysroot_prefix}/lib",
-            },
-            "libxml2" => libxml2_env,
-            "zlib"    => {
-              "CFLAGS"   => "-fPIC",
-              "LDSHARED" => "#{sysroot_env["CC"]} -shared -Wl,-soname,libz.so.1 -Wl,--version-script,libz.map",
-            },
           },
           configure_overrides: {
             "libxml2" => libxml2_cmake_flags,
           },
-        ),
-        PhaseSpec.new(
-          name: "crystal-from-sysroot",
-          description: "Build Crystal into the sysroot prefix (requires an existing Crystal compiler).",
-          workspace: "/workspace",
-          environment: "sysroot-toolchain",
-          install_prefix: sysroot_prefix,
-          destdir: nil,
-          env: rootfs_env.merge({
-            "CRYSTAL_CACHE_DIR" => "/tmp/crystal_cache",
-            "CRYSTAL"           => "/usr/bin/crystal",
-            "SHARDS"            => "/usr/bin/shards",
-            "LLVM_CONFIG"       => "#{sysroot_prefix}/bin/llvm-config",
-            "CC"                => "#{sysroot_prefix}/bin/clang++ --target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -stdlib=libc++",
-            "CXX"               => "#{sysroot_prefix}/bin/clang++ --target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -stdlib=libc++",
-            "CPPFLAGS"          => "-I#{sysroot_prefix}/include",
-            "LDFLAGS"           => "-L#{sysroot_prefix}/lib/#{sysroot_triple} -L#{sysroot_prefix}/lib",
-            "LIBRARY_PATH"      => "#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
-          }),
-          package_allowlist: nil,
         ),
         PhaseSpec.new(
           name: "rootfs-from-sysroot",
@@ -813,16 +806,6 @@ module Bootstrap
               "NO_TCLTK"   => "1",
             },
           },
-        ),
-        PhaseSpec.new(
-          name: "crystal-from-system",
-          description: "Build Crystal inside the new rootfs (requires a bootstrap Crystal compiler).",
-          workspace: "/workspace",
-          environment: "rootfs-system",
-          install_prefix: "/usr",
-          destdir: nil,
-          env: rootfs_env,
-          package_allowlist: nil,
         ),
         PhaseSpec.new(
           name: "finalize-rootfs",

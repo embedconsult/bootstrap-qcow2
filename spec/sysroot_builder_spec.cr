@@ -132,7 +132,7 @@ describe Bootstrap::SysrootBuilder do
 
   it "lists build phase names" do
     phases = Bootstrap::SysrootBuilder.new.phase_specs.map(&.name)
-    phases.should eq ["sysroot-from-alpine", "crystal-from-sysroot", "rootfs-from-sysroot", "system-from-sysroot", "tools-from-system", "crystal-from-system", "finalize-rootfs"]
+    phases.should eq ["sysroot-from-alpine", "rootfs-from-sysroot", "system-from-sysroot", "tools-from-system", "finalize-rootfs"]
   end
 
   it "seeds rootfs profile, CA bundle, and final musl loader path" do

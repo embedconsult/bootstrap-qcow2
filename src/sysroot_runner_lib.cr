@@ -486,6 +486,7 @@ module Bootstrap
         raise "Refusing to run #{phase.name} (env=#{phase.environment}) outside the produced rootfs (missing #{ROOTFS_MARKER_PATH})"
       end
       Log.info { "Executing phase #{phase.name} (env=#{phase.environment}, workspace=#{phase.workspace})" }
+      Log.info { "**** #{phase.description} ****" }
       if destdir = phase.destdir
         prepare_destdir(destdir)
       end
