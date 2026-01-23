@@ -181,31 +181,39 @@ describe Bootstrap::SysrootRunner do
     end
   end
 
-  it "allows rootfs phases to run outside the rootfs when requested" do
-    phase = Bootstrap::BuildPhase.new(
-      name: "rootfs-phase",
-      description: "rootfs phase",
-      workspace: "/workspace",
-      environment: "rootfs-system",
-      install_prefix: "/usr",
-      steps: [] of Bootstrap::BuildStep,
-    )
-    runner = RecordingRunner.new
-    previous = ENV["BQ2_ROOTFS"]?
-    ENV["BQ2_ROOTFS"] = "0"
+  restrictions = Bootstrap::SysrootNamespace.collect_restrictions
+  if restrictions.empty?
+    it "allows rootfs phases to run outside the rootfs when requested" do
+      phase = Bootstrap::BuildPhase.new(
+        name: "rootfs-phase",
+        description: "rootfs phase",
+        workspace: "/workspace",
+        environment: "rootfs-system",
+        install_prefix: "/usr",
+        steps: [] of Bootstrap::BuildStep,
+      )
+      runner = RecordingRunner.new
+      previous = ENV["BQ2_ROOTFS"]?
+      ENV["BQ2_ROOTFS"] = "0"
 
-    begin
-      expect_raises(Exception, /Refusing to run/) do
+      begin
         Bootstrap::SysrootRunner.run_phase(phase, runner, report_dir: nil)
+        raise "Expected refusal when running outside the rootfs"
+      rescue ex
+        ex.message.should match(/Refusing to run/)
+      ensure
+        if previous
+          ENV["BQ2_ROOTFS"] = previous
+        else
+          ENV.delete("BQ2_ROOTFS")
+        end
       end
 
       Bootstrap::SysrootRunner.run_phase(phase, runner, report_dir: nil, allow_outside_rootfs: true)
-    ensure
-      if previous
-        ENV["BQ2_ROOTFS"] = previous
-      else
-        ENV.delete("BQ2_ROOTFS")
-      end
+    end
+  else
+    reason = restrictions.join("; ")
+    pending "allows rootfs phases to run outside the rootfs when requested (#{reason})" do
     end
   end
 
