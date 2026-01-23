@@ -255,7 +255,11 @@ module Bootstrap
             end
           when "crystal-build"
             if File.exists?("shard.yml")
-              run_cmd(["shards", "install"], env: env)
+              if skip_shards_install?(env)
+                Log.info { "Skipping shards install for #{step.name} (BQ2_SKIP_SHARDS_INSTALL=1)" }
+              else
+                run_cmd(["shards", "install"], env: env)
+              end
             end
             run_cmd(["crystal", "build"] + step.configure_flags, env: env)
             bin_prefix = destdir ? "#{destdir}#{install_prefix}" : install_prefix
@@ -293,6 +297,12 @@ module Bootstrap
       # a normal build. If an extractor fails to preserve mtimes, those artifacts
       # can appear older than `configure.ac` and trigger automake/autoconf
       # rebuild rules, which breaks minimal bootstrap environments.
+      private def skip_shards_install?(env : Hash(String, String)) : Bool
+        value = env["BQ2_SKIP_SHARDS_INSTALL"]?.try(&.strip.downcase)
+        return false unless value
+        !(value.empty? || value == "0" || value == "false" || value == "no")
+      end
+
       private def normalize_autotools_timestamps
         return unless File.exists?("configure.ac")
         reference = File.info("configure.ac").modification_time
