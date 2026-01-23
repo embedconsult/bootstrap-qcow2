@@ -621,6 +621,7 @@ module Bootstrap
     # 1. build a complete sysroot from sources using Alpine's seed environment
     # 2. validate the sysroot by using it as the toolchain when assembling a rootfs
     def phase_specs : Array(PhaseSpec)
+      bootstrap_repo_dir = "/workspace/bootstrap-qcow2-#{bootstrap_source_branch}"
       sysroot_prefix = "/opt/sysroot"
       rootfs_destdir = "/workspace/rootfs"
       rootfs_tarball = "/workspace/bq2-rootfs-#{Bootstrap::VERSION}.tar.gz"
@@ -674,13 +675,21 @@ module Bootstrap
               "LDFLAGS"  => "-L#{sysroot_prefix}/lib",
             },
             "libxml2" => libxml2_env,
-            "zlib"    => {
+            "shards"  => {
+              "SHARDS_CACHE_PATH" => "/tmp/shards-cache",
+            },
+            "zlib" => {
               "CFLAGS"   => "-fPIC",
               "LDSHARED" => "#{sysroot_env["CC"]} -shared -Wl,-soname,libz.so.1 -Wl,--version-script,libz.map",
             },
           },
           configure_overrides: {
             "libxml2" => libxml2_cmake_flags,
+          },
+          patch_overrides: {
+            "llvm-project" => [
+              "#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/x86-mctargetdesc-include-cstdint.patch",
+            ],
           },
         ),
         PhaseSpec.new(
