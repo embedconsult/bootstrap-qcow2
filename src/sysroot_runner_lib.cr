@@ -623,8 +623,6 @@ module Bootstrap
       {
         # Prefer prefix-free /usr tools but keep /opt/sysroot on PATH for the toolchain.
         "PATH" => "/usr/bin:/bin:/usr/sbin:/sbin:/opt/sysroot/bin:/opt/sysroot/sbin",
-        "CC"   => "clang --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld",
-        "CXX"  => "clang++ --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -stdlib=libc++",
       }
     end
 
