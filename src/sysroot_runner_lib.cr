@@ -89,18 +89,25 @@ module Bootstrap
           destdir = step.destdir || phase.destdir
           case step.strategy
           when "cmake"
-            had_build_files = File.exists?("CMakeCache.txt") || File.exists?("Makefile") || Dir.exists?("CMakeFiles")
-            bootstrap_argv = ["./bootstrap", "--prefix=#{install_prefix}"]
-            if step.configure_flags.size > 0
-              bootstrap_argv << "--"
-              bootstrap_argv.concat(step.configure_flags)
+            build_dir = step.build_dir || step.workdir
+            bootstrap_path = File.join(step.workdir, "bootstrap")
+            had_build_files = File.exists?(File.join(build_dir, "CMakeCache.txt")) ||
+                              File.exists?(File.join(build_dir, "Makefile")) ||
+                              Dir.exists?(File.join(build_dir, "CMakeFiles"))
+            FileUtils.mkdir_p(build_dir)
+            Dir.cd(build_dir) do
+              bootstrap_argv = [bootstrap_path, "--prefix=#{install_prefix}"]
+              if step.configure_flags.size > 0
+                bootstrap_argv << "--"
+                bootstrap_argv.concat(step.configure_flags)
+              end
+              run_cmd(bootstrap_argv, env: env)
+              if (step.clean_build || had_build_files) && File.exists?("Makefile")
+                run_cmd(["make", "clean"], env: env)
+              end
+              run_cmd(["make", "-j#{cpus}"], env: env)
+              run_make_install(destdir, env)
             end
-            run_cmd(bootstrap_argv, env: env)
-            if had_build_files && File.exists?("Makefile")
-              run_cmd(["make", "clean"], env: env)
-            end
-            run_cmd(["make", "-j#{cpus}"], env: env)
-            run_make_install(destdir, env)
           when "busybox"
             run_cmd(["make", "defconfig"], env: env)
             run_cmd(["make", "-j#{cpus}"], env: env)

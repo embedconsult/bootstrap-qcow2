@@ -23,6 +23,8 @@ module Bootstrap
             install_prefix: step.install_prefix,
             destdir: step.destdir ? rewrite_root(step.destdir.not_nil!, from_root, to_root) : nil,
             env: step.env,
+            build_dir: step.build_dir ? rewrite_root(step.build_dir.not_nil!, from_root, to_root) : nil,
+            clean_build: step.clean_build,
           )
         end
 
