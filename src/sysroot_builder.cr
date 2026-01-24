@@ -886,7 +886,7 @@ module Bootstrap
               "-DOPENSSL_SSL_LIBRARY=/usr/lib/libssl.so",
               "-DOPENSSL_CRYPTO_LIBRARY=/usr/lib/libcrypto.so",
             ],
-            "libxml2"      => libxml2_cmake_flags,
+            "libxml2" => libxml2_cmake_flags,
           },
           extra_steps: [
             BuildStep.new(
@@ -1039,6 +1039,10 @@ module Bootstrap
         "PATH"            => "#{sysroot_prefix}/bin:#{sysroot_prefix}/sbin:/usr/bin:/bin",
         "CC"              => cc,
         "CXX"             => cxx,
+        "AR"              => "#{sysroot_prefix}/bin/llvm-ar",
+        "NM"              => "#{sysroot_prefix}/bin/llvm-nm",
+        "RANLIB"          => "#{sysroot_prefix}/bin/llvm-ranlib",
+        "STRIP"           => "#{sysroot_prefix}/bin/llvm-strip",
         "LD_LIBRARY_PATH" => "#{sysroot_prefix}/lib:#{libcxx_libdir}",
       }
     end
