@@ -617,6 +617,7 @@ module Bootstrap
     end
 
     private def self.native_rootfs_env : Hash(String, String)
+      return {} of String => String unless File.exists?("/usr/bin/clang") && File.exists?("/usr/bin/clang++")
       {
         "PATH" => "/usr/bin:/bin:/usr/sbin:/sbin",
         "CC"   => "clang --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld",
