@@ -93,7 +93,13 @@ module Bootstrap
             if clean_build_dirs && had_build_files
               FileUtils.rm("CMakeCache.txt") if File.exists?("CMakeCache.txt")
               FileUtils.rm_rf("CMakeFiles") if Dir.exists?("CMakeFiles")
-              FileUtils.rm("Bootstrap.cmk") if File.exists?("Bootstrap.cmk")
+              if File.exists?("Bootstrap.cmk")
+                if File.directory?("Bootstrap.cmk")
+                  FileUtils.rm_rf("Bootstrap.cmk")
+                else
+                  FileUtils.rm("Bootstrap.cmk")
+                end
+              end
               FileUtils.rm("Makefile") if File.exists?("Makefile")
               had_build_files = false
             end
