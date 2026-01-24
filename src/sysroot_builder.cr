@@ -1039,6 +1039,10 @@ module Bootstrap
         "PATH"            => "#{sysroot_prefix}/bin:#{sysroot_prefix}/sbin:/usr/bin:/bin",
         "CC"              => cc,
         "CXX"             => cxx,
+        "AR"              => "#{sysroot_prefix}/bin/llvm-ar",
+        "NM"              => "#{sysroot_prefix}/bin/llvm-nm",
+        "RANLIB"          => "#{sysroot_prefix}/bin/llvm-ranlib",
+        "STRIP"           => "#{sysroot_prefix}/bin/llvm-strip",
         "LD_LIBRARY_PATH" => "#{sysroot_prefix}/lib:#{libcxx_libdir}",
       }
     end
