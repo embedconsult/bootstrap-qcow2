@@ -496,19 +496,23 @@ module Bootstrap
                        state_path : String? = nil,
                        resume : Bool = true,
                        allow_outside_rootfs : Bool = false)
-      if !allow_outside_rootfs && phase.environment.starts_with?("rootfs-") && !rootfs_marker_present?
+      effective_phase = phase
+      if phase.environment.starts_with?("rootfs-") && !rootfs_marker_present? && workspace_rootfs_present?
+        effective_phase = apply_rootfs_env_override(phase)
+      end
+      if !allow_outside_rootfs && effective_phase.environment.starts_with?("rootfs-") && !rootfs_marker_present?
         enter_workspace_rootfs! if workspace_rootfs_present?
       end
-      if !allow_outside_rootfs && phase.environment.starts_with?("rootfs-") && !rootfs_marker_present?
-        raise "Refusing to run #{phase.name} (env=#{phase.environment}) outside the produced rootfs (missing #{ROOTFS_MARKER_PATH})"
+      if !allow_outside_rootfs && effective_phase.environment.starts_with?("rootfs-") && !rootfs_marker_present?
+        raise "Refusing to run #{effective_phase.name} (env=#{effective_phase.environment}) outside the produced rootfs (missing #{ROOTFS_MARKER_PATH})"
       end
-      Log.info { "Executing phase #{phase.name} (env=#{phase.environment}, workspace=#{phase.workspace})" }
-      Log.info { "**** #{phase.description} ****" }
-      if destdir = phase.destdir
+      Log.info { "Executing phase #{effective_phase.name} (env=#{effective_phase.environment}, workspace=#{effective_phase.workspace})" }
+      Log.info { "**** #{effective_phase.description} ****" }
+      if destdir = effective_phase.destdir
         prepare_destdir(destdir)
       end
-      run_steps(phase, phase.steps, runner, report_dir: report_dir, state: state, state_path: state_path, resume: resume)
-      Log.info { "Completed phase #{phase.name}" }
+      run_steps(effective_phase, effective_phase.steps, runner, report_dir: report_dir, state: state, state_path: state_path, resume: resume)
+      Log.info { "Completed phase #{effective_phase.name}" }
     end
 
     # Execute a list of BuildStep entries, stopping immediately on failure.
@@ -592,22 +596,26 @@ module Bootstrap
     end
 
     private def self.apply_rootfs_env_overrides(phases : Array(BuildPhase)) : Array(BuildPhase)
-      overrides = native_rootfs_env
       phases.map do |phase|
-        next phase unless phase.environment.starts_with?("rootfs-")
-        merged = phase.env.dup
-        overrides.each { |key, value| merged[key] = value }
-        BuildPhase.new(
-          name: phase.name,
-          description: phase.description,
-          workspace: phase.workspace,
-          environment: phase.environment,
-          install_prefix: phase.install_prefix,
-          destdir: phase.destdir,
-          env: merged,
-          steps: phase.steps,
-        )
+        apply_rootfs_env_override(phase)
       end
+    end
+
+    private def self.apply_rootfs_env_override(phase : BuildPhase) : BuildPhase
+      return phase unless phase.environment.starts_with?("rootfs-")
+      overrides = native_rootfs_env
+      merged = phase.env.dup
+      overrides.each { |key, value| merged[key] = value }
+      BuildPhase.new(
+        name: phase.name,
+        description: phase.description,
+        workspace: phase.workspace,
+        environment: phase.environment,
+        install_prefix: phase.install_prefix,
+        destdir: phase.destdir,
+        env: merged,
+        steps: phase.steps,
+      )
     end
 
     private def self.native_rootfs_env : Hash(String, String)
