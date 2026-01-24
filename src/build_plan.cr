@@ -13,14 +13,18 @@ module Bootstrap
     getter workdir : String
     getter configure_flags : Array(String)
     getter patches : Array(String)
+    getter build_dir : String?
     getter install_prefix : String?
     getter destdir : String?
     getter env : Hash(String, String)
+    getter clean_build : Bool
 
     # Creates a single step within a build phase.
     #
     # Steps can optionally override install locations (`install_prefix`/`destdir`)
-    # and set additional environment variables via `env`.
+    # and set additional environment variables via `env`. `build_dir` selects
+    # an out-of-tree directory for build outputs, while `clean_build` requests
+    # a `make clean` before building (when supported by the strategy).
     def initialize(@name : String,
                    @strategy : String,
                    @workdir : String,
@@ -28,7 +32,9 @@ module Bootstrap
                    @patches : Array(String),
                    @install_prefix : String? = nil,
                    @destdir : String? = nil,
-                   @env : Hash(String, String) = {} of String => String)
+                   @env : Hash(String, String) = {} of String => String,
+                   @build_dir : String? = nil,
+                   @clean_build : Bool = false)
     end
   end
 

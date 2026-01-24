@@ -72,11 +72,13 @@ module Bootstrap
       return step unless override
 
       workdir = override.workdir || step.workdir
+      build_dir = override.build_dir || step.build_dir
       install_prefix = override.install_prefix || step.install_prefix
       destdir = override.destdir || step.destdir
       env = merge_env(step.env, override.env)
       configure_flags = step.configure_flags + override.configure_flags_add
       patches = step.patches + override.patches_add
+      clean_build = override.clean_build.nil? ? step.clean_build : override.clean_build.not_nil!
       BuildStep.new(
         name: step.name,
         strategy: step.strategy,
@@ -86,6 +88,8 @@ module Bootstrap
         install_prefix: install_prefix,
         destdir: destdir,
         env: env,
+        build_dir: build_dir,
+        clean_build: clean_build,
       )
     end
 
@@ -118,16 +122,20 @@ module Bootstrap
     include JSON::Serializable
 
     getter workdir : String?
+    getter build_dir : String?
     getter install_prefix : String?
     getter destdir : String?
     getter env : Hash(String, String)?
+    getter clean_build : Bool?
     getter configure_flags_add : Array(String) = [] of String
     getter patches_add : Array(String) = [] of String
 
     def initialize(@workdir : String? = nil,
+                   @build_dir : String? = nil,
                    @install_prefix : String? = nil,
                    @destdir : String? = nil,
                    @env : Hash(String, String)? = nil,
+                   @clean_build : Bool? = nil,
                    @configure_flags_add : Array(String) = [] of String,
                    @patches_add : Array(String) = [] of String)
     end
