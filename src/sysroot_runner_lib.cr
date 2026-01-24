@@ -90,6 +90,13 @@ module Bootstrap
           case step.strategy
           when "cmake"
             had_build_files = File.exists?("CMakeCache.txt") || File.exists?("Makefile") || Dir.exists?("CMakeFiles")
+            if clean_build_dirs && had_build_files
+              FileUtils.rm("CMakeCache.txt") if File.exists?("CMakeCache.txt")
+              FileUtils.rm_rf("CMakeFiles") if Dir.exists?("CMakeFiles")
+              FileUtils.rm("Bootstrap.cmk") if File.exists?("Bootstrap.cmk")
+              FileUtils.rm("Makefile") if File.exists?("Makefile")
+              had_build_files = false
+            end
             bootstrap_argv = ["./bootstrap", "--prefix=#{install_prefix}"]
             if step.configure_flags.size > 0
               bootstrap_argv << "--"

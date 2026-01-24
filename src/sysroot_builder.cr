@@ -737,6 +737,14 @@ module Bootstrap
       profile_content = rootfs_profile_content
       resolv_conf_content = rootfs_resolv_conf_content
       hosts_content = rootfs_hosts_content
+      libcxx_include = "#{sysroot_prefix}/include/c++/v1"
+      libcxx_target_include = "#{sysroot_prefix}/include/#{sysroot_triple}/c++/v1"
+      libcxx_libdir = "#{sysroot_prefix}/lib/#{sysroot_triple}"
+      cmake_c_flags = "--target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld"
+      cmake_cxx_flags = "#{cmake_c_flags} -nostdinc++ -isystem #{libcxx_include} -isystem #{libcxx_target_include} -nostdlib++ -stdlib=libc++ -L#{libcxx_libdir} -L#{sysroot_prefix}/lib -Wl,--start-group -lc++ -lc++abi -lunwind -Wl,--end-group"
+      cmake_archive_create = "#{sysroot_prefix}/bin/llvm-ar qc <TARGET> <OBJECTS>"
+      cmake_archive_append = "#{sysroot_prefix}/bin/llvm-ar q <TARGET> <OBJECTS>"
+      cmake_archive_finish = "#{sysroot_prefix}/bin/llvm-ranlib <TARGET>"
       libxml2_env = {
         "CPPFLAGS" => "-I#{sysroot_prefix}/include",
         "LDFLAGS"  => "-L#{sysroot_prefix}/lib",
@@ -885,6 +893,26 @@ module Bootstrap
               "-DOPENSSL_INCLUDE_DIR=/usr/include",
               "-DOPENSSL_SSL_LIBRARY=/usr/lib/libssl.so",
               "-DOPENSSL_CRYPTO_LIBRARY=/usr/lib/libcrypto.so",
+              "-DCMAKE_C_COMPILER=#{sysroot_prefix}/bin/clang",
+              "-DCMAKE_CXX_COMPILER=#{sysroot_prefix}/bin/clang++",
+              "-DCMAKE_AR:FILEPATH=#{sysroot_prefix}/bin/llvm-ar",
+              "-DCMAKE_RANLIB:FILEPATH=#{sysroot_prefix}/bin/llvm-ranlib",
+              "-DCMAKE_C_COMPILER_AR:FILEPATH=#{sysroot_prefix}/bin/llvm-ar",
+              "-DCMAKE_C_COMPILER_RANLIB:FILEPATH=#{sysroot_prefix}/bin/llvm-ranlib",
+              "-DCMAKE_CXX_COMPILER_AR:FILEPATH=#{sysroot_prefix}/bin/llvm-ar",
+              "-DCMAKE_CXX_COMPILER_RANLIB:FILEPATH=#{sysroot_prefix}/bin/llvm-ranlib",
+              "-DCMAKE_C_ARCHIVE_CREATE:STRING=#{cmake_archive_create}",
+              "-DCMAKE_C_ARCHIVE_APPEND:STRING=#{cmake_archive_append}",
+              "-DCMAKE_C_ARCHIVE_FINISH:STRING=#{cmake_archive_finish}",
+              "-DCMAKE_CXX_ARCHIVE_CREATE:STRING=#{cmake_archive_create}",
+              "-DCMAKE_CXX_ARCHIVE_APPEND:STRING=#{cmake_archive_append}",
+              "-DCMAKE_CXX_ARCHIVE_FINISH:STRING=#{cmake_archive_finish}",
+              "-DCMAKE_C_FLAGS=#{cmake_c_flags}",
+              "-DCMAKE_CXX_FLAGS=#{cmake_cxx_flags}",
+              "-DCMAKE_MAKE_PROGRAM=/usr/bin/make",
+              "-DKWSYS_CXX_HAS_EXT_STDIO_FILEBUF_H=0",
+              # musl doesn't ship sys/cdefs.h, but cmake's libarchive probe can mis-detect it.
+              "-DHAVE_SYS_CDEFS_H=0",
             ],
             "libxml2" => libxml2_cmake_flags,
           },
