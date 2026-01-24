@@ -529,7 +529,8 @@ module Bootstrap
           Log.info { "Skipping previously completed #{phase.name}/#{step.name}" }
           next
         end
-        Log.info { "Building #{step.name} in #{step.workdir}" }
+        rootfs_label = rootfs_context_label
+        Log.info { "Building #{step.name} in #{step.workdir} (phase=#{phase.name}, rootfs=#{rootfs_label})" }
         begin
           effective_runner = runner
           if resume && state && retrying_step?(phase.name, step.name, state)
@@ -625,6 +626,12 @@ module Bootstrap
         "CC"   => "clang --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld",
         "CXX"  => "clang++ --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -stdlib=libc++",
       }
+    end
+
+    private def self.rootfs_context_label : String
+      return "Alpine" unless rootfs_marker_present?
+      return "workspace-BQ2" if File.exists?(WORKSPACE_ROOTFS_MARKER_PATH)
+      "seed-BQ2"
     end
 
     private def self.apply_overrides(plan : BuildPlan, path : String) : BuildPlan
