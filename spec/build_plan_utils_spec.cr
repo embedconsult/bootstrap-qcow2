@@ -18,6 +18,7 @@ describe Bootstrap::BuildPlanUtils do
             workdir: "/workspace/m4-1.4.19",
             configure_flags: [] of String,
             patches: [] of String,
+            build_dir: "/workspace/m4-1.4.19-build",
           ),
         ],
       ),
@@ -27,5 +28,6 @@ describe Bootstrap::BuildPlanUtils do
     rewritten.phases.first.workspace.should eq "/work/ws"
     rewritten.phases.first.destdir.should eq "/work/ws/rootfs"
     rewritten.phases.first.steps.first.workdir.should eq "/work/ws/m4-1.4.19"
+    rewritten.phases.first.steps.first.build_dir.should eq "/work/ws/m4-1.4.19-build"
   end
 end

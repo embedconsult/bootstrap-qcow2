@@ -36,6 +36,8 @@ Source trees:
    - Read the newest report in `/var/lib/sysroot-build-reports/`.
    - Encode the next hypothesis in `/var/lib/sysroot-build-overrides.json`.
    - Re-run `./bin/bq2 sysroot-runner` (avoid changing the plan JSON).
+   - For CMake/bootstrap reuse issues, you can set per-step `build_dir` and
+     `clean_build` overrides to force out-of-tree builds and a `make clean`.
 
 ## Codex session continuity
 
