@@ -620,6 +620,7 @@ module Bootstrap
     end
 
     private def self.native_rootfs_env : Hash(String, String)
+      return {} of String => String unless File.exists?("/usr/bin/clang") && File.exists?("/usr/bin/clang++")
       {
         # Prefer prefix-free /usr tools but keep /opt/sysroot on PATH for the toolchain.
         "PATH" => "/usr/bin:/bin:/usr/sbin:/sbin:/opt/sysroot/bin:/opt/sysroot/sbin",
