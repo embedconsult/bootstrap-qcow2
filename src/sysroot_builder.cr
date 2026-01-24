@@ -725,6 +725,12 @@ module Bootstrap
     # Define the multi-phase build in an LFS-inspired style:
     # 1. build a complete sysroot from sources using Alpine's seed environment
     # 2. validate the sysroot by using it as the toolchain when assembling a rootfs
+    #
+    # Phase environments:
+    # - sysroot-from-alpine: runs in the Alpine seed rootfs (host tools).
+    # - rootfs-from-sysroot: runs inside the workspace rootfs and seeds /etc plus /opt/sysroot.
+    # - system-from-sysroot/tools-from-system/finalize-rootfs: run inside the workspace rootfs,
+    #   prefer /usr/bin, and rely on musl's /etc/ld-musl-<arch>.path for runtime lookup.
     def phase_specs : Array(PhaseSpec)
       bootstrap_repo_dir = "/workspace/bootstrap-qcow2-#{bootstrap_source_version}"
       sysroot_prefix = "/opt/sysroot"
@@ -1055,7 +1061,9 @@ module Bootstrap
     # Return environment variables for the rootfs validation phase.
     #
     # The rootfs phase is intended to use tools from the newly built sysroot,
-    # but still execute in the bootstrap environment.
+    # but still execute in the bootstrap environment. Dynamic linker search
+    # paths come from /etc/ld-musl-<arch>.path written during rootfs phases,
+    # so avoid LD_LIBRARY_PATH overrides here.
     private def rootfs_phase_env(sysroot_prefix : String) : Hash(String, String)
       target = sysroot_target_triple
       libcxx_include = "#{sysroot_prefix}/include/c++/v1"
@@ -1064,14 +1072,13 @@ module Bootstrap
       cc = "#{sysroot_prefix}/bin/clang --target=#{target} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld"
       cxx = "#{sysroot_prefix}/bin/clang++ --target=#{target} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -nostdinc++ -isystem #{libcxx_include} -isystem #{libcxx_target_include} -nostdlib++ -stdlib=libc++ -L#{libcxx_libdir} -L#{sysroot_prefix}/lib -Wl,--start-group -lc++ -lc++abi -lunwind -Wl,--end-group"
       {
-        "PATH"            => "#{sysroot_prefix}/bin:#{sysroot_prefix}/sbin:/usr/bin:/bin",
+        "PATH"            => "/usr/bin:/bin:/usr/sbin:/sbin:#{sysroot_prefix}/bin:#{sysroot_prefix}/sbin",
         "CC"              => cc,
         "CXX"             => cxx,
         "AR"              => "#{sysroot_prefix}/bin/llvm-ar",
         "NM"              => "#{sysroot_prefix}/bin/llvm-nm",
         "RANLIB"          => "#{sysroot_prefix}/bin/llvm-ranlib",
         "STRIP"           => "#{sysroot_prefix}/bin/llvm-strip",
-        "LD_LIBRARY_PATH" => "#{sysroot_prefix}/lib:#{libcxx_libdir}",
       }
     end
 
