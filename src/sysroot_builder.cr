@@ -365,6 +365,7 @@ module Bootstrap
             "-DLLVM_ENABLE_SPHINX=OFF",
             "-DCLANG_BUILD_DOCS=OFF",
             "-DLLVM_ENABLE_TERMINFO=OFF",
+            "-DLLVM_ENABLE_PYTHON=OFF",
             "-DLLVM_ENABLE_PIC=OFF",
             "-DCOMPILER_RT_BUILD_BUILTINS=ON",
             "-DCOMPILER_RT_BUILD_CRT=ON",
@@ -392,6 +393,7 @@ module Bootstrap
           patches: [
             "#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/smallvector-include-cstdint.patch",
             "#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/cmake-guard-cxx-compiler-id.patch",
+            "#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/disable-python-required.patch",
           ],
           phases: ["sysroot-from-alpine", "system-from-sysroot"],
         ),

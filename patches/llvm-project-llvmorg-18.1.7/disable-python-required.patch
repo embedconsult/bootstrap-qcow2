@@ -1,0 +1,104 @@
+diff --git a/llvm/CMakeLists.txt b/llvm/CMakeLists.txt
+index a321a3d7fe20..cc9f16a87550 100644
+--- a/llvm/CMakeLists.txt
++++ b/llvm/CMakeLists.txt
+@@ -883,8 +883,14 @@ else()
+ endif()
+ 
+ # Find python before including config-ix, since it needs to be able to search
+-# for python modules.
+-find_package(Python3 ${LLVM_MINIMUM_PYTHON_VERSION} REQUIRED
+-    COMPONENTS Interpreter)
++# for python modules.
++option(LLVM_ENABLE_PYTHON "Enable Python-based build utilities." ON)
++if(LLVM_ENABLE_PYTHON)
++  find_package(Python3 ${LLVM_MINIMUM_PYTHON_VERSION} REQUIRED
++      COMPONENTS Interpreter)
++else()
++  find_package(Python3 ${LLVM_MINIMUM_PYTHON_VERSION} QUIET
++      COMPONENTS Interpreter)
++endif()
+ 
+ # All options referred to from HandleLLVMOptions have to be specified
+ # BEFORE this include, otherwise options will not be correctly set on
+diff --git a/llvm/cmake/config-ix.cmake b/llvm/cmake/config-ix.cmake
+index c339ae46e1ae..7b60e9b6a6e2 100644
+--- a/llvm/cmake/config-ix.cmake
++++ b/llvm/cmake/config-ix.cmake
+@@ -687,34 +687,38 @@ endif()
+ 
+ string(REPLACE " " ";" LLVM_BINDINGS_LIST "${LLVM_BINDINGS}")
+ 
+-function(find_python_module module)
+-  string(REPLACE "." "_" module_name ${module})
+-  string(TOUPPER ${module_name} module_upper)
+-  set(FOUND_VAR PY_${module_upper}_FOUND)
+-  if (DEFINED ${FOUND_VAR})
+-    return()
+-  endif()
++if(LLVM_ENABLE_PYTHON AND Python3_EXECUTABLE)
++  function(find_python_module module)
++    string(REPLACE "." "_" module_name ${module})
++    string(TOUPPER ${module_name} module_upper)
++    set(FOUND_VAR PY_${module_upper}_FOUND)
++    if (DEFINED ${FOUND_VAR})
++      return()
++    endif()
+ 
+-  execute_process(COMMAND "${Python3_EXECUTABLE}" "-c" "import ${module}"
+-    RESULT_VARIABLE status
+-    ERROR_QUIET)
++    execute_process(COMMAND "${Python3_EXECUTABLE}" "-c" "import ${module}"
++      RESULT_VARIABLE status
++      ERROR_QUIET)
+ 
+-  if(status)
+-    set(${FOUND_VAR} OFF CACHE BOOL "Failed to find python module '${module}'")
+-    message(STATUS "Could NOT find Python module ${module}")
+-  else()
+-  set(${FOUND_VAR} ON CACHE BOOL "Found python module '${module}'")
+-    message(STATUS "Found Python module ${module}")
+-  endif()
+-endfunction()
++    if(status)
++      set(${FOUND_VAR} OFF CACHE BOOL "Failed to find python module '${module}'")
++      message(STATUS "Could NOT find Python module ${module}")
++    else()
++      set(${FOUND_VAR} ON CACHE BOOL "Found python module '${module}'")
++      message(STATUS "Found Python module ${module}")
++    endif()
++  endfunction()
+ 
+-set (PYTHON_MODULES
+-  pygments
+-  # Some systems still don't have pygments.lexers.c_cpp which was introduced in
+-  # version 2.0 in 2014...
+-  pygments.lexers.c_cpp
+-  yaml
+-  )
+-foreach(module ${PYTHON_MODULES})
+-  find_python_module(${module})
+-endforeach()
++  set (PYTHON_MODULES
++    pygments
++    # Some systems still don't have pygments.lexers.c_cpp which was introduced in
++    # version 2.0 in 2014...
++    pygments.lexers.c_cpp
++    yaml
++    )
++  foreach(module ${PYTHON_MODULES})
++    find_python_module(${module})
++  endforeach()
+ 
+-if(PY_PYGMENTS_FOUND AND PY_PYGMENTS_LEXERS_C_CPP_FOUND AND PY_YAML_FOUND)
+-  set (LLVM_HAVE_OPT_VIEWER_MODULES 1)
+-else()
+-  set (LLVM_HAVE_OPT_VIEWER_MODULES 0)
++  if(PY_PYGMENTS_FOUND AND PY_PYGMENTS_LEXERS_C_CPP_FOUND AND PY_YAML_FOUND)
++    set (LLVM_HAVE_OPT_VIEWER_MODULES 1)
++  else()
++    set (LLVM_HAVE_OPT_VIEWER_MODULES 0)
++  endif()
++else()
++  set (LLVM_HAVE_OPT_VIEWER_MODULES 0)
+ endif()
