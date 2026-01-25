@@ -67,6 +67,8 @@ module Bootstrap
       phases : Array(String)? = nil,
       configure_flags : Array(String) = [] of String,
       build_directory : String? = nil,
+      # Optional out-of-tree build directory template. Supports %{phase} and %{name}.
+      build_dir : String? = nil,
       strategy : String = "autotools",
       patches : Array(String) = [] of String,
       extra_urls : Array(URI) = [] of URI do
@@ -226,6 +228,7 @@ module Bootstrap
           DEFAULT_CMAKE,
           URI.parse("https://github.com/Kitware/CMake/releases/download/v#{DEFAULT_CMAKE}/cmake-#{DEFAULT_CMAKE}.tar.gz"),
           strategy: "cmake",
+          build_dir: "cmake-#{DEFAULT_CMAKE}-build-%{phase}",
           configure_flags: [
             "-DCMake_HAVE_CXX_MAKE_UNIQUE=ON",
             "-DCMake_HAVE_CXX_UNIQUE_PTR=ON",
@@ -1128,6 +1131,11 @@ module Bootstrap
       steps = phase_packages.map do |pkg|
         build_directory = pkg.build_directory || strip_archive_extension(pkg.filename)
         build_root = File.join(spec.workspace, build_directory)
+        build_dir = pkg.build_dir
+        if build_dir
+          build_dir = build_dir.gsub("%{phase}", spec.name).gsub("%{name}", pkg.name)
+          build_dir = build_dir.starts_with?("/") ? build_dir : File.join(spec.workspace, build_dir)
+        end
         BuildStep.new(
           name: pkg.name,
           strategy: pkg.strategy,
@@ -1135,6 +1143,7 @@ module Bootstrap
           configure_flags: configure_flags_for(pkg, spec),
           patches: patches_for(pkg, spec),
           env: spec.env_overrides[pkg.name]? || ({} of String => String),
+          build_dir: build_dir,
         )
       end
       steps.concat(spec.extra_steps) unless spec.extra_steps.empty?
