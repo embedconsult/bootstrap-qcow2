@@ -1,15 +1,11 @@
-diff --git a/llvm/CMakeLists.txt b/llvm/CMakeLists.txt
-index a321a3d7fe20..cc9f16a87550 100644
 --- a/llvm/CMakeLists.txt
 +++ b/llvm/CMakeLists.txt
-@@ -883,8 +883,14 @@ else()
- endif()
+@@ -889,8 +889,14 @@
  
  # Find python before including config-ix, since it needs to be able to search
--# for python modules.
+ # for python modules.
 -find_package(Python3 ${LLVM_MINIMUM_PYTHON_VERSION} REQUIRED
 -    COMPONENTS Interpreter)
-+# for python modules.
 +option(LLVM_ENABLE_PYTHON "Enable Python-based build utilities." ON)
 +if(LLVM_ENABLE_PYTHON)
 +  find_package(Python3 ${LLVM_MINIMUM_PYTHON_VERSION} REQUIRED
@@ -21,11 +17,9 @@ index a321a3d7fe20..cc9f16a87550 100644
  
  # All options referred to from HandleLLVMOptions have to be specified
  # BEFORE this include, otherwise options will not be correctly set on
-diff --git a/llvm/cmake/config-ix.cmake b/llvm/cmake/config-ix.cmake
-index c339ae46e1ae..7b60e9b6a6e2 100644
 --- a/llvm/cmake/config-ix.cmake
 +++ b/llvm/cmake/config-ix.cmake
-@@ -687,34 +687,38 @@ endif()
+@@ -697,40 +697,44 @@
  
  string(REPLACE " " ";" LLVM_BINDINGS_LIST "${LLVM_BINDINGS}")
  
@@ -92,13 +86,11 @@ index c339ae46e1ae..7b60e9b6a6e2 100644
  
 -if(PY_PYGMENTS_FOUND AND PY_PYGMENTS_LEXERS_C_CPP_FOUND AND PY_YAML_FOUND)
 -  set (LLVM_HAVE_OPT_VIEWER_MODULES 1)
--else()
--  set (LLVM_HAVE_OPT_VIEWER_MODULES 0)
 +  if(PY_PYGMENTS_FOUND AND PY_PYGMENTS_LEXERS_C_CPP_FOUND AND PY_YAML_FOUND)
 +    set (LLVM_HAVE_OPT_VIEWER_MODULES 1)
 +  else()
 +    set (LLVM_HAVE_OPT_VIEWER_MODULES 0)
 +  endif()
-+else()
-+  set (LLVM_HAVE_OPT_VIEWER_MODULES 0)
+ else()
+   set (LLVM_HAVE_OPT_VIEWER_MODULES 0)
  endif()
