@@ -215,12 +215,33 @@ module Bootstrap
               FileUtils.rm_rf(stage2_build_dir) if Dir.exists?(stage2_build_dir)
             end
 
-            stage1_cc = env["CC"]? || Process.find_executable("clang") || "clang"
-            stage1_cxx = env["CXX"]? || Process.find_executable("clang++") || "clang++"
+            stage1_cc_flags = ""
+            stage1_cc = env["CC"]?
+            if stage1_cc
+              cc_parts = stage1_cc.split(/\s+/)
+              stage1_cc = cc_parts.first? || stage1_cc
+              stage1_cc_flags = cc_parts[1..-1].join(" ") if cc_parts.size > 1
+            end
+            stage1_cc = stage1_cc || Process.find_executable("clang") || "clang"
+
+            stage1_cxx_flags = ""
+            stage1_cxx = env["CXX"]?
+            if stage1_cxx
+              cxx_parts = stage1_cxx.split(/\s+/)
+              stage1_cxx = cxx_parts.first? || stage1_cxx
+              stage1_cxx_flags = cxx_parts[1..-1].join(" ") if cxx_parts.size > 1
+            end
+            stage1_cxx = stage1_cxx || Process.find_executable("clang++") || "clang++"
             stage1_flags = step.configure_flags.reject { |flag| flag.starts_with?("-DLLVM_ENABLE_LIBCXX=") } + [
               "-DCMAKE_C_COMPILER=#{stage1_cc}",
               "-DCMAKE_CXX_COMPILER=#{stage1_cxx}",
             ]
+            unless stage1_cc_flags.empty? || stage1_flags.any? { |flag| flag.starts_with?("-DCMAKE_C_FLAGS=") }
+              stage1_flags << "-DCMAKE_C_FLAGS=#{stage1_cc_flags}"
+            end
+            unless stage1_cxx_flags.empty? || stage1_flags.any? { |flag| flag.starts_with?("-DCMAKE_CXX_FLAGS=") }
+              stage1_flags << "-DCMAKE_CXX_FLAGS=#{stage1_cxx_flags}"
+            end
             run_cmd(["cmake", "-S", source_dir, "-B", stage1_build_dir, "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + stage1_flags, env: env)
             run_cmd(["cmake", "--build", stage1_build_dir, "-j#{cpus}"], env: env)
             install_env = destdir ? env.merge({"DESTDIR" => destdir}) : env
