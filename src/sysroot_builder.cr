@@ -54,7 +54,7 @@ module Bootstrap
     DEFAULT_FOSSIL        = "2.25"
     DEFAULT_GIT           = "2.45.2"
     DEFAULT_CRYSTAL       = "1.18.2"
-    DEFAULT_BQ2           = "0.0.5"
+    DEFAULT_BQ2           = "0.0.6"
     # Source: https://curl.se/ca/cacert.pem (Mozilla CA certificate bundle).
     CA_BUNDLE_PEM = {{ read_file("#{__DIR__}/../data/ca-bundle/ca-certificates.crt") }}
 
