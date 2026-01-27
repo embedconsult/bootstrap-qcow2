@@ -1,0 +1,16 @@
+--- a/runtimes/CMakeLists.txt
++++ b/runtimes/CMakeLists.txt
+@@ -155,7 +155,12 @@
+ include(AddLLVM)
+ include(HandleLLVMOptions)
+ 
+-find_package(Python3 REQUIRED COMPONENTS Interpreter)
++option(LLVM_ENABLE_PYTHON "Enable Python-based build utilities." ON)
++if(LLVM_ENABLE_PYTHON)
++  find_package(Python3 REQUIRED COMPONENTS Interpreter)
++else()
++  find_package(Python3 QUIET COMPONENTS Interpreter)
++endif()
+ 
+ # Host triple is used by tests to check if they are running natively.
+ include(GetHostTriple)

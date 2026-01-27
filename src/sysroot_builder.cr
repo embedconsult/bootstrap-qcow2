@@ -253,7 +253,7 @@ module Bootstrap
           strategy: "llvm-libcxx",
           configure_flags: [
             "-DCMAKE_BUILD_TYPE=Release",
-            "-DLLVM_TARGETS_TO_BUILD=AArch64;X86",
+            "-DLLVM_TARGETS_TO_BUILD=AArch64",
             "-DLLVM_HOST_TRIPLE=#{sysroot_triple}",
             "-DLLVM_DEFAULT_TARGET_TRIPLE=#{sysroot_triple}",
             "-DLLVM_ENABLE_PROJECTS=clang;lld;compiler-rt",
@@ -364,6 +364,8 @@ module Bootstrap
             "-DLLVM_ENABLE_DOXYGEN=OFF",
             "-DLLVM_ENABLE_SPHINX=OFF",
             "-DCLANG_BUILD_DOCS=OFF",
+            "-DCLANG_ENABLE_STATIC_ANALYZER=OFF",
+            "-DCLANG_ENABLE_ARCMT=OFF",
             "-DLLVM_ENABLE_TERMINFO=OFF",
             "-DLLVM_ENABLE_PYTHON=OFF",
             "-DLLVM_ENABLE_PIC=OFF",
@@ -841,6 +843,15 @@ module Bootstrap
           destdir: rootfs_destdir,
           env: rootfs_env,
           package_allowlist: ["musl", "busybox", "linux-headers"],
+          env_overrides: {
+            "busybox" => {
+              "HOSTCC"      => "#{sysroot_prefix}/bin/clang #{cmake_c_flags}",
+              "HOSTCXX"     => "#{sysroot_prefix}/bin/clang++ #{cmake_c_flags}",
+              "HOSTLDFLAGS" => "-L#{sysroot_prefix}/lib/#{sysroot_triple} -L#{sysroot_prefix}/lib",
+              "MAKEFLAGS"   => "-e",
+              "STRIP"       => "/bin/true",
+            },
+          },
           extra_steps: [
             BuildStep.new(
               name: "musl-ld-path",
