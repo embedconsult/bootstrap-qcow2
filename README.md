@@ -24,7 +24,7 @@ During the interim, reliance on externally-authored and compiled tools (for exam
 ### Build the CLI and sysroot tarball
 
 ```bash
-shards build                         # builds bin/bq2 and subcommand symlinks
+shards build                         # builds bin/bq2 (run ./bin/bq2 --install for symlinks)
 ./bin/sysroot-builder --output sysroot.tar.gz
 ```
 
@@ -43,10 +43,11 @@ The rootfs output includes:
 
 ### Busybox-style CLI (`bq2`)
 
-The single executable (`bin/bq2`) dispatches subcommands by argv[0] or the first argument. Symlinks in `bin/` mirror the subcommands.
+The single executable (`bin/bq2`) dispatches subcommands by argv[0] or the first argument. Symlinks in `bin/` mirror the subcommands (create them with `./bin/bq2 --install`).
 
 ```bash
 shards build
+./bin/bq2 --install
 
 # Build the sysroot tarball
 ./bin/sysroot-builder --output sysroot.tar.gz
@@ -68,7 +69,7 @@ shards build
 	# Or run every phase in order:
 	./bin/bq2 sysroot-runner --phase all
 
-# Default (no args): build the sysroot, set up DNS, enter with /bin/sh
+# Default (no args): show resume status + help (use --all --resume to continue a build)
 ./bin/bq2
 ```
 
@@ -114,7 +115,7 @@ host-side context than `bin/sysroot-status`, which only inspects a state file.
 
 ## Contributing
 
-1. Fork it (<https://github.com/your-github-user/bootstrap-qcow2/fork>)
+1. Fork it (<https://github.com/jkridner/bootstrap-qcow2/fork>)
 2. Create your feature branch (`git checkout -b my-new-feature`)
 3. Commit your changes (`git commit -am 'Add some feature'`)
 4. Push to the branch (`git push origin my-new-feature`)
@@ -122,4 +123,4 @@ host-side context than `bin/sysroot-status`, which only inspects a state file.
 
 ## Contributors
 
-- [Jason Kridner](https://github.com/your-github-user) - creator and maintainer
+- [Jason Kridner](https://github.com/jkridner) - creator and maintainer
