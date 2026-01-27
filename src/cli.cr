@@ -156,7 +156,8 @@ module Bootstrap
       exit_code
     end
 
-    # Create CLI symlinks in ./bin for each registered command.
+    # Create CLI symlinks in ./bin for registered commands that are exposed as
+    # symlinks (excluding default/flag-only entries).
     def self.run_install : Int32
       bin_dir = Path["bin"]
       target = bin_dir / "bq2"

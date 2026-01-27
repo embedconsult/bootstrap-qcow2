@@ -23,8 +23,8 @@ module Bootstrap
   # * aarch64-first defaults, but architecture/branch/version are configurable.
   # * Deterministic source handling: every tarball is cached locally with CRC32 +
   #   SHA256 bookkeeping for reuse and verification.
-  # * Coordinator source is stored in the repository and copied into the chroot
-  #   so it participates in formatting and specs.
+  # * bootstrap-qcow2 source is fetched as a tarball and staged into /workspace
+  #   so it participates in formatting and specs inside the rootfs.
   class SysrootBuilder < CLI
     {% if flag?(:x86_64) %}
       DEFAULT_ARCH = "x86_64"
@@ -652,7 +652,7 @@ module Bootstrap
     # * extracts the seed rootfs
     # * creates workspace/var/lib directories (/workspace holds extracted sources,
     #   /var/lib holds the build plan)
-    # * stages the coordinator entrypoints
+    # * stages source archives (including bootstrap-qcow2) into /workspace
     # Returns the rootfs path on success.
     # Invoked by `generate_chroot_tarball` and can also be used directly in callers.
     def prepare_rootfs(base_rootfs : PackageSpec = base_rootfs_spec, include_sources : Bool = true) : Path
