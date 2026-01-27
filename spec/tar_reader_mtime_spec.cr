@@ -1,15 +1,5 @@
 require "./spec_helper"
-require "../src/sysroot_builder"
-
-class Bootstrap::SysrootBuilder
-  def self._spec_write_tar_gz(source : Path, output : Path) : Nil
-    TarWriter.write_gz(source, output)
-  end
-
-  def _spec_extract_tarball(path : Path, destination : Path) : Nil
-    extract_tarball(path, destination, false)
-  end
-end
+require "../src/tarball"
 
 describe "Bootstrap::SysrootBuilder tar extraction" do
   it "preserves entry mtimes from the archive" do
@@ -25,10 +15,9 @@ describe "Bootstrap::SysrootBuilder tar extraction" do
       File.utime(fixed, fixed, file_path)
 
       archive = dir / "out.tar.gz"
-      Bootstrap::SysrootBuilder._spec_write_tar_gz(source, archive)
+      Bootstrap::Tarball.write_gz(source, archive)
 
-      builder = Bootstrap::SysrootBuilder.new(dir)
-      builder._spec_extract_tarball(archive, dest)
+      Bootstrap::Tarball.extract(archive, dest, false, nil, nil)
 
       extracted = dest / "hello.txt"
       File.exists?(extracted).should be_true
