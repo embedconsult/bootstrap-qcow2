@@ -237,8 +237,8 @@ module Bootstrap
     private def self.apply_toolchain_env_defaults : Nil
       ENV["CRYSTAL_CACHE_DIR"] = "/tmp/crystal_cache"
       ENV["SSL_CERT_FILE"] = "/etc/ssl/certs/ca-certificates.crt"
-      ENV["CC"] = "clang -fuse-ld=lld"
-      ENV["CXX"] = "clang++ -fuse-ld=lld"
+      ENV["CC"] = "clang -fuse-ld=lld -Wno-unused-command-line-argument"
+      ENV["CXX"] = "clang++ -fuse-ld=lld -Wno-unused-command-line-argument"
       ENV["LD"] = "ld.lld"
       ENV["PATH"] = DEFAULT_PATH
     end
