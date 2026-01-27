@@ -395,6 +395,8 @@ module Bootstrap
             "#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/cmake-guard-cxx-compiler-id.patch",
             "#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/disable-python-required.patch",
             "#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/flow-sensitive-html-logger-prebuilt.patch",
+            "#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/runtimes-python-optional.patch",
+            "#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/runtimes-propagate-python-option.patch",
           ],
           phases: ["sysroot-from-alpine", "system-from-sysroot"],
         ),
