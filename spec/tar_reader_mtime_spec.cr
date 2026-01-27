@@ -1,7 +1,7 @@
 require "./spec_helper"
 require "../src/tarball"
 
-describe "Bootstrap::SysrootBuilder tar extraction" do
+describe "Bootstrap::Tarball" do
   it "preserves entry mtimes from the archive" do
     with_tempdir do |dir|
       source = dir / "src"
