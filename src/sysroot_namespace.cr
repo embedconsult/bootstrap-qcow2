@@ -41,15 +41,16 @@ module Bootstrap
     CLONE_NEWUSER = 0x10000000
     CLONE_NEWNET  = 0x40000000
 
-    MS_BIND    =  4096_u64
-    MS_REC     = 16384_u64
-    MS_RDONLY  = (1_u64 << 0)
-    MS_NOSUID  = (1_u64 << 1)
-    MS_NODEV   = (1_u64 << 2)
-    MS_NOEXEC  = (1_u64 << 3)
-    MS_REMOUNT = (1_u64 << 5)
-    MS_PRIVATE = (1_u64 << 18)
-    MNT_DETACH = 2
+    MS_BIND      =  4096_u64
+    MS_REC       = 16384_u64
+    MS_RDONLY    = (1_u64 << 0)
+    MS_NOSUID    = (1_u64 << 1)
+    MS_NODEV     = (1_u64 << 2)
+    MS_NOEXEC    = (1_u64 << 3)
+    MS_REMOUNT   = (1_u64 << 5)
+    MS_PRIVATE   = (1_u64 << 18)
+    MNT_DETACH   = 2
+    DEFAULT_PATH = "/opt/sysroot/bin:/opt/sysroot/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
 
     class NamespaceError < RuntimeError
     end
@@ -227,7 +228,7 @@ module Bootstrap
     private def self.reset_environment(home : String, extra_env : Hash(String, String) = {} of String => String) : Nil
       ENV.clear
       ENV["HOME"] = home
-      ENV["PATH"] = "/usr/bin:/usr/sbin:/bin:/sbin"
+      ENV["PATH"] = DEFAULT_PATH
       extra_env.each { |key, value| ENV[key] = value }
     end
 
@@ -238,7 +239,7 @@ module Bootstrap
       ENV["CC"] = "clang -fuse-ld=lld"
       ENV["CXX"] = "clang++ -fuse-ld=lld"
       ENV["LD"] = "ld.lld"
-      ENV["PATH"] = "/opt/sysroot/bin:/opt/sysroot/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
+      ENV["PATH"] = DEFAULT_PATH
     end
 
     # Collects restriction messages that can prevent user-namespace mounts of
