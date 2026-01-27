@@ -109,6 +109,8 @@ module Bootstrap
       end
       return CLI.print_help(parser) if help
 
+      home = codex_mode ? "/work" : "/root"
+      extra_env = {} of String => String
       if codex_mode
         # TODO: if there isn't a git checkout in codex/work/bootstrap-qcow2, make one
         FileUtils.mkdir_p("codex/work/bootstrap-qcow2")
@@ -117,11 +119,9 @@ module Bootstrap
         unless remaining.empty?
           command[-1] = [command[-1], remaining.join(" ")].join(" ")
         end
-        ENV["HOME"] = "/work"
-        ENV["CODEX_HOME"] = "/work/.codex"
+        extra_env["CODEX_HOME"] = "/work/.codex"
         STDERR.puts "codex-mode: command=#{command.join(" ")}"
       else
-        ENV["HOME"] = "/root"
         if remaining.empty?
           command = ["/bin/sh", "--login"]
         else
@@ -147,8 +147,8 @@ module Bootstrap
         return 1
       end
 
-      ENV["HOME"] = "/root"
       SysrootNamespace.enter_rootfs(rootfs_value, extra_binds: extra_binds)
+      reset_environment(home, extra_env)
       apply_toolchain_env_defaults
       AlpineSetup.install_sysroot_runner_packages if run_alpine_setup
       Log.info { "Executing command: #{command.join(" ")}" }
@@ -221,6 +221,14 @@ module Bootstrap
     private def self.normalize_bind_target(value : String) : Path
       cleaned = value.starts_with?("/") ? value[1..] : value
       Path[cleaned]
+    end
+
+    # Reset the environment to a minimal expected set before entering the rootfs.
+    private def self.reset_environment(home : String, extra_env : Hash(String, String) = {} of String => String) : Nil
+      ENV.clear
+      ENV["HOME"] = home
+      ENV["PATH"] = "/usr/bin:/usr/sbin:/bin:/sbin"
+      extra_env.each { |key, value| ENV[key] = value }
     end
 
     # Ensure the sysroot toolchain defaults are available inside the namespace.

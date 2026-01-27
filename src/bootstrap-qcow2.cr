@@ -1,9 +1,9 @@
 # `Bootstrap::Qcow2` coordinates qcow2 image generation and dependency checks.
 #
 # Rootfs/sysroot orchestration now runs through `SysrootNamespace` and the
-# Crystal CLI tooling. qcow2 image generation is still evolving; legacy
-# container-based steps remain for CI experiments until a pure Crystal flow
-# is available.
+# Crystal CLI tooling. qcow2 image generation is still evolving; container-based
+# steps may be reintroduced for CI once user-namespace constraints are captured
+# and a Crystal-first flow is fully defined.
 require "log"
 
 module Bootstrap
@@ -66,7 +66,7 @@ module Bootstrap
     end
 
     # Build a qcow2 image using the legacy Docker pipeline while the
-    # sysroot-namespace orchestration is still being built out.
+    # Crystal-first orchestration is still being built out.
     def genQcow2
       self.class.exec(command: "docker", args: ["build", "-f", "Dockerfile.uefi_rs", "-t", "jkridner/bootstrap-qcow2", "."])
       self.class.exec(command: "docker", args: ["rm", "temp-img"])
