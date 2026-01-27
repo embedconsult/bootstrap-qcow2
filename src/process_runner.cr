@@ -45,21 +45,39 @@ module Bootstrap
       stderr_io = process.error.not_nil!
       throttler = ThrottledOutput.new(stdout, stderr, flush_interval)
       throttler.start
+      previous_handler = Signal::INT.trap_handler?
+      Signal::INT.trap do |signal|
+        throttler.restore_cursor
+        if previous_handler
+          previous_handler.call(signal)
+        else
+          Signal::INT.reset
+          Process.signal(signal, Process.pid)
+        end
+      end
 
       done = Channel(Nil).new
-      spawn do
-        drain_stream(stdout_io) { |bytes| throttler.append_stdout(bytes) }
-        done.send(nil)
-      end
-      spawn do
-        drain_stream(stderr_io) { |bytes| throttler.append_stderr(bytes) }
-        done.send(nil)
-      end
+      begin
+        spawn do
+          drain_stream(stdout_io) { |bytes| throttler.append_stdout(bytes) }
+          done.send(nil)
+        end
+        spawn do
+          drain_stream(stderr_io) { |bytes| throttler.append_stderr(bytes) }
+          done.send(nil)
+        end
 
-      status = process.wait
-      2.times { done.receive }
-      throttler.close
-      status
+        status = process.wait
+        2.times { done.receive }
+        status
+      ensure
+        throttler.close
+        if previous_handler
+          Signal::INT.trap { |signal| previous_handler.call(signal) }
+        else
+          Signal::INT.reset
+        end
+      end
     end
 
     # Drain a process output stream into the provided block.
@@ -81,8 +99,8 @@ module Bootstrap
         @stderr_buffer = IO::Memory.new
         @stdout_fragment = ""
         @stderr_fragment = ""
-        @last_lines = [] of String
-        @last_rendered = [] of String
+        @last_lines = [] of TailLine
+        @last_rendered = [] of TailLine
         @rendered_lines = 0
         @display_io = select_display_io
         @display_mode = !@display_io.nil?
@@ -95,7 +113,7 @@ module Bootstrap
       # Append bytes destined for stdout.
       def append_stdout(bytes : Bytes) : Nil
         @mutex.synchronize do
-          @stdout_fragment = consume_bytes(bytes, @stdout_fragment) if @display_mode
+          @stdout_fragment = consume_bytes(bytes, @stdout_fragment, false) if @display_mode
           @stdout_buffer.write(bytes) if @stdout_passthrough || !@display_mode
         end
       end
@@ -103,7 +121,7 @@ module Bootstrap
       # Append bytes destined for stderr.
       def append_stderr(bytes : Bytes) : Nil
         @mutex.synchronize do
-          @stderr_fragment = consume_bytes(bytes, @stderr_fragment) if @display_mode
+          @stderr_fragment = consume_bytes(bytes, @stderr_fragment, true) if @display_mode
           @stderr_buffer.write(bytes) if @stderr_passthrough || !@display_mode
         end
       end
@@ -148,17 +166,17 @@ module Bootstrap
         io.flush
       end
 
-      private def consume_bytes(bytes : Bytes, fragment : String) : String
+      private def consume_bytes(bytes : Bytes, fragment : String, is_stderr : Bool) : String
         text = String.new(bytes)
         combined = fragment + text
         parts = combined.split('\n', remove_empty: false)
         new_fragment = parts.pop? || ""
-        parts.each { |line| record_line(line) }
+        parts.each { |line| record_line(line, is_stderr) }
         new_fragment
       end
 
-      private def record_line(line : String) : Nil
-        @last_lines << line
+      private def record_line(line : String, is_stderr : Bool) : Nil
+        @last_lines << TailLine.new(line, is_stderr)
         if @last_lines.size > MAX_BUFFERED_LINES
           @last_lines.shift(@last_lines.size - MAX_BUFFERED_LINES)
         end
@@ -169,18 +187,21 @@ module Bootstrap
         return unless display_io
 
         lines = @last_lines.dup
-        lines << @stdout_fragment unless @stdout_fragment.empty?
-        lines << @stderr_fragment unless @stderr_fragment.empty?
+        lines << TailLine.new(@stdout_fragment, false) unless @stdout_fragment.empty?
+        lines << TailLine.new(@stderr_fragment, true) unless @stderr_fragment.empty?
         return if lines.empty?
 
         lines = lines.last(TAIL_LINES)
         if lines.size < TAIL_LINES
-          lines = Array.new(TAIL_LINES - lines.size, "") + lines
+          lines = Array.new(TAIL_LINES - lines.size, TailLine.new("", false)) + lines
         end
         return if lines == @last_rendered
 
         clear_rendered_lines(display_io) if @rendered_lines > 0
-        display_io.print(lines.join("\n"))
+        lines.each_with_index do |line, idx|
+          display_io.print(format_line(line))
+          display_io.print("\n") if idx < lines.size - 1
+        end
         display_io.flush
         @rendered_lines = TAIL_LINES
         @last_rendered = lines
@@ -188,7 +209,7 @@ module Bootstrap
 
       private def clear_rendered_lines(io : IO) : Nil
         @rendered_lines.times do |idx|
-          io.print("\r\033[2K")
+          io.print("\r\033[0m\033[2K")
           io.print("\033[A") if idx < @rendered_lines - 1
         end
       end
@@ -197,12 +218,31 @@ module Bootstrap
         @mutex.synchronize do
           display_io = @display_io
           return unless display_io
+          if @rendered_lines > 0
+            clear_rendered_lines(display_io)
+            display_io.flush
+          end
+          @rendered_lines = 0
+          @last_rendered.clear
+        end
+      end
+
+      def restore_cursor : Nil
+        @mutex.synchronize do
+          display_io = @display_io
+          return unless display_io
           return if @rendered_lines == 0
-          display_io.print("\n")
+          clear_rendered_lines(display_io)
           display_io.flush
           @rendered_lines = 0
           @last_rendered.clear
         end
+      end
+
+      private def format_line(line : TailLine) : String
+        return "" if line.text.empty?
+        return line.text unless line.stderr
+        "\e[31m#{line.text}\e[0m"
       end
 
       private def select_display_io : IO?
@@ -210,6 +250,8 @@ module Bootstrap
         return @stderr if @stderr.tty?
         nil
       end
+
+      private record TailLine, text : String, stderr : Bool
     end
   end
 end
