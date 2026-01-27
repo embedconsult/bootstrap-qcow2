@@ -5,6 +5,20 @@ module Bootstrap
   # When attached to a TTY, only the last few lines are rendered at a
   # controlled rate to avoid scrolling.
   class ProcessRunner
+    # Linux TIOCGWINSZ ioctl request value from /usr/include/asm-generic/ioctls.h.
+    TTY_IOCTL_GET_WINSIZE = 0x5413_u64
+
+    lib LibC
+      struct Winsize
+        ws_row : UInt16
+        ws_col : UInt16
+        ws_xpixel : UInt16
+        ws_ypixel : UInt16
+      end
+
+      fun ioctl(fd : Int32, request : UInt64, arg : Winsize*) : Int32
+    end
+
     # Result wrapper for a timed process invocation.
     record Result,
       status : Process::Status,
@@ -99,6 +113,9 @@ module Bootstrap
         @stderr_buffer = IO::Memory.new
         @stdout_fragment = ""
         @stderr_fragment = ""
+        @fragment_seq = 0_u64
+        @stdout_fragment_seq = 0_u64
+        @stderr_fragment_seq = 0_u64
         @last_lines = [] of TailLine
         @last_rendered = [] of TailLine
         @rendered_lines = 0
@@ -113,7 +130,11 @@ module Bootstrap
       # Append bytes destined for stdout.
       def append_stdout(bytes : Bytes) : Nil
         @mutex.synchronize do
-          @stdout_fragment = consume_bytes(bytes, @stdout_fragment, false) if @display_mode
+          if @display_mode
+            @stdout_fragment = consume_bytes(bytes, @stdout_fragment, false)
+            @fragment_seq &+= 1
+            @stdout_fragment_seq = @fragment_seq
+          end
           @stdout_buffer.write(bytes) if @stdout_passthrough || !@display_mode
         end
       end
@@ -121,7 +142,11 @@ module Bootstrap
       # Append bytes destined for stderr.
       def append_stderr(bytes : Bytes) : Nil
         @mutex.synchronize do
-          @stderr_fragment = consume_bytes(bytes, @stderr_fragment, true) if @display_mode
+          if @display_mode
+            @stderr_fragment = consume_bytes(bytes, @stderr_fragment, true)
+            @fragment_seq &+= 1
+            @stderr_fragment_seq = @fragment_seq
+          end
           @stderr_buffer.write(bytes) if @stderr_passthrough || !@display_mode
         end
       end
@@ -187,8 +212,9 @@ module Bootstrap
         return unless display_io
 
         lines = @last_lines.dup
-        lines << TailLine.new(@stdout_fragment, false) unless @stdout_fragment.empty?
-        lines << TailLine.new(@stderr_fragment, true) unless @stderr_fragment.empty?
+        if (fragment = select_fragment_line)
+          lines << fragment
+        end
         return if lines.empty?
 
         lines = lines.last(TAIL_LINES)
@@ -197,9 +223,10 @@ module Bootstrap
         end
         return if lines == @last_rendered
 
+        columns = terminal_columns
         clear_rendered_lines(display_io) if @rendered_lines > 0
         lines.each_with_index do |line, idx|
-          display_io.print(format_line(line))
+          display_io.print(format_line(line, columns))
           display_io.print("\n") if idx < lines.size - 1
         end
         display_io.flush
@@ -239,16 +266,66 @@ module Bootstrap
         end
       end
 
-      private def format_line(line : TailLine) : String
+      private def format_line(line : TailLine, columns : Int32?) : String
         return "" if line.text.empty?
-        return line.text unless line.stderr
-        "\e[31m#{line.text}\e[0m"
+        text = columns ? truncate_to_columns(line.text, columns) : line.text
+        return text unless line.stderr
+        "\e[31m#{text}\e[0m"
       end
 
       private def select_display_io : IO?
         return @stdout if @stdout.tty?
         return @stderr if @stderr.tty?
         nil
+      end
+
+      private def select_fragment_line : TailLine?
+        stdout_fragment = @stdout_fragment
+        stderr_fragment = @stderr_fragment
+        return nil if stdout_fragment.empty? && stderr_fragment.empty?
+        if stdout_fragment.empty?
+          return TailLine.new(stderr_fragment, true)
+        end
+        if stderr_fragment.empty?
+          return TailLine.new(stdout_fragment, false)
+        end
+        if @stdout_fragment_seq >= @stderr_fragment_seq
+          TailLine.new(stdout_fragment, false)
+        else
+          TailLine.new(stderr_fragment, true)
+        end
+      end
+
+      private def terminal_columns : Int32?
+        display_io = @display_io
+        return nil unless display_io
+        if display_io.is_a?(IO::FileDescriptor)
+          winsize = LibC::Winsize.new
+          if LibC.ioctl(display_io.fd.to_i, TTY_IOCTL_GET_WINSIZE, pointerof(winsize)) == 0
+            columns = winsize.ws_col.to_i
+            return columns if columns > 1
+          end
+        end
+        env_columns = ENV["COLUMNS"]?
+        return nil unless env_columns
+        value = env_columns.to_i?
+        return nil unless value
+        value > 1 ? value : nil
+      end
+
+      private def truncate_to_columns(text : String, columns : Int32) : String
+        # Leave the last column empty to avoid terminal auto-wrapping.
+        max_columns = columns > 1 ? columns - 1 : columns
+        return text if max_columns <= 0
+        return text if text.size <= max_columns
+        String.build do |io|
+          count = 0
+          text.each_char do |char|
+            break if count >= max_columns
+            io << char
+            count += 1
+          end
+        end
       end
 
       private record TailLine, text : String, stderr : Bool
