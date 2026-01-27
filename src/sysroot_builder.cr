@@ -259,6 +259,7 @@ module Bootstrap
             "-DLLVM_TARGETS_TO_BUILD=AArch64",
             "-DLLVM_HOST_TRIPLE=#{sysroot_triple}",
             "-DLLVM_DEFAULT_TARGET_TRIPLE=#{sysroot_triple}",
+            "-DLLVM_ENABLE_WARNINGS=OFF",
             "-DLLVM_ENABLE_PROJECTS=clang;lld;compiler-rt",
             "-DLLVM_ENABLE_RUNTIMES=libunwind;libcxxabi;libcxx",
             "-DLLVM_ENABLE_LIBCXX=ON",
