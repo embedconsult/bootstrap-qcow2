@@ -9,7 +9,7 @@ require "uri"
 require "./build_plan"
 require "./build_plan_utils"
 require "./cli"
-require "./sysroot_runner_lib"
+require "./sysroot_runner"
 require "./tarball"
 
 module Bootstrap
