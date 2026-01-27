@@ -266,8 +266,8 @@ module Bootstrap
             stage2_flags = step.configure_flags.reject { |flag| flag.starts_with?("-DLLVM_ENABLE_RUNTIMES=") } + [
               "-DCMAKE_C_COMPILER=#{stage2_cc}",
               "-DCMAKE_CXX_COMPILER=#{stage2_cxx}",
-              "-DCMAKE_C_FLAGS=--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld",
-              "-DCMAKE_CXX_FLAGS=-nostdinc++ -isystem #{libcxx_include} -isystem #{libcxx_target_include} -nostdlib++ -stdlib=libc++ --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{install_root}/lib",
+              "-DCMAKE_C_FLAGS=--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -Wno-unused-command-line-argument",
+              "-DCMAKE_CXX_FLAGS=-nostdinc++ -isystem #{libcxx_include} -isystem #{libcxx_target_include} -nostdlib++ -stdlib=libc++ --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -Wno-unused-command-line-argument -L#{libcxx_libdir} -L#{install_root}/lib",
               "-DCMAKE_CXX_STANDARD_LIBRARIES=#{cxx_standard_libs}",
               "-DCMAKE_EXE_LINKER_FLAGS=--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{install_root}/lib",
               "-DCMAKE_SHARED_LINKER_FLAGS=--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{install_root}/lib",
