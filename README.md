@@ -115,7 +115,7 @@ host-side context than `bin/sysroot-status`, which only inspects a state file.
 
 ## Contributing
 
-1. Fork it (<https://github.com/jkridner/bootstrap-qcow2/fork>)
+1. Fork it (<https://github.com/embedconsult/bootstrap-qcow2/fork>)
 2. Create your feature branch (`git checkout -b my-new-feature`)
 3. Commit your changes (`git commit -am 'Add some feature'`)
 4. Push to the branch (`git push origin my-new-feature`)
@@ -123,4 +123,4 @@ host-side context than `bin/sysroot-status`, which only inspects a state file.
 
 ## Contributors
 
-- [Jason Kridner](https://github.com/jkridner) - creator and maintainer
+- [Jason Kridner](https://github.com/jadonk) - creator and maintainer
