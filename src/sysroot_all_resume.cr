@@ -214,7 +214,7 @@ module Bootstrap
       end
       return CLI.print_help(parser) if help
 
-      Log.info { "bq2 --all starting" }
+      puts "bq2 --all starting"
       Log.info { "workspace=#{workspace} arch=#{architecture} branch=#{branch} base_version=#{base_version} resume=#{resume}" }
       Log.info { "repo_root=#{repo_root}" }
 
@@ -280,12 +280,12 @@ module Bootstrap
         when "plan-write"
           time_stage(stage) do
             chroot_path = builder.generate_chroot(include_sources: true)
-            puts "Prepared chroot directory at #{chroot_path}"
+            Log.info { "Prepared chroot directory at #{chroot_path}" }
           end
         when "sysroot-runner"
           time_stage(stage) do
             builder.stage_sources(skip_existing: true)
-            puts "Restaged missing sources into #{builder.rootfs_dir}/workspace"
+            Log.info { "Restaged missing sources into #{builder.rootfs_dir}/workspace" }
             AlpineSetup.write_resolv_conf(builder.rootfs_dir)
             status = run_sysroot_runner(
               bq2_path,

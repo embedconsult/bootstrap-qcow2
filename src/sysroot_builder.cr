@@ -491,7 +491,7 @@ module Bootstrap
             end
           end
 
-          Log.info { "Downloading #{pkg.name} #{pkg.version} from #{pkg.url}" }
+          Log.debug { "Downloading #{pkg.name} #{pkg.version} from #{pkg.url}" }
           download_with_redirects(pkg.url, target)
           raise "Empty download for #{pkg.name}" if File.size(target) == 0
           verify(pkg, target)
@@ -661,7 +661,7 @@ module Bootstrap
       FileUtils.mkdir_p(rootfs_dir)
 
       tarball = resolve_base_rootfs_tarball(base_rootfs)
-      Log.info { "Extracting base rootfs from #{tarball}" }
+      Log.debug { "Extracting base rootfs from #{tarball}" }
       Tarball.extract(tarball, rootfs_dir, @preserve_ownership_for_rootfs, @owner_uid, @owner_gid, force_system_tar: @use_system_tar_for_rootfs)
       FileUtils.mkdir_p(rootfs_dir / "workspace")
       FileUtils.mkdir_p(rootfs_dir / "var/lib")
@@ -691,10 +691,10 @@ module Bootstrap
             end
           build_root = workspace_path / build_directory
           if skip_existing && Dir.exists?(build_root)
-            Log.info { "Skipping already-staged source directory #{build_root}" }
+            Log.debug { "Skipping already-staged source directory #{build_root}" }
             next
           end
-          Log.info { "Extracting source archive #{archive} into #{workspace_path}" }
+          Log.debug { "Extracting source archive #{archive} into #{workspace_path}" }
           Tarball.extract(archive, workspace_path, @preserve_ownership_for_sources, @owner_uid, @owner_gid, force_system_tar: @use_system_tar_for_sources)
         end
       end
