@@ -8,9 +8,9 @@ module Bootstrap
       status : Process::Status,
       elapsed : Time::Span
 
-    # Flush output at most 5 times per second.
-    # Source: build output throttling requirement (5 Hz).
-    DEFAULT_FLUSH_INTERVAL = 0.2.seconds
+    # Flush output at most 2 times per second.
+    # Source: build output throttling requirement (2 Hz).
+    DEFAULT_FLUSH_INTERVAL = 0.5.seconds
 
     # Run *argv* with throttled stdout/stderr, returning status + elapsed time.
     def self.run(argv : Array(String),
@@ -70,21 +70,40 @@ module Bootstrap
     end
 
     private class ThrottledOutput
+      MAX_BUFFERED_LINES = 50
+
       def initialize(@stdout : IO, @stderr : IO, @interval : Time::Span = DEFAULT_FLUSH_INTERVAL)
         @stdout_buffer = IO::Memory.new
         @stderr_buffer = IO::Memory.new
+        @stdout_fragment = ""
+        @stderr_fragment = ""
+        @last_lines = [] of String
+        @rendered_lines = 0
+        @tty_mode = @stdout.tty? && @stderr.tty?
         @mutex = Mutex.new
         @closed = false
       end
 
       # Append bytes destined for stdout.
       def append_stdout(bytes : Bytes) : Nil
-        @mutex.synchronize { @stdout_buffer.write(bytes) }
+        @mutex.synchronize do
+          if @tty_mode
+            @stdout_fragment = consume_bytes(bytes, @stdout_fragment)
+          else
+            @stdout_buffer.write(bytes)
+          end
+        end
       end
 
       # Append bytes destined for stderr.
       def append_stderr(bytes : Bytes) : Nil
-        @mutex.synchronize { @stderr_buffer.write(bytes) }
+        @mutex.synchronize do
+          if @tty_mode
+            @stderr_fragment = consume_bytes(bytes, @stderr_fragment)
+          else
+            @stderr_buffer.write(bytes)
+          end
+        end
       end
 
       # Start the periodic flush loop.
@@ -101,8 +120,12 @@ module Bootstrap
       # Flush buffered stdout/stderr to the real outputs.
       def flush : Nil
         @mutex.synchronize do
-          flush_buffer(@stdout_buffer, @stdout)
-          flush_buffer(@stderr_buffer, @stderr)
+          if @tty_mode
+            render_tail
+          else
+            flush_buffer(@stdout_buffer, @stdout)
+            flush_buffer(@stderr_buffer, @stderr)
+          end
         end
       end
 
@@ -118,6 +141,46 @@ module Bootstrap
         io.write(buffer.to_slice)
         buffer.clear
         io.flush
+      end
+
+      private def consume_bytes(bytes : Bytes, fragment : String) : String
+        text = String.new(bytes)
+        combined = fragment + text
+        parts = combined.split('\n', remove_empty: false)
+        new_fragment = parts.pop? || ""
+        parts.each { |line| record_line(line) }
+        new_fragment
+      end
+
+      private def record_line(line : String) : Nil
+        @last_lines << line
+        if @last_lines.size > MAX_BUFFERED_LINES
+          @last_lines.shift(@last_lines.size - MAX_BUFFERED_LINES)
+        end
+      end
+
+      private def render_tail : Nil
+        lines = @last_lines.dup
+        lines << @stdout_fragment unless @stdout_fragment.empty?
+        lines << @stderr_fragment unless @stderr_fragment.empty?
+        lines = lines.last(5)
+
+        clear_rendered_lines if @rendered_lines > 0
+        if lines.empty?
+          @rendered_lines = 0
+          return
+        end
+
+        @stdout.print(lines.join("\n"))
+        @stdout.flush
+        @rendered_lines = lines.size
+      end
+
+      private def clear_rendered_lines : Nil
+        @rendered_lines.times do |idx|
+          @stdout.print("\r\033[2K")
+          @stdout.print("\033[A") if idx < @rendered_lines - 1
+        end
       end
     end
   end
