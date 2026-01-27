@@ -2,6 +2,7 @@ require "file_utils"
 require "log"
 require "path"
 require "process"
+require "./process_runner"
 
 module Bootstrap
   # Shared Alpine-specific setup for sysroot iteration.
@@ -52,7 +53,8 @@ module Bootstrap
       return if packages.empty?
       argv = ["add", "--no-cache"] + packages
       Log.info { "apk #{argv.join(" ")}" }
-      status = Process.run("apk", argv, output: STDOUT, error: STDERR)
+      result = ProcessRunner.run(["apk"] + argv)
+      status = result.status
       raise "apk add failed (#{status.exit_code})" unless status.success?
     end
   end
