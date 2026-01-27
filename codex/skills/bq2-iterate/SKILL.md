@@ -9,10 +9,13 @@ Use this when the user says "iterate" or "resume iteration". The goal is to run 
 
 ## Detect rootfs context and paths
 
-1. Find the rootfs prefix:
-   - If `/var/lib/sysroot-build-plan.json` exists, you are inside the workspace rootfs. Use `rootfs_prefix=""` and `rootfs_root="/"`.
-   - Else if `/workspace/rootfs/var/lib/sysroot-build-plan.json` exists, you are in the outer rootfs. Use `rootfs_prefix="/workspace/rootfs"` and `rootfs_root="/workspace/rootfs"`.
+1. Find the rootfs prefix (do not assume `/var/lib` means inner rootfs; Alpine seed also has it):
+   - If `/workspace/rootfs/var/lib/sysroot-build-plan.json` exists, you are outside the workspace rootfs. Use `rootfs_prefix="/workspace/rootfs"` and `rootfs_root="/workspace/rootfs"`.
    - Else if `/work/bootstrap-qcow2/data/sysroot/rootfs/var/lib/sysroot-build-plan.json` exists, use `rootfs_prefix="/work/bootstrap-qcow2/data/sysroot/rootfs"`.
+   - Else if `/var/lib/sysroot-build-plan.json` exists, you are operating in-place. Use `rootfs_prefix=""` and `rootfs_root="/"`.
+     - Classify the seed:
+       - If `/usr/bin/clang` exists, treat as inner rootfs (system-from-sysroot).
+       - If `/opt/sysroot/bin/clang` exists and `/usr/bin/clang` does not, treat as Alpine seed (sysroot-from-alpine).
    - Otherwise, stop and ask for the rootfs location.
 
 2. Define canonical paths (prefix with `rootfs_prefix`):
