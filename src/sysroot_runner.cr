@@ -234,6 +234,7 @@ module Bootstrap
               stage1_cxx_flags = cxx_parts[1..-1].join(" ") if cxx_parts.size > 1
             end
             stage1_cxx = stage1_cxx || Process.find_executable("clang++") || "clang++"
+            stage1_cxx_flags = append_warning_suppression(stage1_cxx_flags)
             stage1_flags = step.configure_flags.reject { |flag| flag.starts_with?("-DLLVM_ENABLE_LIBCXX=") } + [
               "-DCMAKE_C_COMPILER=#{stage1_cc}",
               "-DCMAKE_CXX_COMPILER=#{stage1_cxx}",
@@ -267,7 +268,7 @@ module Bootstrap
               "-DCMAKE_C_COMPILER=#{stage2_cc}",
               "-DCMAKE_CXX_COMPILER=#{stage2_cxx}",
               "-DCMAKE_C_FLAGS=--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -Wno-unused-command-line-argument",
-              "-DCMAKE_CXX_FLAGS=-nostdinc++ -isystem #{libcxx_include} -isystem #{libcxx_target_include} -nostdlib++ -stdlib=libc++ --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -Wno-unused-command-line-argument -L#{libcxx_libdir} -L#{install_root}/lib",
+              "-DCMAKE_CXX_FLAGS=-nostdinc++ -isystem #{libcxx_include} -isystem #{libcxx_target_include} -nostdlib++ -stdlib=libc++ --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -Wno-unused-command-line-argument -Wno-unnecessary-virtual-specifier -L#{libcxx_libdir} -L#{install_root}/lib",
               "-DCMAKE_CXX_STANDARD_LIBRARIES=#{cxx_standard_libs}",
               "-DCMAKE_EXE_LINKER_FLAGS=--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{install_root}/lib",
               "-DCMAKE_SHARED_LINKER_FLAGS=--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{install_root}/lib",
@@ -409,6 +410,13 @@ module Bootstrap
         triple = output.to_s.strip
         raise "Empty target triple from #{clang_path} -dumpmachine" if triple.empty?
         triple
+      end
+
+      private def append_warning_suppression(flags : String) : String
+        warning_flag = "-Wno-unnecessary-virtual-specifier"
+        return flags if flags.includes?(warning_flag)
+        return warning_flag if flags.empty?
+        "#{flags} #{warning_flag}"
       end
 
       # Runs `make install`, optionally staging through `DESTDIR`.
