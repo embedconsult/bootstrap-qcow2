@@ -40,20 +40,21 @@ module Bootstrap
 
       # Return a log message summarizing the decision.
       def log_message : String
-        message = "Resume decision:\n stage=#{stage} (#{reason})"
-        if resume_phase
-          message = "#{message}\n phase=#{resume_phase}"
+        String.build do |io|
+          io << "Resume decision:\n stage=" << stage << " (" << reason << ")"
+          if resume_phase
+            io << "\n phase=" << resume_phase
+          end
+          if resume_step
+            io << "\n step=" << resume_step
+          end
+          if state_path
+            io << "\n state=" << state_path
+          end
+          if plan_path
+            io << "\n plan=" << plan_path
+          end
         end
-        if resume_step
-          message = "#{message}\n step=#{resume_step}"
-        end
-        if state_path
-          message = "#{message}\n state=#{state_path}"
-        end
-        if plan_path
-          message = "#{message}\n plan=#{plan_path}"
-        end
-        message
       end
     end
 
@@ -213,6 +214,10 @@ module Bootstrap
       end
       return CLI.print_help(parser) if help
 
+      Log.info { "bq2 --all starting" }
+      Log.info { "workspace=#{workspace} arch=#{architecture} branch=#{branch} base_version=#{base_version} resume=#{resume}" }
+      Log.info { "repo_root=#{repo_root}" }
+
       builder = SysrootBuilder.new(
         workspace: workspace,
         architecture: architecture,
@@ -249,6 +254,7 @@ module Bootstrap
       rootfs_tarball = base_rootfs_path || (File.exists?(default_rootfs_path) ? default_rootfs_path : nil)
       use_bq2_rootfs = rootfs_tarball ? bq2_rootfs_tarball?(rootfs_tarball) : false
       use_alpine_setup = rootfs_tarball.nil? || !use_bq2_rootfs
+      Log.info { "base_rootfs=#{rootfs_tarball || "(download)"} use_alpine_setup=#{use_alpine_setup}" }
 
       stages = SysrootAllResume::STAGE_ORDER
       start_stage = "download-sources"
@@ -262,6 +268,7 @@ module Bootstrap
         resume_phase = decision.resume_phase
         resume_step = decision.resume_step
       end
+      Log.info { "stage_order=#{stages.join(" -> ")} start_stage=#{start_stage}" }
 
       start_index = stages.index(start_stage)
       raise "Unknown resume stage #{start_stage}" unless start_index
@@ -269,39 +276,45 @@ module Bootstrap
       stages[start_index..].each do |stage|
         case stage
         when "download-sources"
-          builder.download_sources
+          time_stage(stage) { builder.download_sources }
         when "plan-write"
-          chroot_path = builder.generate_chroot(include_sources: true)
-          puts "Prepared chroot directory at #{chroot_path}"
-        when "sysroot-runner"
-          builder.stage_sources(skip_existing: true)
-          puts "Restaged missing sources into #{builder.rootfs_dir}/workspace"
-          AlpineSetup.write_resolv_conf(builder.rootfs_dir)
-          status = run_sysroot_runner(
-            bq2_path,
-            builder,
-            repo_root,
-            use_alpine_setup,
-            "all",
-          )
-          unless status.success?
-            STDERR.puts "sysroot-runner failed with exit code #{status.exit_code}"
-            return status.exit_code
+          time_stage(stage) do
+            chroot_path = builder.generate_chroot(include_sources: true)
+            puts "Prepared chroot directory at #{chroot_path}"
           end
-        when "rootfs-tarball"
-          if File.exists?(builder.rootfs_dir / "workspace" / "bq-rootfs.tar.gz")
-            Log.info { "Rootfs tarball already present; skipping finalize-rootfs" }
-          else
+        when "sysroot-runner"
+          time_stage(stage) do
+            builder.stage_sources(skip_existing: true)
+            puts "Restaged missing sources into #{builder.rootfs_dir}/workspace"
+            AlpineSetup.write_resolv_conf(builder.rootfs_dir)
             status = run_sysroot_runner(
               bq2_path,
               builder,
               repo_root,
-              false,
-              "finalize-rootfs",
+              use_alpine_setup,
+              "all",
             )
             unless status.success?
-              STDERR.puts "finalize-rootfs failed with exit code #{status.exit_code}"
+              STDERR.puts "sysroot-runner failed with exit code #{status.exit_code}"
               return status.exit_code
+            end
+          end
+        when "rootfs-tarball"
+          time_stage(stage) do
+            if File.exists?(builder.rootfs_dir / "workspace" / "bq-rootfs.tar.gz")
+              Log.info { "Rootfs tarball already present; skipping finalize-rootfs" }
+            else
+              status = run_sysroot_runner(
+                bq2_path,
+                builder,
+                repo_root,
+                false,
+                "finalize-rootfs",
+              )
+              unless status.success?
+                STDERR.puts "finalize-rootfs failed with exit code #{status.exit_code}"
+                return status.exit_code
+              end
             end
           end
           break
@@ -380,6 +393,16 @@ module Bootstrap
         output: STDOUT,
         error: STDERR,
       )
+    end
+
+    # Log the duration of a stage for the --all workflow.
+    private def self.time_stage(stage : String, &block : -> T) : T forall T
+      Log.info { "Stage #{stage} starting" }
+      started_at = Time.monotonic
+      result = yield
+      elapsed = Time.monotonic - started_at
+      Log.info { "Stage #{stage} finished in #{elapsed.total_seconds.round(2)}s" }
+      result
     end
 
     # Copy the produced rootfs tarball into the workspace source cache.
