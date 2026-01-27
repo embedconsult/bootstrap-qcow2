@@ -211,7 +211,7 @@ module Bootstrap
         PackageSpec.new(
           "linux-headers",
           DEFAULT_LINUX,
-          URI.parse("https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-#{DEFAULT_LINUX}.tar.xz"),
+          URI.parse("https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-#{DEFAULT_LINUX}.tar.gz"),
           strategy: "linux-headers",
           build_directory: "linux-#{DEFAULT_LINUX}",
           configure_flags: [
