@@ -253,7 +253,7 @@ module Bootstrap
           "llvm-project",
           DEFAULT_LLVM_VER,
           URI.parse("https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-#{DEFAULT_LLVM_VER}.tar.gz"),
-          strategy: "llvm-libcxx",
+          strategy: "cmake-project",
           configure_flags: [
             "-DCMAKE_BUILD_TYPE=Release",
             "-DLLVM_TARGETS_TO_BUILD=AArch64",
@@ -1154,24 +1154,7 @@ module Bootstrap
     # per-package build steps.
     private def build_phase(spec : PhaseSpec) : BuildPhase
       phase_packages = select_packages(spec.name, spec.package_allowlist)
-      steps = phase_packages.map do |pkg|
-        build_directory = pkg.build_directory || strip_archive_extension(pkg.filename)
-        build_root = File.join(spec.workspace, build_directory)
-        build_dir = pkg.build_dir
-        if build_dir
-          build_dir = build_dir.gsub("%{phase}", spec.name).gsub("%{name}", pkg.name)
-          build_dir = build_dir.starts_with?("/") ? build_dir : File.join(spec.workspace, build_dir)
-        end
-        BuildStep.new(
-          name: pkg.name,
-          strategy: pkg.strategy,
-          workdir: build_root,
-          configure_flags: configure_flags_for(pkg, spec),
-          patches: patches_for(pkg, spec),
-          env: spec.env_overrides[pkg.name]? || ({} of String => String),
-          build_dir: build_dir,
-        )
-      end
+      steps = phase_packages.flat_map { |pkg| build_steps_for(pkg, spec) }
       steps.concat(spec.extra_steps) unless spec.extra_steps.empty?
       BuildPhase.new(
         name: spec.name,
@@ -1183,6 +1166,139 @@ module Bootstrap
         env: spec.env,
         steps: steps,
       )
+    end
+
+    # Build the steps for a package, expanding multi-stage packages as needed.
+    private def build_steps_for(pkg : PackageSpec, spec : PhaseSpec) : Array(BuildStep)
+      build_root = build_root_for(pkg, spec)
+      env = env_overrides_for(pkg, spec)
+      return llvm_stage_steps(pkg, spec, build_root, env) if pkg.name == "llvm-project"
+
+      [BuildStep.new(
+        name: pkg.name,
+        strategy: pkg.strategy,
+        workdir: build_root,
+        configure_flags: configure_flags_for(pkg, spec),
+        patches: patches_for(pkg, spec),
+        env: env,
+        build_dir: build_dir_for(pkg, spec),
+      )]
+    end
+
+    # Resolve the package build root in the workspace.
+    private def build_root_for(pkg : PackageSpec, spec : PhaseSpec) : String
+      build_directory = pkg.build_directory || strip_archive_extension(pkg.filename)
+      File.join(spec.workspace, build_directory)
+    end
+
+    # Resolve the package build directory when an out-of-tree build is requested.
+    private def build_dir_for(pkg : PackageSpec, spec : PhaseSpec) : String?
+      build_dir = pkg.build_dir
+      return nil unless build_dir
+      build_dir = build_dir.gsub("%{phase}", spec.name).gsub("%{name}", pkg.name)
+      build_dir.starts_with?("/") ? build_dir : File.join(spec.workspace, build_dir)
+    end
+
+    # Return a copy of the env overrides for a package.
+    private def env_overrides_for(pkg : PackageSpec, spec : PhaseSpec) : Hash(String, String)
+      overrides = spec.env_overrides[pkg.name]? || ({} of String => String)
+      overrides.dup
+    end
+
+    # Expand llvm-project into a two-stage CMake build using the sysroot toolchain.
+    private def llvm_stage_steps(pkg : PackageSpec,
+                                 spec : PhaseSpec,
+                                 build_root : String,
+                                 env : Hash(String, String)) : Array(BuildStep)
+      env["CMAKE_SOURCE_DIR"] = "llvm"
+      base_flags = configure_flags_for(pkg, spec)
+      patches = patches_for(pkg, spec)
+      stage1_flags = llvm_stage1_flags(base_flags, spec.env)
+      stage2_flags = llvm_stage2_flags(base_flags, spec.install_prefix, sysroot_target_triple)
+      [
+        BuildStep.new(
+          name: "#{pkg.name}-stage1",
+          strategy: "cmake-project",
+          workdir: build_root,
+          configure_flags: stage1_flags,
+          patches: patches,
+          env: env,
+          build_dir: "build-stage1",
+        ),
+        BuildStep.new(
+          name: "#{pkg.name}-stage2",
+          strategy: "cmake-project",
+          workdir: build_root,
+          configure_flags: stage2_flags,
+          patches: patches,
+          env: env,
+          build_dir: "build-stage2",
+        ),
+      ]
+    end
+
+    # Split a compiler command string into its binary and trailing flags.
+    private def split_compiler_flags(value : String) : Tuple(String, String)
+      parts = value.split(/\s+/)
+      compiler = parts.first? || value
+      flags = parts.size > 1 ? parts[1..-1].join(" ") : ""
+      {compiler, flags}
+    end
+
+    # Ensure warning suppression is present for LLVM C++ builds.
+    private def append_warning_suppression(flags : String) : String
+      warning_flag = "-Wno-unnecessary-virtual-specifier"
+      return flags if flags.includes?(warning_flag)
+      return warning_flag if flags.empty?
+      "#{flags} #{warning_flag}"
+    end
+
+    # Stage 1 LLVM flags use the host compiler and skip the libC++ toggle.
+    private def llvm_stage1_flags(base_flags : Array(String),
+                                  phase_env : Hash(String, String)) : Array(String)
+      cc_value = phase_env["CC"]? || "clang"
+      cxx_value = phase_env["CXX"]? || "clang++"
+      cc, cc_flags = split_compiler_flags(cc_value)
+      cxx, cxx_flags = split_compiler_flags(cxx_value)
+      cxx_flags = append_warning_suppression(cxx_flags)
+
+      flags = base_flags.reject { |flag| flag.starts_with?("-DLLVM_ENABLE_LIBCXX=") }
+      flags << "-DCMAKE_C_COMPILER=#{cc}"
+      flags << "-DCMAKE_CXX_COMPILER=#{cxx}"
+      unless cc_flags.empty? || flags.any? { |flag| flag.starts_with?("-DCMAKE_C_FLAGS=") }
+        flags << "-DCMAKE_C_FLAGS=#{cc_flags}"
+      end
+      unless cxx_flags.empty? || flags.any? { |flag| flag.starts_with?("-DCMAKE_CXX_FLAGS=") }
+        flags << "-DCMAKE_CXX_FLAGS=#{cxx_flags}"
+      end
+      flags
+    end
+
+    # Stage 2 LLVM flags use the sysroot compiler and static runtimes.
+    private def llvm_stage2_flags(base_flags : Array(String),
+                                  sysroot_prefix : String,
+                                  sysroot_triple : String) : Array(String)
+      libcxx_include = "#{sysroot_prefix}/include/c++/v1"
+      libcxx_target_include = "#{sysroot_prefix}/include/#{sysroot_triple}/c++/v1"
+      libcxx_libdir = "#{sysroot_prefix}/lib/#{sysroot_triple}"
+      libcxx_archive = "#{libcxx_libdir}/libc++.a"
+      libcxxabi_archive = "#{libcxx_libdir}/libc++abi.a"
+      libunwind_archive = "#{libcxx_libdir}/libunwind.a"
+      cxx_standard_libs = "-Wl,--start-group #{libcxx_archive} #{libcxxabi_archive} #{libunwind_archive} -Wl,--end-group"
+      c_flags = "--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -Wno-unused-command-line-argument"
+      cxx_flags = "-nostdinc++ -isystem #{libcxx_include} -isystem #{libcxx_target_include} -nostdlib++ -stdlib=libc++ --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -Wno-unused-command-line-argument -Wno-unnecessary-virtual-specifier -L#{libcxx_libdir} -L#{sysroot_prefix}/lib"
+      linker_flags = "--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{sysroot_prefix}/lib"
+
+      flags = base_flags.reject { |flag| flag.starts_with?("-DLLVM_ENABLE_RUNTIMES=") }
+      flags << "-DCMAKE_C_COMPILER=#{sysroot_prefix}/bin/clang"
+      flags << "-DCMAKE_CXX_COMPILER=#{sysroot_prefix}/bin/clang++"
+      flags << "-DCMAKE_C_FLAGS=#{c_flags}"
+      flags << "-DCMAKE_CXX_FLAGS=#{cxx_flags}"
+      flags << "-DCMAKE_CXX_STANDARD_LIBRARIES=#{cxx_standard_libs}"
+      flags << "-DCMAKE_EXE_LINKER_FLAGS=#{linker_flags}"
+      flags << "-DCMAKE_SHARED_LINKER_FLAGS=#{linker_flags}"
+      flags << "-DCMAKE_MODULE_LINKER_FLAGS=#{linker_flags}"
+      flags
     end
 
     # Selects the packages to include in a phase.

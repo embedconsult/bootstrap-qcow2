@@ -194,89 +194,8 @@ module Bootstrap
             include_dest = File.join(install_root, "include")
             FileUtils.mkdir_p(include_dest)
             run_cmd(["cp", "-a", "usr/include/.", include_dest], env: env)
-          when "llvm"
-            source_dir = "."
-            unless File.exists?("CMakeLists.txt")
-              source_dir = "llvm" if File.exists?(File.join("llvm", "CMakeLists.txt"))
-            end
-            FileUtils.rm_rf("build") if clean_build_dirs && Dir.exists?("build")
-            run_cmd(["cmake", "-S", source_dir, "-B", "build", "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + step.configure_flags, env: env)
-            run_cmd(["cmake", "--build", "build", "-j#{cpus}"], env: env)
-            install_env = destdir ? env.merge({"DESTDIR" => destdir}) : env
-            run_cmd(["cmake", "--install", "build"], env: install_env)
-          when "llvm-libcxx"
-            source_dir = "."
-            unless File.exists?("CMakeLists.txt")
-              source_dir = "llvm" if File.exists?(File.join("llvm", "CMakeLists.txt"))
-            end
-
-            stage1_build_dir = "build-stage1"
-            stage2_build_dir = "build-stage2"
-            if clean_build_dirs
-              FileUtils.rm_rf(stage1_build_dir) if Dir.exists?(stage1_build_dir)
-              FileUtils.rm_rf(stage2_build_dir) if Dir.exists?(stage2_build_dir)
-            end
-
-            stage1_cc_flags = ""
-            stage1_cc = env["CC"]?
-            if stage1_cc
-              cc_parts = stage1_cc.split(/\s+/)
-              stage1_cc = cc_parts.first? || stage1_cc
-              stage1_cc_flags = cc_parts[1..-1].join(" ") if cc_parts.size > 1
-            end
-            stage1_cc = stage1_cc || Process.find_executable("clang") || "clang"
-
-            stage1_cxx_flags = ""
-            stage1_cxx = env["CXX"]?
-            if stage1_cxx
-              cxx_parts = stage1_cxx.split(/\s+/)
-              stage1_cxx = cxx_parts.first? || stage1_cxx
-              stage1_cxx_flags = cxx_parts[1..-1].join(" ") if cxx_parts.size > 1
-            end
-            stage1_cxx = stage1_cxx || Process.find_executable("clang++") || "clang++"
-            stage1_cxx_flags = append_warning_suppression(stage1_cxx_flags)
-            stage1_flags = step.configure_flags.reject { |flag| flag.starts_with?("-DLLVM_ENABLE_LIBCXX=") } + [
-              "-DCMAKE_C_COMPILER=#{stage1_cc}",
-              "-DCMAKE_CXX_COMPILER=#{stage1_cxx}",
-            ]
-            unless stage1_cc_flags.empty? || stage1_flags.any? { |flag| flag.starts_with?("-DCMAKE_C_FLAGS=") }
-              stage1_flags << "-DCMAKE_C_FLAGS=#{stage1_cc_flags}"
-            end
-            unless stage1_cxx_flags.empty? || stage1_flags.any? { |flag| flag.starts_with?("-DCMAKE_CXX_FLAGS=") }
-              stage1_flags << "-DCMAKE_CXX_FLAGS=#{stage1_cxx_flags}"
-            end
-            run_cmd(["cmake", "-S", source_dir, "-B", stage1_build_dir, "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + stage1_flags, env: env)
-            run_cmd(["cmake", "--build", stage1_build_dir, "-j#{cpus}"], env: env)
-            install_env = destdir ? env.merge({"DESTDIR" => destdir}) : env
-            run_cmd(["cmake", "--install", stage1_build_dir], env: install_env)
-
-            install_root = destdir ? "#{destdir}#{install_prefix}" : install_prefix
-            stage2_cc = "#{install_root}/bin/clang"
-            stage2_cxx = "#{install_root}/bin/clang++"
-            raise "llvm-libcxx stage2 requires #{stage2_cc}" unless File.exists?(stage2_cc)
-            raise "llvm-libcxx stage2 requires #{stage2_cxx}" unless File.exists?(stage2_cxx)
-            triple = detect_clang_target_triple(stage2_cc, env: env)
-            libcxx_include = "#{install_root}/include/c++/v1"
-            libcxx_target_include = "#{install_root}/include/#{triple}/c++/v1"
-            libcxx_libdir = "#{install_root}/lib/#{triple}"
-            libcxx_archive = "#{libcxx_libdir}/libc++.a"
-            libcxxabi_archive = "#{libcxx_libdir}/libc++abi.a"
-            libunwind_archive = "#{libcxx_libdir}/libunwind.a"
-            cxx_standard_libs = "-Wl,--start-group #{libcxx_archive} #{libcxxabi_archive} #{libunwind_archive} -Wl,--end-group"
-
-            stage2_flags = step.configure_flags.reject { |flag| flag.starts_with?("-DLLVM_ENABLE_RUNTIMES=") } + [
-              "-DCMAKE_C_COMPILER=#{stage2_cc}",
-              "-DCMAKE_CXX_COMPILER=#{stage2_cxx}",
-              "-DCMAKE_C_FLAGS=--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -Wno-unused-command-line-argument",
-              "-DCMAKE_CXX_FLAGS=-nostdinc++ -isystem #{libcxx_include} -isystem #{libcxx_target_include} -nostdlib++ -stdlib=libc++ --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -Wno-unused-command-line-argument -Wno-unnecessary-virtual-specifier -L#{libcxx_libdir} -L#{install_root}/lib",
-              "-DCMAKE_CXX_STANDARD_LIBRARIES=#{cxx_standard_libs}",
-              "-DCMAKE_EXE_LINKER_FLAGS=--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{install_root}/lib",
-              "-DCMAKE_SHARED_LINKER_FLAGS=--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{install_root}/lib",
-              "-DCMAKE_MODULE_LINKER_FLAGS=--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{install_root}/lib",
-            ]
-            run_cmd(["cmake", "-S", source_dir, "-B", stage2_build_dir, "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + stage2_flags, env: env)
-            run_cmd(["cmake", "--build", stage2_build_dir, "-j#{cpus}"], env: env)
-            run_cmd(["cmake", "--install", stage2_build_dir], env: install_env)
+          when "cmake-project"
+            run_cmake_project(step, env, install_prefix, destdir, cpus)
           when "crystal"
             run_cmd(["shards", "build"], env: env)
             bin_prefix = destdir ? "#{destdir}#{install_prefix}" : install_prefix
@@ -309,12 +228,8 @@ module Bootstrap
               run_cmd(["./configure", "--prefix=#{install_prefix}"] + step.configure_flags, env: env)
               run_cmd(["make", "-j#{cpus}"], env: env)
               run_make_install(destdir, env)
-            elsif File.exists?("CMakeLists.txt")
-              FileUtils.rm_rf("build") if clean_build_dirs && Dir.exists?("build")
-              run_cmd(["cmake", "-S", ".", "-B", "build", "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + step.configure_flags, env: env)
-              run_cmd(["cmake", "--build", "build", "-j#{cpus}"], env: env)
-              install_env = destdir ? env.merge({"DESTDIR" => destdir}) : env
-              run_cmd(["cmake", "--install", "build"], env: install_env)
+            elsif cmake_lists_present?(step)
+              run_cmake_project(step, env, install_prefix, destdir, cpus)
             else
               raise "Unknown build strategy #{step.strategy} and missing ./configure in #{step.workdir}"
             end
@@ -323,17 +238,18 @@ module Bootstrap
         end
       end
 
-      # Many release tarballs include pre-generated autotools artifacts
-      # (`configure`, `aclocal.m4`, etc.) that should not be regenerated during
-      # a normal build. If an extractor fails to preserve mtimes, those artifacts
-      # can appear older than `configure.ac` and trigger automake/autoconf
-      # rebuild rules, which breaks minimal bootstrap environments.
+      # Returns true when the environment requests skipping shards install.
       private def skip_shards_install?(env : Hash(String, String)) : Bool
         value = env["BQ2_SKIP_SHARDS_INSTALL"]?.try(&.strip.downcase)
         return false unless value
         !(value.empty? || value == "0" || value == "false" || value == "no")
       end
 
+      # Many release tarballs include pre-generated autotools artifacts
+      # (`configure`, `aclocal.m4`, etc.) that should not be regenerated during
+      # a normal build. If an extractor fails to preserve mtimes, those artifacts
+      # can appear older than `configure.ac` and trigger automake/autoconf
+      # rebuild rules, which breaks minimal bootstrap environments.
       private def normalize_autotools_timestamps
         return unless File.exists?("configure.ac")
         reference = File.info("configure.ac").modification_time
@@ -401,24 +317,6 @@ module Bootstrap
         result.status
       end
 
-      private def detect_clang_target_triple(clang_path : String, env : Hash(String, String)) : String
-        output = IO::Memory.new
-        status = Process.run(clang_path, ["-dumpmachine"], env: env, output: output, error: STDERR)
-        unless status.success?
-          raise CommandFailedError.new([clang_path, "-dumpmachine"], status.exit_code, "Failed to detect target triple via #{clang_path} -dumpmachine")
-        end
-        triple = output.to_s.strip
-        raise "Empty target triple from #{clang_path} -dumpmachine" if triple.empty?
-        triple
-      end
-
-      private def append_warning_suppression(flags : String) : String
-        warning_flag = "-Wno-unnecessary-virtual-specifier"
-        return flags if flags.includes?(warning_flag)
-        return warning_flag if flags.empty?
-        "#{flags} #{warning_flag}"
-      end
-
       # Runs `make install`, optionally staging through `DESTDIR`.
       private def run_make_install(destdir : String?, env : Hash(String, String))
         if destdir
@@ -449,6 +347,37 @@ module Bootstrap
           env["LD_LIBRARY_PATH"] = sysroot_lib
         end
         env
+      end
+
+      # Returns true when a CMakeLists.txt file exists for the step.
+      private def cmake_lists_present?(step : BuildStep) : Bool
+        source_dir = cmake_source_dir_for(step)
+        File.exists?("CMakeLists.txt") || File.exists?(File.join(source_dir, "CMakeLists.txt"))
+      end
+
+      # Resolve the CMake source directory for a build step.
+      private def cmake_source_dir_for(step : BuildStep) : String
+        step.env["CMAKE_SOURCE_DIR"]? || "."
+      end
+
+      # Resolve the CMake build directory for a build step.
+      private def cmake_build_dir_for(step : BuildStep) : String
+        step.build_dir || "build"
+      end
+
+      # Run a standard CMake configure/build/install cycle.
+      private def run_cmake_project(step : BuildStep,
+                                    env : Hash(String, String),
+                                    install_prefix : String,
+                                    destdir : String?,
+                                    cpus : Int32) : Nil
+        source_dir = cmake_source_dir_for(step)
+        build_dir = cmake_build_dir_for(step)
+        FileUtils.rm_rf(build_dir) if clean_build_dirs && Dir.exists?(build_dir)
+        run_cmd(["cmake", "-S", source_dir, "-B", build_dir, "-DCMAKE_INSTALL_PREFIX=#{install_prefix}"] + step.configure_flags, env: env)
+        run_cmd(["cmake", "--build", build_dir, "-j#{cpus}"], env: env)
+        install_env = destdir ? env.merge({"DESTDIR" => destdir}) : env
+        run_cmd(["cmake", "--install", build_dir], env: install_env)
       end
     end
 
