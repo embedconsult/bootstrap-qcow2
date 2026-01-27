@@ -9,6 +9,7 @@ require "./build_plan"
 require "./build_plan_reader"
 require "./build_plan_overrides"
 require "./cli"
+require "./process_runner"
 require "./sysroot_namespace"
 require "./sysroot_build_state"
 
@@ -68,55 +69,6 @@ module Bootstrap
     # Default runner that shells out via Process.run using strategy metadata.
     struct SystemRunner
       getter clean_build_dirs : Bool
-
-      private struct ThrottledOutput
-        # Flush at most 5 times per second to avoid per-line terminal overhead.
-        FLUSH_INTERVAL = 0.2.seconds
-
-        def initialize(@stdout : IO, @stderr : IO, @interval : Time::Span = FLUSH_INTERVAL)
-          @stdout_buffer = IO::Memory.new
-          @stderr_buffer = IO::Memory.new
-          @mutex = Mutex.new
-          @closed = false
-        end
-
-        def append_stdout(bytes : Bytes) : Nil
-          @mutex.synchronize { @stdout_buffer.write(bytes) }
-        end
-
-        def append_stderr(bytes : Bytes) : Nil
-          @mutex.synchronize { @stderr_buffer.write(bytes) }
-        end
-
-        def start : Nil
-          spawn do
-            loop do
-              sleep @interval
-              break if @mutex.synchronize { @closed }
-              flush
-            end
-          end
-        end
-
-        def flush : Nil
-          @mutex.synchronize do
-            flush_buffer(@stdout_buffer, @stdout)
-            flush_buffer(@stderr_buffer, @stderr)
-          end
-        end
-
-        def close : Nil
-          @mutex.synchronize { @closed = true }
-          flush
-        end
-
-        private def flush_buffer(buffer : IO::Memory, io : IO) : Nil
-          return if buffer.size == 0
-          io.write(buffer.to_slice)
-          buffer.clear
-          io.flush
-        end
-      end
 
       def initialize(@clean_build_dirs : Bool = true)
       end
@@ -443,50 +395,9 @@ module Bootstrap
       # Run a command array and return its Process::Status while throttling output.
       private def run_cmd_status(argv : Array(String), env : Hash(String, String) = {} of String => String) : Process::Status
         Log.info { "Running in #{Dir.current}: #{argv.join(" ")}" }
-        started = Time.monotonic
-        status = run_throttled_process(argv, env)
-        elapsed = Time.monotonic - started
-        Log.info { "Finished in #{elapsed.total_seconds.round(3)}s (exit=#{status.exit_code}): #{argv.join(" ")}" }
-        status
-      end
-
-      # Run a command with throttled stdout/stderr output to avoid IO bottlenecks.
-      private def run_throttled_process(argv : Array(String), env : Hash(String, String)) : Process::Status
-        process = Process.new(
-          argv[0],
-          argv[1..],
-          env: env,
-          input: STDIN,
-          output: Process::Redirect::Pipe,
-          error: Process::Redirect::Pipe
-        )
-        stdout_io = process.output.not_nil!
-        stderr_io = process.error.not_nil!
-        throttler = ThrottledOutput.new(STDOUT, STDERR)
-        throttler.start
-
-        done = Channel(Nil).new
-        spawn do
-          drain_stream(stdout_io) { |bytes| throttler.append_stdout(bytes) }
-          done.send(nil)
-        end
-        spawn do
-          drain_stream(stderr_io) { |bytes| throttler.append_stderr(bytes) }
-          done.send(nil)
-        end
-
-        status = process.wait
-        2.times { done.receive }
-        throttler.close
-        status
-      end
-
-      # Drain a process output stream into the provided block.
-      private def drain_stream(io : IO, &block : Bytes ->) : Nil
-        buffer = Bytes.new(8192)
-        while (read = io.read(buffer)) > 0
-          yield buffer[0, read]
-        end
+        result = ProcessRunner.run(argv, env: env)
+        Log.info { "Finished in #{result.elapsed.total_seconds.round(3)}s (exit=#{result.status.exit_code}): #{argv.join(" ")}" }
+        result.status
       end
 
       private def detect_clang_target_triple(clang_path : String, env : Hash(String, String)) : String
