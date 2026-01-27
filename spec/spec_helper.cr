@@ -7,6 +7,7 @@ require "../src/github_cli"
 require "../src/sysroot_builder"
 require "../src/sysroot_namespace"
 require "../src/sysroot_runner_lib"
+require "../src/tarball"
 # require "../src/hello-efi"
 require "../src/inproc_llvm"
 

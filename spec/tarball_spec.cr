@@ -1,5 +1,4 @@
 require "./spec_helper"
-require "../src/tarball"
 
 describe "Bootstrap::Tarball" do
   it "preserves entry mtimes from the archive" do
