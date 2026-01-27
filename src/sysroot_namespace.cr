@@ -121,6 +121,7 @@ module Bootstrap
           command[-1] = [command[-1], remaining.join(" ")].join(" ")
         end
         extra_env["CODEX_HOME"] = "/work/.codex"
+        extra_env["OPENAI_API_KEY"] = ENV["OPENAI_API_KEY"]
         STDERR.puts "codex-mode: command=#{command.join(" ")}"
       else
         if remaining.empty?
