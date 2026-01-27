@@ -797,7 +797,7 @@ module Bootstrap
           package_allowlist: nil,
           env_overrides: {
             "cmake" => {
-              "CPPFLAGS" => "-I#{sysroot_prefix}/include -Wdeprecated-literal-operator",
+              "CPPFLAGS" => "-I#{sysroot_prefix}/include -Wno-deprecated-literal-operator",
               "LDFLAGS"  => "-L#{sysroot_prefix}/lib",
             },
             "zlib" => {
