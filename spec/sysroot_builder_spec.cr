@@ -130,6 +130,19 @@ describe Bootstrap::SysrootBuilder do
     names.should contain("llvm-project")
   end
 
+  it "expands llvm into staged cmake steps" do
+    builder = Bootstrap::SysrootBuilder.new(Path["/tmp/work"])
+    plan = builder.build_plan
+    sysroot_phase = plan.phases.find(&.name.==("sysroot-from-alpine")).not_nil!
+    llvm_steps = sysroot_phase.steps.select { |step| step.name.starts_with?("llvm-project-stage") }
+    llvm_steps.map(&.name).should eq ["llvm-project-stage1", "llvm-project-stage2"]
+    llvm_steps.all? { |step| step.strategy == "cmake-project" }.should be_true
+    llvm_steps.each do |step|
+      step.env["CMAKE_SOURCE_DIR"].should eq "llvm"
+    end
+    sysroot_phase.steps.any? { |step| step.name == "llvm-project" }.should be_false
+  end
+
   it "lists build phase names" do
     phases = Bootstrap::SysrootBuilder.new.phase_specs.map(&.name)
     phases.should eq ["sysroot-from-alpine", "rootfs-from-sysroot", "system-from-sysroot", "tools-from-system", "finalize-rootfs"]
