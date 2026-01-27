@@ -15,8 +15,8 @@ require "./sysroot_build_state"
 module Bootstrap
   # SysrootRunner houses the logic that replays build steps inside the chroot.
   # It is kept in a regular source file so it benefits from formatting, linting,
-  # and specs. The small main entrypoint simply requires this library and calls
-  # `run_plan`.
+  # and specs. The main entrypoint registers the CLI class and dispatches into
+  # the `run` helpers below.
   class SysrootRunner < CLI
     DEFAULT_PLAN_PATH      = "/var/lib/sysroot-build-plan.json"
     DEFAULT_OVERRIDES_PATH = "/var/lib/sysroot-build-overrides.json"
