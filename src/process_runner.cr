@@ -2,6 +2,8 @@ require "time"
 
 module Bootstrap
   # Run processes with throttled output to reduce IO overhead during builds.
+  # When attached to a TTY, only the last few lines are rendered at a
+  # controlled rate to avoid scrolling.
   class ProcessRunner
     # Result wrapper for a timed process invocation.
     record Result,
@@ -71,6 +73,8 @@ module Bootstrap
 
     private class ThrottledOutput
       MAX_BUFFERED_LINES = 50
+      TAIL_LINES         =  5
+      @display_io : IO?
 
       def initialize(@stdout : IO, @stderr : IO, @interval : Time::Span = DEFAULT_FLUSH_INTERVAL)
         @stdout_buffer = IO::Memory.new
@@ -78,8 +82,12 @@ module Bootstrap
         @stdout_fragment = ""
         @stderr_fragment = ""
         @last_lines = [] of String
+        @last_rendered = [] of String
         @rendered_lines = 0
-        @tty_mode = @stdout.tty? && @stderr.tty?
+        @display_io = select_display_io
+        @display_mode = !@display_io.nil?
+        @stdout_passthrough = !@stdout.tty? && @display_io != @stdout
+        @stderr_passthrough = !@stderr.tty? && @display_io != @stderr
         @mutex = Mutex.new
         @closed = false
       end
@@ -87,22 +95,16 @@ module Bootstrap
       # Append bytes destined for stdout.
       def append_stdout(bytes : Bytes) : Nil
         @mutex.synchronize do
-          if @tty_mode
-            @stdout_fragment = consume_bytes(bytes, @stdout_fragment)
-          else
-            @stdout_buffer.write(bytes)
-          end
+          @stdout_fragment = consume_bytes(bytes, @stdout_fragment) if @display_mode
+          @stdout_buffer.write(bytes) if @stdout_passthrough || !@display_mode
         end
       end
 
       # Append bytes destined for stderr.
       def append_stderr(bytes : Bytes) : Nil
         @mutex.synchronize do
-          if @tty_mode
-            @stderr_fragment = consume_bytes(bytes, @stderr_fragment)
-          else
-            @stderr_buffer.write(bytes)
-          end
+          @stderr_fragment = consume_bytes(bytes, @stderr_fragment) if @display_mode
+          @stderr_buffer.write(bytes) if @stderr_passthrough || !@display_mode
         end
       end
 
@@ -120,12 +122,14 @@ module Bootstrap
       # Flush buffered stdout/stderr to the real outputs.
       def flush : Nil
         @mutex.synchronize do
-          if @tty_mode
+          if @display_mode
             render_tail
-          else
-            flush_buffer(@stdout_buffer, @stdout)
-            flush_buffer(@stderr_buffer, @stderr)
+            flush_buffer(@stdout_buffer, @stdout) if @stdout_passthrough
+            flush_buffer(@stderr_buffer, @stderr) if @stderr_passthrough
+            return
           end
+          flush_buffer(@stdout_buffer, @stdout)
+          flush_buffer(@stderr_buffer, @stderr)
         end
       end
 
@@ -133,6 +137,7 @@ module Bootstrap
       def close : Nil
         @mutex.synchronize { @closed = true }
         flush
+        finalize_display
       end
 
       # Write a buffered stream into the target IO and clear it.
@@ -160,27 +165,50 @@ module Bootstrap
       end
 
       private def render_tail : Nil
+        display_io = @display_io
+        return unless display_io
+
         lines = @last_lines.dup
         lines << @stdout_fragment unless @stdout_fragment.empty?
         lines << @stderr_fragment unless @stderr_fragment.empty?
-        lines = lines.last(5)
+        return if lines.empty?
 
-        clear_rendered_lines if @rendered_lines > 0
-        if lines.empty?
-          @rendered_lines = 0
-          return
+        lines = lines.last(TAIL_LINES)
+        if lines.size < TAIL_LINES
+          lines = Array.new(TAIL_LINES - lines.size, "") + lines
         end
+        return if lines == @last_rendered
 
-        @stdout.print(lines.join("\n"))
-        @stdout.flush
-        @rendered_lines = lines.size
+        clear_rendered_lines(display_io) if @rendered_lines > 0
+        display_io.print(lines.join("\n"))
+        display_io.flush
+        @rendered_lines = TAIL_LINES
+        @last_rendered = lines
       end
 
-      private def clear_rendered_lines : Nil
+      private def clear_rendered_lines(io : IO) : Nil
         @rendered_lines.times do |idx|
-          @stdout.print("\r\033[2K")
-          @stdout.print("\033[A") if idx < @rendered_lines - 1
+          io.print("\r\033[2K")
+          io.print("\033[A") if idx < @rendered_lines - 1
         end
+      end
+
+      private def finalize_display : Nil
+        @mutex.synchronize do
+          display_io = @display_io
+          return unless display_io
+          return if @rendered_lines == 0
+          display_io.print("\n")
+          display_io.flush
+          @rendered_lines = 0
+          @last_rendered.clear
+        end
+      end
+
+      private def select_display_io : IO?
+        return @stdout if @stdout.tty?
+        return @stderr if @stderr.tty?
+        nil
       end
     end
   end
