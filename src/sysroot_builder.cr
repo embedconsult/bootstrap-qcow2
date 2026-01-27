@@ -815,6 +815,10 @@ module Bootstrap
             },
             "shards" => {
               "SHARDS_CACHE_PATH" => "/tmp/shards-cache",
+              "CC"                => "#{sysroot_prefix}/bin/clang --target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld",
+              "CXX"               => "#{sysroot_prefix}/bin/clang++ --target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -stdlib=libc++",
+              "LDFLAGS"           => "-L#{sysroot_prefix}/lib/#{sysroot_triple} -L#{sysroot_prefix}/lib",
+              "LIBRARY_PATH"      => "#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
             },
             "bootstrap-qcow2" => {
               "CRYSTAL"         => "/usr/bin/crystal",
