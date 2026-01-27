@@ -911,6 +911,9 @@ module Bootstrap
               "CFLAGS"   => "-fPIC",
               "LDSHARED" => "#{rootfs_env["CC"]} -shared -Wl,-soname,libz.so.1 -Wl,--version-script,libz.map",
             },
+            "m4" => {
+              "INSTALL" => "./build-aux/install-sh",
+            },
           },
           configure_overrides: {
             "cmake" => [
