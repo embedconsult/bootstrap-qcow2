@@ -98,7 +98,8 @@ module Bootstrap
                               Dir.exists?(File.join(build_dir, "CMakeFiles"))
             FileUtils.mkdir_p(build_dir)
             Dir.cd(build_dir) do
-              bootstrap_argv = [bootstrap_path, "--prefix=#{install_prefix}"]
+              # CMake's bootstrap script only parallelizes when --parallel is set.
+              bootstrap_argv = [bootstrap_path, "--parallel=#{cpus}", "--prefix=#{install_prefix}"]
               if step.configure_flags.size > 0
                 bootstrap_argv << "--"
                 bootstrap_argv.concat(step.configure_flags)
