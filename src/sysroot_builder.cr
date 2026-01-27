@@ -815,6 +815,10 @@ module Bootstrap
             },
             "shards" => {
               "SHARDS_CACHE_PATH" => "/tmp/shards-cache",
+              "CC"                => "#{sysroot_prefix}/bin/clang --target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld",
+              "CXX"               => "#{sysroot_prefix}/bin/clang++ --target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -stdlib=libc++",
+              "LDFLAGS"           => "-L#{sysroot_prefix}/lib/#{sysroot_triple} -L#{sysroot_prefix}/lib",
+              "LIBRARY_PATH"      => "#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
             },
             "bootstrap-qcow2" => {
               "CRYSTAL"         => "/usr/bin/crystal",
@@ -910,6 +914,9 @@ module Bootstrap
             "zlib"    => {
               "CFLAGS"   => "-fPIC",
               "LDSHARED" => "#{rootfs_env["CC"]} -shared -Wl,-soname,libz.so.1 -Wl,--version-script,libz.map",
+            },
+            "m4" => {
+              "INSTALL" => "./build-aux/install-sh",
             },
           },
           configure_overrides: {
