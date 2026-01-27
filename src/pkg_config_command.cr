@@ -1,4 +1,5 @@
 require "./cli"
+require "./sysroot_builder"
 
 module Bootstrap
   # Minimal pkg-config replacement for Crystal's libssl/libcrypto probes.
@@ -16,12 +17,12 @@ module Bootstrap
       "libpcre2-8" => ["-lpcre2-8"],
     }
     PKG_VERSIONS = {
-      "libssl"     => "3.8.2",
-      "openssl"    => "3.8.2",
-      "libcrypto"  => "3.8.2",
-      "crypto"     => "3.8.2",
-      "bdw-gc"     => "8.2.6",
-      "libpcre2-8" => "10.44",
+      "libssl"     => SysrootBuilder::DEFAULT_LIBRESSL,
+      "openssl"    => SysrootBuilder::DEFAULT_LIBRESSL,
+      "libcrypto"  => SysrootBuilder::DEFAULT_LIBRESSL,
+      "crypto"     => SysrootBuilder::DEFAULT_LIBRESSL,
+      "bdw-gc"     => SysrootBuilder::DEFAULT_BDWGC,
+      "libpcre2-8" => SysrootBuilder::DEFAULT_PCRE2,
     }
     PKG_VARIABLES = {
       "prefix"     => "/usr",
