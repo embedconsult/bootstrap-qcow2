@@ -159,3 +159,10 @@ All mounts disappear when the process exits.
 - No persistent mounts
 - No AppArmor mediation of this tool
 - Any dependency on host paths must be explicit and intentional
+
+## Skills
+### Available skills
+- bq2-iterate: Automate sysroot iteration when the user says "iterate" or "resume iteration"; detect rootfs context, run sysroot-runner in the background, apply overrides, and back-annotate fixes. (file: /work/bootstrap-qcow2/codex/skills/bq2-iterate/SKILL.md)
+- bootstrap-qcow2-build-plan-iteration: Iterate bootstrap-qcow2 sysroot/rootfs build plans inside the container using sysroot-runner overrides, state bookmarks, and failure reports, then back-annotate stable fixes into SysrootBuilder for reproducible clean builds. (file: /work/bootstrap-qcow2/codex/skills/bootstrap-qcow2-build-plan-iteration/SKILL.md)
+- bootstrap-qcow2-create-pr: Codex-oriented workflow to create GitHub PRs via Bootstrap::GitHubUtils.create_pull_request without gh. (file: /work/bootstrap-qcow2/codex/skills/bootstrap-qcow2-create-pr/SKILL.md)
+- bootstrap-qcow2-check-pr-feedback: Manual workflow to fetch PR review comments and thread comments. (file: /work/bootstrap-qcow2/codex/skills/bootstrap-qcow2-check-pr-feedback/SKILL.md)
