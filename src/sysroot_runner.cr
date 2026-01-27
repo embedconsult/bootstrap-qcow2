@@ -768,6 +768,9 @@ module Bootstrap
       dry_run = false
       resume = true
       allow_outside_rootfs = false
+      rootfs : String? = nil
+      extra_binds = [] of Tuple(Path, Path)
+      run_alpine_setup = false
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-runner [options]") do |p|
         p.on("--plan PATH", "Read the build plan from PATH (default: #{SysrootRunner::DEFAULT_PLAN_PATH})") { |path| plan_path = path }
         p.on("--phase NAME", "Select build phase to run (default: first phase; use 'all' for every phase)") { |name| phase = name }
@@ -786,8 +789,23 @@ module Bootstrap
         p.on("--no-resume", "Disable resume/state tracking (useful when the default state path is not writable)") { resume = false }
         p.on("--allow-outside-rootfs", "Allow running rootfs-* phases outside the produced rootfs (requires destdir overrides)") { allow_outside_rootfs = true }
         p.on("--dry-run", "List selected phases/steps and exit") { dry_run = true }
+        p.on("--rootfs=PATH", "Enter the rootfs namespace before running (default: none)") { |path| rootfs = path }
+        p.on("--bind=SRC:DST", "Bind-mount SRC into DST inside the rootfs (repeatable)") do |val|
+          extra_binds << parse_bind_spec(val)
+        end
+        p.on("--alpine-setup", "Install Alpine packages needed to replay the sysroot build plan") do
+          run_alpine_setup = true
+        end
       end
       return CLI.print_help(parser) if help
+
+      if rootfs
+        rootfs_value = rootfs.not_nil!
+        raise "Rootfs path does not exist: #{rootfs_value}" unless Dir.exists?(rootfs_value)
+        SysrootNamespace.enter_rootfs_with_setup(rootfs_value,
+          extra_binds: extra_binds,
+          run_alpine_setup: run_alpine_setup)
+      end
 
       SysrootRunner.run_plan(
         plan_path,
@@ -802,6 +820,15 @@ module Bootstrap
         allow_outside_rootfs: allow_outside_rootfs,
       )
       0
+    end
+
+    private def self.parse_bind_spec(value : String) : Tuple(Path, Path)
+      parts = value.split(":", 2)
+      raise "Expected --bind=SRC:DST" unless parts.size == 2
+      src = Path[parts[0]].expand
+      dst_raw = parts[1]
+      dst_clean = dst_raw.starts_with?("/") ? dst_raw[1..] : dst_raw
+      {src, Path[dst_clean]}
     end
 
     # Print the current build status and next phase/step.

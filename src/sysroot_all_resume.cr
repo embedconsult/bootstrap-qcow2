@@ -277,12 +277,12 @@ module Bootstrap
           builder.stage_sources(skip_existing: true)
           puts "Restaged missing sources into #{builder.rootfs_dir}/workspace"
           AlpineSetup.write_resolv_conf(builder.rootfs_dir)
-          status = run_sysroot_command(
+          status = run_sysroot_runner(
             bq2_path,
             builder,
             repo_root,
             use_alpine_setup,
-            ["sysroot-runner", "--phase", "all"],
+            "all",
           )
           unless status.success?
             STDERR.puts "sysroot-runner failed with exit code #{status.exit_code}"
@@ -292,15 +292,15 @@ module Bootstrap
           if File.exists?(builder.rootfs_dir / "workspace" / "bq-rootfs.tar.gz")
             Log.info { "Rootfs tarball already present; skipping finalize-rootfs" }
           else
-            status = run_sysroot_command(
+            status = run_sysroot_runner(
               bq2_path,
               builder,
               repo_root,
-              use_alpine_setup,
-              ["sysroot-tarball"],
+              false,
+              "finalize-rootfs",
             )
             unless status.success?
-              STDERR.puts "sysroot-tarball failed with exit code #{status.exit_code}"
+              STDERR.puts "finalize-rootfs failed with exit code #{status.exit_code}"
               return status.exit_code
             end
           end
@@ -358,31 +358,24 @@ module Bootstrap
     end
 
     # Run a bq2 subcommand inside the sysroot namespace.
-    private def self.run_sysroot_command(bq2_path : Path,
-                                         builder : SysrootBuilder,
-                                         repo_root : Path,
-                                         use_alpine_setup : Bool,
-                                         command : Array(String)) : Process::Status
+    private def self.run_sysroot_runner(bq2_path : Path,
+                                        builder : SysrootBuilder,
+                                        repo_root : Path,
+                                        use_alpine_setup : Bool,
+                                        phase : String) : Process::Status
       bind_spec = "#{repo_root}:#{repo_root}"
-      crystal_path = "/usr/bin/crystal"
-      main_path = repo_root / "src" / "main.cr"
-      namespace_args = [
-        "sysroot-namespace",
+      argv = [
+        "sysroot-runner",
         "--rootfs",
         builder.rootfs_dir.to_s,
         "--bind",
         bind_spec,
       ]
-      namespace_args << "--alpine-setup" if use_alpine_setup
-      namespace_args << "--"
+      argv << "--alpine-setup" if use_alpine_setup
+      argv.concat(["--phase", phase])
       Process.run(
         bq2_path.to_s,
-        namespace_args + [
-          crystal_path,
-          "run",
-          main_path.to_s,
-          "--",
-        ] + command,
+        argv,
         input: STDIN,
         output: STDOUT,
         error: STDERR,

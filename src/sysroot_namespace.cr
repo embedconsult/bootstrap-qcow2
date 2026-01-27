@@ -388,6 +388,18 @@ module Bootstrap
       pivot_root!(root_path, unmount_old_root: unmount_old_root)
     end
 
+    # Enter a rootfs and apply the standard environment/toolchain setup.
+    def self.enter_rootfs_with_setup(rootfs : String,
+                                     extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path),
+                                     home : String = "/root",
+                                     extra_env : Hash(String, String) = {} of String => String,
+                                     run_alpine_setup : Bool = false) : Nil
+      enter_rootfs(rootfs, extra_binds: extra_binds)
+      reset_environment(home, extra_env)
+      apply_toolchain_env_defaults
+      AlpineSetup.install_sysroot_runner_packages if run_alpine_setup
+    end
+
     # pivot_root requires the new root to be a mount point. A bind mount creates
     # a dedicated mount point without depending on a specific filesystem type.
     private def self.bind_mount_rootfs(rootfs : Path)
