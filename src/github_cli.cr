@@ -6,8 +6,46 @@ require "./github_utils"
 
 module Bootstrap
   # GitHub-oriented CLI helpers built on `Bootstrap::GitHubUtils`.
-  module GitHubCLI
+  class GitHubCLI < CLI
     DEFAULT_BASE = "master"
+
+    # Return the canonical command name for GitHub feedback.
+    def self.command_line_override : String?
+      "github-pr-feedback"
+    end
+
+    # Return command aliases for GitHub helpers.
+    def self.aliases : Array(String)
+      ["github-pr-comment", "github-pr-create"]
+    end
+
+    # Summarize the GitHub CLI helpers for help output.
+    def self.summary : String
+      "GitHub pull request helper"
+    end
+
+    # Describe help output entries for GitHub CLI commands.
+    def self.help_entries : Array(Tuple(String, String))
+      [
+        {"github-pr-feedback", "Fetch PR feedback as JSON"},
+        {"github-pr-comment", "Post a PR conversation comment"},
+        {"github-pr-create", "Create a GitHub pull request"},
+      ]
+    end
+
+    # Dispatch GitHub CLI subcommands by command name.
+    def self.run(args : Array(String), command_name : String) : Int32
+      case command_name
+      when "github-pr-feedback"
+        run_pr_feedback(args)
+      when "github-pr-comment"
+        run_pr_comment(args)
+      when "github-pr-create"
+        run_pr_create(args)
+      else
+        raise "Unknown GitHub CLI command #{command_name}"
+      end
+    end
 
     # Returns `owner/repo` when *url* is a GitHub remote URL.
     def self.repo_from_url?(url : String) : String?

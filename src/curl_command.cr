@@ -1,15 +1,26 @@
 require "file_utils"
 require "http/client"
 require "uri"
+require "./cli"
 
 module Bootstrap
   # Minimal HTTP client with curl-like flags for internal tooling.
-  module CurlCommand
+  class CurlCommand < CLI
     # Conservative default to avoid redirect loops; override with --max-redirects.
     DEFAULT_MAX_REDIRECTS = 10
 
+    # Return the canonical command name for the curl shim.
+    def self.command_line_override : String?
+      "curl"
+    end
+
+    # Summarize the curl shim for help output.
+    def self.summary : String
+      "Minimal HTTP client helper"
+    end
+
     # Run the curl command with *args* and return a shell-style exit code.
-    def self.run(args : Array(String)) : Int32
+    def self.run(args : Array(String), _command_name : String) : Int32
       output : Path? = nil
       method = "GET"
       data : String? = nil

@@ -8,6 +8,7 @@ require "time"
 require "./build_plan"
 require "./build_plan_reader"
 require "./build_plan_overrides"
+require "./cli"
 require "./sysroot_namespace"
 require "./sysroot_build_state"
 
@@ -16,7 +17,7 @@ module Bootstrap
   # It is kept in a regular source file so it benefits from formatting, linting,
   # and specs. The small main entrypoint simply requires this library and calls
   # `run_plan`.
-  class SysrootRunner
+  class SysrootRunner < CLI
     DEFAULT_PLAN_PATH      = "/var/lib/sysroot-build-plan.json"
     DEFAULT_OVERRIDES_PATH = "/var/lib/sysroot-build-overrides.json"
     DEFAULT_REPORT_DIR     = "/var/lib/sysroot-build-reports"
@@ -778,6 +779,138 @@ module Bootstrap
     rescue report_ex
       Log.warn { "Failed to write build failure report: #{report_ex.message}" }
       nil
+    end
+
+    # Summarize the sysroot runner CLI behavior for help output.
+    def self.summary : String
+      "Replay build plan inside the sysroot"
+    end
+
+    # Return additional command aliases handled by the sysroot runner.
+    def self.aliases : Array(String)
+      ["sysroot-status"]
+    end
+
+    # Describe help output entries for sysroot runner commands.
+    def self.help_entries : Array(Tuple(String, String))
+      [
+        {"sysroot-runner", "Replay build plan inside the sysroot"},
+        {"sysroot-status", "Print current sysroot build phase"},
+      ]
+    end
+
+    # Dispatch sysroot runner subcommands by command name.
+    def self.run(args : Array(String), command_name : String) : Int32
+      case command_name
+      when "sysroot-runner"
+        run_runner(args)
+      when "sysroot-status"
+        run_status(args)
+      else
+        raise "Unknown sysroot runner command #{command_name}"
+      end
+    end
+
+    # Run build plan phases/steps inside the sysroot.
+    private def self.run_runner(args : Array(String)) : Int32
+      plan_path = SysrootRunner::DEFAULT_PLAN_PATH
+      phase : String? = nil
+      packages = [] of String
+      overrides_path : String? = nil
+      use_default_overrides = true
+      report_dir : String? = SysrootRunner::DEFAULT_REPORT_DIR
+      state_path : String? = nil
+      dry_run = false
+      resume = true
+      allow_outside_rootfs = false
+      parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-runner [options]") do |p|
+        p.on("--plan PATH", "Read the build plan from PATH (default: #{SysrootRunner::DEFAULT_PLAN_PATH})") { |path| plan_path = path }
+        p.on("--phase NAME", "Select build phase to run (default: first phase; use 'all' for every phase)") { |name| phase = name }
+        p.on("--package NAME", "Only run the named package(s); repeatable") { |name| packages << name }
+        p.on("--overrides PATH", "Apply runtime overrides JSON (default: #{SysrootRunner::DEFAULT_OVERRIDES_PATH} when using the default plan path)") do |path|
+          overrides_path = path
+          use_default_overrides = false
+        end
+        p.on("--no-overrides", "Disable runtime overrides") do
+          overrides_path = nil
+          use_default_overrides = false
+        end
+        p.on("--report-dir PATH", "Write failure reports to PATH (default: #{SysrootRunner::DEFAULT_REPORT_DIR})") { |path| report_dir = path }
+        p.on("--no-report", "Disable failure report writing") { report_dir = nil }
+        p.on("--state-path PATH", "Write runner state/bookmarks to PATH (default: #{SysrootRunner::DEFAULT_STATE_PATH} when using the default plan path)") { |path| state_path = path }
+        p.on("--no-resume", "Disable resume/state tracking (useful when the default state path is not writable)") { resume = false }
+        p.on("--allow-outside-rootfs", "Allow running rootfs-* phases outside the produced rootfs (requires destdir overrides)") { allow_outside_rootfs = true }
+        p.on("--dry-run", "List selected phases/steps and exit") { dry_run = true }
+      end
+      return CLI.print_help(parser) if help
+
+      SysrootRunner.run_plan(
+        plan_path,
+        phase: phase,
+        packages: packages.empty? ? nil : packages,
+        overrides_path: overrides_path,
+        use_default_overrides: use_default_overrides,
+        report_dir: report_dir,
+        dry_run: dry_run,
+        state_path: state_path,
+        resume: resume,
+        allow_outside_rootfs: allow_outside_rootfs,
+      )
+      0
+    end
+
+    # Print the current build status and next phase/step.
+    private def self.run_status(args : Array(String)) : Int32
+      workspace = "data/sysroot"
+      rootfs : String? = nil
+      state_path : String? = nil
+
+      parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-status [options]") do |p|
+        p.on("-w DIR", "--workspace=DIR", "Sysroot workspace directory (default: #{workspace})") { |val| workspace = val }
+        p.on("--rootfs=PATH", "Prepared rootfs directory (default: <workspace>/rootfs)") { |val| rootfs = val }
+        p.on("--state=PATH", "Explicit sysroot build state JSON path") { |val| state_path = val }
+      end
+      return CLI.print_help(parser) if help
+
+      rootfs_dir = rootfs
+      if rootfs_dir.nil? && SysrootRunner.rootfs_marker_present?
+        rootfs_dir = "/"
+      end
+      rootfs_dir ||= File.join(workspace, "rootfs")
+      resolved_state_path = state_path
+      resolved_state_path ||= File.join(rootfs_dir, "var/lib/sysroot-build-state.json")
+      resolved_state_path = resolved_state_path.not_nil!
+      unless File.exists?(resolved_state_path)
+        resolved_state_path = SysrootBuildState::DEFAULT_PATH if File.exists?(SysrootBuildState::DEFAULT_PATH)
+      end
+      raise "Missing sysroot build state at #{resolved_state_path}" unless File.exists?(resolved_state_path)
+
+      state = SysrootBuildState.load(resolved_state_path)
+      puts(state.progress.current_phase || "(none)")
+
+      plan_path = File.join(rootfs_dir, "var/lib/sysroot-build-plan.json")
+      plan_path = state.plan_path unless File.exists?(plan_path)
+      if File.exists?(plan_path)
+        plan = BuildPlan.from_json(File.read(plan_path))
+        next_phase = plan.phases.find do |phase|
+          phase.steps.any? { |step| !state.completed?(phase.name, step.name) }
+        end
+        if next_phase
+          next_step = next_phase.steps.find { |step| !state.completed?(next_phase.name, step.name) }
+          puts("next_phase=#{next_phase.name}")
+          puts("next_step=#{next_step.not_nil!.name}") if next_step
+        else
+          puts("next_phase=(none)")
+        end
+      end
+
+      if (success = state.progress.last_success)
+        puts("last_success=#{success.phase}/#{success.step}")
+      end
+      if (failure = state.progress.last_failure)
+        puts("last_failure=#{failure.phase}/#{failure.step}")
+      end
+      0
     end
 
     private def self.slugify(value : String) : String

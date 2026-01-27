@@ -1,6 +1,8 @@
+require "./cli"
+
 module Bootstrap
   # Minimal pkg-config replacement for Crystal's libssl/libcrypto probes.
-  module PkgConfigCommand
+  class PkgConfigCommand < CLI
     VERSION      = "0.29.2"
     LIB_DIRS     = ["/usr/lib", "/usr/lib64", "/opt/sysroot/lib", "/opt/sysroot/lib64"]
     INCLUDE_DIRS = ["/usr/include", "/opt/sysroot/include"]
@@ -57,7 +59,18 @@ module Bootstrap
       end
     end
 
-    def self.run(args : Array(String)) : Int32
+    # Return the canonical command name for the pkg-config shim.
+    def self.command_line_override : String?
+      "pkg-config"
+    end
+
+    # Summarize the pkg-config shim for help output.
+    def self.summary : String
+      "Minimal pkg-config helper"
+    end
+
+    # Run the pkg-config shim with *args* and return a shell-style exit code.
+    def self.run(args : Array(String), _command_name : String) : Int32
       options = Options.new
       debug_log("args=#{args.inspect}") if debug_enabled?
       begin

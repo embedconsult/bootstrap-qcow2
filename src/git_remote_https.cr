@@ -3,10 +3,11 @@ require "http/client"
 require "openssl/lib_ssl"
 require "path"
 require "uri"
+require "./cli"
 
 module Bootstrap
   # Minimal Git remote helper for HTTPS fetch over the smart HTTP protocol.
-  module GitRemoteHttps
+  class GitRemoteHttps < CLI
     # Limit redirects to avoid loops; matches curl defaults.
     MAX_REDIRECTS = 10
     # Git smart HTTP service name for fetch operations.
@@ -24,8 +25,18 @@ module Bootstrap
     # Enable debug logging when set to any non-empty value.
     DEBUG_ENV = "BQ2_GIT_REMOTE_HTTPS_DEBUG"
 
+    # Return the canonical command name for the git-remote-https helper.
+    def self.command_line_override : String?
+      "git-remote-https"
+    end
+
+    # Summarize the git-remote-https helper for help output.
+    def self.summary : String
+      "HTTPS remote helper for Git"
+    end
+
     # Run the git-remote-https helper with *args* and return a shell-style exit code.
-    def self.run(args : Array(String)) : Int32
+    def self.run(args : Array(String), _command_name : String) : Int32
       if args.size < 2
         STDERR.puts "Usage: git-remote-https <name> <url>"
         return 1

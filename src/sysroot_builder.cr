@@ -7,6 +7,9 @@ require "log"
 require "path"
 require "uri"
 require "./build_plan"
+require "./build_plan_utils"
+require "./cli"
+require "./sysroot_runner_lib"
 require "./tarball"
 
 module Bootstrap
@@ -22,7 +25,7 @@ module Bootstrap
   #   SHA256 bookkeeping for reuse and verification.
   # * Coordinator source is stored in the repository and copied into the chroot
   #   so it participates in formatting and specs.
-  class SysrootBuilder
+  class SysrootBuilder < CLI
     {% if flag?(:x86_64) %}
       DEFAULT_ARCH = "x86_64"
     {% elsif flag?(:aarch64) %}
@@ -1287,6 +1290,202 @@ module Bootstrap
     rescue ex
       Log.warn { "Failed to read #{passwd_path}: #{ex.message}" }
       nil
+    end
+
+    # Summarize the sysroot builder CLI behavior for help output.
+    def self.summary : String
+      "Build sysroot tarball or directory"
+    end
+
+    # Return command aliases handled by the sysroot builder CLI.
+    def self.aliases : Array(String)
+      ["sysroot-plan-write", "sysroot-tarball"]
+    end
+
+    # Describe help output entries for the sysroot builder CLI.
+    def self.help_entries : Array(Tuple(String, String))
+      [
+        {"sysroot-builder", "Build sysroot tarball or directory"},
+        {"sysroot-plan-write", "Write a fresh build plan JSON"},
+        {"sysroot-tarball", "Emit a prefix-free rootfs tarball"},
+      ]
+    end
+
+    # Dispatch sysroot builder subcommands by command name.
+    def self.run(args : Array(String), command_name : String) : Int32
+      case command_name
+      when "sysroot-builder"
+        run_builder(args)
+      when "sysroot-plan-write"
+        run_plan_write(args)
+      when "sysroot-tarball"
+        run_sysroot_tarball(args)
+      else
+        raise "Unknown sysroot builder command #{command_name}"
+      end
+    end
+
+    # Build or reuse a sysroot workspace and optionally emit a tarball.
+    private def self.run_builder(args : Array(String)) : Int32
+      output = Path["sysroot.tar.gz"]
+      workspace = Path["data/sysroot"]
+      architecture = SysrootBuilder::DEFAULT_ARCH
+      branch = SysrootBuilder::DEFAULT_BRANCH
+      base_version = SysrootBuilder::DEFAULT_BASE_VERSION
+      base_rootfs_path : Path? = nil
+      include_sources = true
+      use_system_tar_for_sources = false
+      use_system_tar_for_rootfs = false
+      preserve_ownership_for_sources = false
+      preserve_ownership_for_rootfs = false
+      owner_uid = nil
+      owner_gid = nil
+      write_tarball = true
+      reuse_rootfs = false
+      refresh_plan = false
+      restage_sources = false
+
+      parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-builder [options]") do |p|
+        p.on("-o OUTPUT", "--output=OUTPUT", "Target sysroot tarball (default: #{output})") { |val| output = Path[val] }
+        p.on("-w DIR", "--workspace=DIR", "Workspace directory (default: #{workspace})") { |val| workspace = Path[val] }
+        p.on("-a ARCH", "--arch=ARCH", "Target architecture (default: #{architecture})") { |val| architecture = val }
+        p.on("-b BRANCH", "--branch=BRANCH", "Source branch/release tag (default: #{branch})") { |val| branch = val }
+        p.on("-v VERSION", "--base-version=VERSION", "Base rootfs version/tag (default: #{base_version})") { |val| base_version = val }
+        p.on("--base-rootfs PATH", "Use a local rootfs tarball instead of downloading the Alpine minirootfs") { |val| base_rootfs_path = Path[val].expand }
+        p.on("--skip-sources", "Skip staging source archives into the rootfs") { include_sources = false }
+        p.on("--system-tar-sources", "Use system tar to extract all staged source archives") { use_system_tar_for_sources = true }
+        p.on("--system-tar-rootfs", "Use system tar to extract the base rootfs") { use_system_tar_for_rootfs = true }
+        p.on("--preserve-ownership-sources", "Apply ownership metadata when extracting source archives") { preserve_ownership_for_sources = true }
+        p.on("--no-preserve-ownership-sources", "Skip applying ownership metadata for source archives") { preserve_ownership_for_sources = false }
+        p.on("--preserve-ownership-rootfs", "Apply ownership metadata for the base rootfs") { preserve_ownership_for_rootfs = true }
+        p.on("--owner-uid=UID", "Override extracted file owner uid (implies ownership preservation)") do |val|
+          preserve_ownership_for_sources = true
+          preserve_ownership_for_rootfs = true
+          owner_uid = val.to_i
+        end
+        p.on("--owner-gid=GID", "Override extracted file owner gid (implies ownership preservation)") do |val|
+          preserve_ownership_for_sources = true
+          preserve_ownership_for_rootfs = true
+          owner_gid = val.to_i
+        end
+        p.on("--no-tarball", "Prepare the chroot tree without writing a tarball") { write_tarball = false }
+        p.on("--reuse-rootfs", "Reuse an existing prepared rootfs when present") { reuse_rootfs = true }
+        p.on("--refresh-plan", "Rewrite the build plan inside an existing rootfs (requires --reuse-rootfs)") { refresh_plan = true }
+        p.on("--restage-sources", "Extract missing sources into an existing rootfs /workspace (requires --reuse-rootfs)") { restage_sources = true }
+      end
+      return CLI.print_help(parser) if help
+
+      Log.info { "Sysroot builder log level=#{Log.for("").level} (env-configured)" }
+      builder = SysrootBuilder.new(
+        workspace: workspace,
+        architecture: architecture,
+        branch: branch,
+        base_version: base_version,
+        base_rootfs_path: base_rootfs_path,
+        use_system_tar_for_sources: use_system_tar_for_sources,
+        use_system_tar_for_rootfs: use_system_tar_for_rootfs,
+        preserve_ownership_for_sources: preserve_ownership_for_sources,
+        preserve_ownership_for_rootfs: preserve_ownership_for_rootfs,
+        owner_uid: owner_uid,
+        owner_gid: owner_gid
+      )
+
+      if reuse_rootfs && builder.rootfs_ready?
+        puts "Reusing existing rootfs at #{builder.rootfs_dir}"
+        puts "Build plan found at #{builder.plan_path} (iteration state is maintained by sysroot-runner)"
+        if include_sources && restage_sources
+          builder.stage_sources(skip_existing: true)
+          puts "Staged missing sources into #{builder.rootfs_dir}/workspace"
+        end
+        if refresh_plan
+          builder.write_plan
+          puts "Refreshed build plan at #{builder.plan_path}"
+        end
+        if write_tarball
+          builder.write_chroot_tarball(output)
+          puts "Generated sysroot tarball at #{output}"
+        end
+        return 0
+      end
+
+      if write_tarball
+        builder.generate_chroot_tarball(output, include_sources: include_sources)
+        puts "Generated sysroot tarball at #{output}"
+      else
+        chroot_path = builder.generate_chroot(include_sources: include_sources)
+        puts "Prepared chroot directory at #{chroot_path}"
+      end
+      0
+    end
+
+    # Writes a freshly generated build plan JSON.
+    private def self.run_plan_write(args : Array(String)) : Int32
+      output = SysrootRunner::DEFAULT_PLAN_PATH
+      workspace_root = Bootstrap::BuildPlanUtils::DEFAULT_WORKSPACE_ROOT
+      force = false
+      parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-plan-write [options]") do |p|
+        p.on("--output PATH", "Write the plan to PATH (default: #{SysrootRunner::DEFAULT_PLAN_PATH})") { |path| output = path }
+        p.on("--workspace-root PATH", "Rewrite plan workdirs rooted at /workspace to PATH (default: #{workspace_root})") { |path| workspace_root = path }
+        p.on("--force", "Overwrite an existing plan at the output path") { force = true }
+      end
+      return CLI.print_help(parser) if help
+
+      if File.exists?(output) && !force
+        STDERR.puts "Refusing to overwrite existing plan at #{output} (pass --force)"
+        return 1
+      end
+
+      tmp_workspace = Path["/tmp/bq2-plan-write-#{Random::Secure.hex(4)}"]
+      builder = SysrootBuilder.new(workspace: tmp_workspace)
+      plan = builder.build_plan
+      if workspace_root != Bootstrap::BuildPlanUtils::DEFAULT_WORKSPACE_ROOT
+        plan = Bootstrap::BuildPlanUtils.rewrite_workspace_root(plan, workspace_root)
+      end
+
+      FileUtils.mkdir_p(File.dirname(output))
+      File.write(output, plan.to_pretty_json)
+      puts "Wrote build plan to #{output}"
+      0
+    end
+
+    # Run the finalize-rootfs phase to emit a prefix-free rootfs tarball.
+    private def self.run_sysroot_tarball(args : Array(String)) : Int32
+      plan_path = SysrootRunner::DEFAULT_PLAN_PATH
+      overrides_path : String? = nil
+      use_default_overrides = true
+      report_dir : String? = SysrootRunner::DEFAULT_REPORT_DIR
+      state_path : String? = nil
+      resume = true
+      allow_outside_rootfs = false
+      parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-tarball [options]") do |p|
+        p.on("--plan PATH", "Read the build plan from PATH (default: #{SysrootRunner::DEFAULT_PLAN_PATH})") { |path| plan_path = path }
+        p.on("--overrides PATH", "Apply runtime overrides JSON (default: #{SysrootRunner::DEFAULT_OVERRIDES_PATH} when using the default plan path)") do |path|
+          overrides_path = path
+          use_default_overrides = false
+        end
+        p.on("--no-overrides", "Disable runtime overrides") do
+          overrides_path = nil
+          use_default_overrides = false
+        end
+        p.on("--report-dir PATH", "Write failure reports to PATH (default: #{SysrootRunner::DEFAULT_REPORT_DIR})") { |path| report_dir = path }
+        p.on("--no-report", "Disable failure report writing") { report_dir = nil }
+        p.on("--state-path PATH", "Write runner state/bookmarks to PATH (default: #{SysrootRunner::DEFAULT_STATE_PATH} when using the default plan path)") { |path| state_path = path }
+        p.on("--no-resume", "Disable resume/state tracking (useful when the default state path is not writable)") { resume = false }
+        p.on("--allow-outside-rootfs", "Allow running rootfs-* phases outside the produced rootfs (requires destdir overrides)") { allow_outside_rootfs = true }
+      end
+      return CLI.print_help(parser) if help
+
+      SysrootRunner.run_plan(
+        plan_path,
+        phase: "finalize-rootfs",
+        overrides_path: overrides_path,
+        use_default_overrides: use_default_overrides,
+        report_dir: report_dir,
+        state_path: state_path,
+        resume: resume,
+        allow_outside_rootfs: allow_outside_rootfs,
+      )
+      0
     end
   end
 end
