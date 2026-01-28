@@ -110,8 +110,9 @@ module Bootstrap
     class CommandFailedError < Exception
       getter argv : Array(String)
       getter exit_code : Int32
+      getter output_path : String?
 
-      def initialize(@argv : Array(String), @exit_code : Int32, message : String)
+      def initialize(@argv : Array(String), @exit_code : Int32, message : String, @output_path : String? = nil)
         super(message)
       end
     end
@@ -119,8 +120,15 @@ module Bootstrap
     # Default runner that shells out via Process.run using strategy metadata.
     struct SystemRunner
       getter clean_build_dirs : Bool
+      getter report_dir : String?
+      @command_log_prefix : String?
 
-      def initialize(@clean_build_dirs : Bool = true)
+      def initialize(@clean_build_dirs : Bool = true, @report_dir : String? = nil)
+        @command_log_prefix = nil
+      end
+
+      def with_report_dir(report_dir : String?) : SystemRunner
+        SystemRunner.new(clean_build_dirs: @clean_build_dirs, report_dir: report_dir)
       end
 
       # Run a build step using the selected strategy.
@@ -135,6 +143,7 @@ module Bootstrap
         Dir.cd(step.workdir) do
           cpus = (System.cpu_count || 1).to_i32
           Log.info { "Starting #{step.strategy} build for #{step.name} in #{step.workdir} (cpus=#{cpus})" }
+          @command_log_prefix = log_prefix_for(phase, step)
           apply_patches(step.patches)
           env = effective_env(phase, step)
           install_prefix = step.install_prefix || phase.install_prefix
@@ -371,20 +380,43 @@ module Bootstrap
 
       # Run a command array and raise if it fails.
       private def run_cmd(argv : Array(String), env : Hash(String, String) = {} of String => String)
-        status = run_cmd_status(argv, env: env)
-        unless status.success?
-          Log.error { "Command failed (#{status.exit_code}): #{argv.join(" ")}" }
-          raise CommandFailedError.new(argv, status.exit_code, "Command failed (#{status.exit_code}): #{argv.join(" ")}")
+        result = run_cmd_result(argv, env: env)
+        unless result.status.success?
+          Log.error { "Command failed (#{result.status.exit_code}): #{argv.join(" ")}" }
+          raise CommandFailedError.new(argv, result.status.exit_code, "Command failed (#{result.status.exit_code}): #{argv.join(" ")}", result.output_path)
         end
-        Log.debug { "Completed #{argv.first} with exit #{status.exit_code}" }
+        Log.debug { "Completed #{argv.first} with exit #{result.status.exit_code}" }
       end
 
       # Run a command array and return its Process::Status while throttling output.
       private def run_cmd_status(argv : Array(String), env : Hash(String, String) = {} of String => String) : Process::Status
+        run_cmd_result(argv, env: env).status
+      end
+
+      private def run_cmd_result(argv : Array(String), env : Hash(String, String) = {} of String => String) : ProcessRunner::Result
         Log.info { "Running in #{Dir.current}: #{argv.join(" ")}" }
-        result = ProcessRunner.run(argv, env: env)
+        result = ProcessRunner.run(argv, env: env, capture_path: capture_path_for(argv), capture_on_error: true)
         Log.info { "Finished in #{result.elapsed.total_seconds.round(3)}s (exit=#{result.status.exit_code}): #{argv.join(" ")}" }
-        result.status
+        result
+      end
+
+      private def capture_path_for(argv : Array(String)) : String?
+        report_dir = @report_dir
+        return nil unless report_dir
+        FileUtils.mkdir_p(report_dir)
+        timestamp = Time.utc.to_s("%Y%m%dT%H%M%S.%LZ")
+        base = @command_log_prefix || argv.first? || "command"
+        slug = slugify(base)
+        disambiguator = Random::Secure.hex(4)
+        File.join(report_dir, "#{timestamp}-#{slug}-#{disambiguator}.log")
+      end
+
+      private def log_prefix_for(phase : BuildPhase, step : BuildStep) : String
+        "#{phase.name}-#{step.name}"
+      end
+
+      private def slugify(value : String) : String
+        value.gsub(/[^A-Za-z0-9]+/, "_").gsub(/^_+|_+$/, "").downcase
       end
 
       # Runs `make install`, optionally staging through `DESTDIR`.
@@ -487,8 +519,12 @@ module Bootstrap
       effective_state_path = state_path || (resume && path == DEFAULT_PLAN_PATH ? DEFAULT_STATE_PATH : nil)
       state = effective_state_path ? SysrootBuildState.load_or_init(effective_state_path, plan_path: path, overrides_path: effective_overrides_path, report_dir: report_dir) : nil
       state.try(&.save(effective_state_path.not_nil!)) if effective_state_path
+      effective_runner = runner
+      if runner.is_a?(SystemRunner) && report_dir && runner.report_dir.nil?
+        effective_runner = runner.with_report_dir(report_dir)
+      end
       run_plan(plan,
-        runner,
+        effective_runner,
         phase: phase,
         packages: packages,
         report_dir: report_dir,
@@ -520,8 +556,12 @@ module Bootstrap
         Log.info { describe_phases(phases) }
         return
       end
+      effective_runner = runner
+      if runner.is_a?(SystemRunner) && report_dir && runner.report_dir.nil?
+        effective_runner = runner.with_report_dir(report_dir)
+      end
       phases.each do |phase_plan|
-        run_phase(phase_plan, runner, report_dir: report_dir, state: state, state_path: state_path, resume: resume, allow_outside_rootfs: allow_outside_rootfs)
+        run_phase(phase_plan, effective_runner, report_dir: report_dir, state: state, state_path: state_path, resume: resume, allow_outside_rootfs: allow_outside_rootfs)
       end
     end
 
@@ -754,9 +794,11 @@ module Bootstrap
 
       argv = nil
       exit_code = nil
+      output_log = nil
       if ex.is_a?(CommandFailedError)
         argv = ex.argv
         exit_code = ex.exit_code
+        output_log = ex.output_path
       end
       effective_env = phase.env.dup
       step.env.each { |key, value| effective_env[key] = value }
@@ -783,9 +825,10 @@ module Bootstrap
           "configure_flags" => step.configure_flags,
           "patches"         => step.patches,
         },
-        "command"   => argv,
-        "exit_code" => exit_code,
-        "error"     => ex.message,
+        "command"    => argv,
+        "exit_code"  => exit_code,
+        "output_log" => output_log,
+        "error"      => ex.message,
       }.to_json
 
       File.write(report_path, report)

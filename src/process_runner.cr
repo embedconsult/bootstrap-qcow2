@@ -1,3 +1,4 @@
+require "file_utils"
 require "time"
 
 module Bootstrap
@@ -22,7 +23,8 @@ module Bootstrap
     # Result wrapper for a timed process invocation.
     record Result,
       status : Process::Status,
-      elapsed : Time::Span
+      elapsed : Time::Span,
+      output_path : String? = nil
 
     # Flush output at most 2 times per second.
     # Source: build output throttling requirement (2 Hz).
@@ -34,10 +36,27 @@ module Bootstrap
                  input : IO = STDIN,
                  stdout : IO = STDOUT,
                  stderr : IO = STDERR,
-                 flush_interval : Time::Span = DEFAULT_FLUSH_INTERVAL) : Result
+                 flush_interval : Time::Span = DEFAULT_FLUSH_INTERVAL,
+                 capture_path : String? = nil,
+                 capture_on_error : Bool = false) : Result
       started = Time.monotonic
-      status = run_with_throttled_output(argv, env, input, stdout, stderr, flush_interval)
-      Result.new(status, Time.monotonic - started)
+      capture_io = nil
+      if capture_path
+        FileUtils.mkdir_p(File.dirname(capture_path))
+        capture_io = File.open(capture_path, "w")
+      end
+      status = run_with_throttled_output(argv, env, input, stdout, stderr, flush_interval, capture_io)
+      capture_io.try(&.flush)
+      capture_io.try(&.close)
+      output_path = nil
+      if capture_path
+        if capture_on_error && status.success?
+          File.delete(capture_path) if File.exists?(capture_path)
+        else
+          output_path = capture_path
+        end
+      end
+      Result.new(status, Time.monotonic - started, output_path)
     end
 
     # Run a command with throttled stdout/stderr output.
@@ -46,7 +65,8 @@ module Bootstrap
                                                input : IO,
                                                stdout : IO,
                                                stderr : IO,
-                                               flush_interval : Time::Span) : Process::Status
+                                               flush_interval : Time::Span,
+                                               capture_io : IO?) : Process::Status
       process = Process.new(
         argv[0],
         argv[1..],
@@ -71,13 +91,14 @@ module Bootstrap
       end
 
       done = Channel(Nil).new
+      capture_mutex = capture_io ? Mutex.new : nil
       begin
         spawn do
-          drain_stream(stdout_io) { |bytes| throttler.append_stdout(bytes) }
+          drain_stream(stdout_io, capture_io, capture_mutex) { |bytes| throttler.append_stdout(bytes) }
           done.send(nil)
         end
         spawn do
-          drain_stream(stderr_io) { |bytes| throttler.append_stderr(bytes) }
+          drain_stream(stderr_io, capture_io, capture_mutex) { |bytes| throttler.append_stderr(bytes) }
           done.send(nil)
         end
 
@@ -95,10 +116,17 @@ module Bootstrap
     end
 
     # Drain a process output stream into the provided block.
-    private def self.drain_stream(io : IO, &block : Bytes ->) : Nil
+    private def self.drain_stream(io : IO, capture_io : IO?, capture_mutex : Mutex?, &block : Bytes ->) : Nil
       # 8 KiB read size matches common pipe buffers for steady throughput.
       buffer = Bytes.new(8192)
       while (read = io.read(buffer)) > 0
+        if capture_io
+          if capture_mutex
+            capture_mutex.synchronize { capture_io.write(buffer[0, read]) }
+          else
+            capture_io.write(buffer[0, read])
+          end
+        end
         yield buffer[0, read]
       end
     end
