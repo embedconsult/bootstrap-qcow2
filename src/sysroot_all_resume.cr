@@ -288,6 +288,7 @@ module Bootstrap
             builder.stage_sources(skip_existing: true)
             Log.info { "Restaged missing sources into #{builder.rootfs_dir}/workspace" }
             AlpineSetup.write_resolv_conf(builder.rootfs_dir)
+            Log.info { "Starting runner exe=#{bq2_path} builder_rootfs=#{builder.rootfs_dir.to_s} repo_root=#{repo_root} alpine=#{use_alpine_setup}" }
             status = run_sysroot_runner(
               bq2_path,
               builder,
