@@ -76,7 +76,7 @@ module Bootstrap
         nil,
         nil,
         false,
-        builder.workspace.expand == SysrootWorkspace::DEFAULT_WORKSPACE.expand
+        false
       )
       @plan_path = Path[resolved.plan_path]
       @state_path = Path[resolved.state_path]

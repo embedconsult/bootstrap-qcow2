@@ -72,9 +72,6 @@ module Bootstrap
             nested_rootfs = File.join(rootfs_dir.not_nil!, "workspace/rootfs")
             candidates << nested_rootfs
           end
-          if !rootfs_explicit && allow_workspace_rootfs
-            candidates << "/workspace/rootfs"
-          end
           candidates << rootfs_dir.not_nil! if rootfs_dir
         end
         candidates = candidates.uniq
@@ -890,7 +887,7 @@ module Bootstrap
           nil,
           state_path,
           false,
-          true
+          false
         )
         plan_path = resolved.plan_path
         state_path ||= resolved.state_path
@@ -937,7 +934,7 @@ module Bootstrap
       end
       return CLI.print_help(parser) if help
 
-      resolved = resolve_status_paths(workspace, rootfs, state_path, rootfs_explicit, true)
+      resolved = resolve_status_paths(workspace, rootfs, state_path, rootfs_explicit, false)
       rootfs_dir = resolved.rootfs_dir
       resolved_state_path = resolved.state_path
       raise "Missing sysroot build state at #{resolved_state_path}" unless File.exists?(resolved_state_path)
