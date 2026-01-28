@@ -39,13 +39,16 @@ module Bootstrap
                  flush_interval : Time::Span = DEFAULT_FLUSH_INTERVAL,
                  capture_path : String? = nil,
                  capture_on_error : Bool = false) : Result
-      started = Time.monotonic
       capture_io = nil
       if capture_path
         FileUtils.mkdir_p(File.dirname(capture_path))
         capture_io = File.open(capture_path, "w")
       end
-      status = run_with_throttled_output(argv, env, input, stdout, stderr, flush_interval, capture_io)
+      status = nil
+      elapsed = Time.measure do
+        status = run_with_throttled_output(argv, env, input, stdout, stderr, flush_interval, capture_io)
+      end
+      status = status.not_nil!
       capture_io.try(&.flush)
       capture_io.try(&.close)
       output_path = nil
@@ -56,7 +59,7 @@ module Bootstrap
           output_path = capture_path
         end
       end
-      Result.new(status, Time.monotonic - started, output_path)
+      Result.new(status, elapsed, output_path)
     end
 
     # Run a command with throttled stdout/stderr output.

@@ -24,18 +24,10 @@ module Bootstrap
     DEFAULT_OVERRIDES_PATH = "/var/lib/sysroot-build-overrides.json"
     DEFAULT_REPORT_DIR     = "/var/lib/sysroot-build-reports"
     DEFAULT_STATE_PATH     = SysrootBuildState::DEFAULT_PATH
-    # Default rootfs output directory from SysrootBuilder.phase_specs.
-    WORKSPACE_ROOTFS_PATH        = "/workspace/rootfs"
-    WORKSPACE_ROOTFS_MARKER_PATH = "#{WORKSPACE_ROOTFS_PATH}#{SysrootWorkspace::ROOTFS_MARKER_PATH}"
 
     # Returns true when a rootfs marker is present (env override or marker file).
     def self.rootfs_marker_present? : Bool
       SysrootWorkspace.rootfs_marker_present?
-    end
-
-    # Returns true when the workspace rootfs has been created.
-    def self.workspace_rootfs_present? : Bool
-      File.exists?(WORKSPACE_ROOTFS_MARKER_PATH)
     end
 
     # Resolved paths used by sysroot-status and resume logic.
@@ -51,59 +43,60 @@ module Bootstrap
     # Resolve the rootfs, state, and plan paths using the same logic as sysroot-status.
     def self.resolve_status_paths(workspace : String,
                                   rootfs : String?,
-                                  state_path : String?,
-                                  rootfs_explicit : Bool,
-                                  allow_workspace_rootfs : Bool) : StatusPaths
-      rootfs_dir = rootfs
-      if rootfs_dir.nil? && rootfs_marker_present?
-        rootfs_dir = "/"
-      end
-      rootfs_dir ||= File.join(workspace, "rootfs")
-      resolved_state_path = state_path
-      if resolved_state_path.nil?
-        candidates = [] of String
-        if rootfs_marker_present?
-          candidates << "/"
-        else
-          if rootfs_explicit
-            candidates << rootfs_dir.not_nil! if rootfs_dir
-          end
-          if rootfs_dir
-            nested_rootfs = File.join(rootfs_dir.not_nil!, "workspace/rootfs")
-            candidates << nested_rootfs
-          end
-          candidates << rootfs_dir.not_nil! if rootfs_dir
-        end
-        candidates = candidates.uniq
-        candidates.each do |candidate|
-          candidate_state = File.join(candidate, "var/lib/sysroot-build-state.json")
-          if File.exists?(candidate_state)
-            rootfs_dir = candidate
-            resolved_state_path = candidate_state
-            break
-          end
-        end
-      end
-      resolved_state_path ||= File.join(rootfs_dir, "var/lib/sysroot-build-state.json")
-      unless File.exists?(resolved_state_path)
-        if rootfs_marker_present? && File.exists?(SysrootBuildState::DEFAULT_PATH)
-          resolved_state_path = SysrootBuildState::DEFAULT_PATH
-        end
-      end
+                                  state_path : String?) : StatusPaths
+      rootfs_dir = rootfs || default_rootfs_dir(workspace)
+      resolved_state_path = state_path || resolve_state_path(rootfs_dir, rootfs_explicit: !rootfs.nil?)
       plan_path = File.join(rootfs_dir, "var/lib/sysroot-build-plan.json")
+      if resolved_state_path != state_path && File.exists?(resolved_state_path)
+        rootfs_root = rootfs_root_for_state(resolved_state_path)
+        plan_path = File.join(rootfs_root, "var/lib/sysroot-build-plan.json")
+        rootfs_dir = rootfs_root
+      end
       StatusPaths.new(rootfs_dir, resolved_state_path, plan_path)
+    end
+
+    # Return the default rootfs directory for the provided workspace.
+    private def self.default_rootfs_dir(workspace : String) : String
+      return "/" if rootfs_marker_present?
+      File.join(workspace, "rootfs")
+    end
+
+    private def self.resolve_state_path(rootfs_dir : String, rootfs_explicit : Bool) : String
+      candidates = [] of String
+      if rootfs_marker_present?
+        candidates << "/"
+      else
+        candidates << rootfs_dir if rootfs_explicit
+        candidates << File.join(rootfs_dir, "workspace/rootfs")
+        candidates << rootfs_dir
+      end
+      candidates.uniq.each do |candidate|
+        candidate_state = File.join(candidate, "var/lib/sysroot-build-state.json")
+        return candidate_state if File.exists?(candidate_state)
+      end
+      if rootfs_marker_present? && File.exists?(SysrootBuildState::DEFAULT_PATH)
+        return SysrootBuildState::DEFAULT_PATH
+      end
+      File.join(rootfs_dir, "var/lib/sysroot-build-state.json")
+    end
+
+    private def self.rootfs_root_for_state(state_path : String) : String
+      File.dirname(File.dirname(File.dirname(state_path)))
     end
 
     # Enter the workspace rootfs when the marker is present.
     def self.enter_workspace_rootfs! : Nil
-      return unless workspace_rootfs_present?
-      Log.info { "Entering workspace rootfs at #{WORKSPACE_ROOTFS_PATH}" }
+      return unless SysrootWorkspace.workspace_rootfs_present?
+      rootfs_path = SysrootWorkspace::WORKSPACE_ROOTFS.to_s
+      Log.info { "Entering workspace rootfs at #{rootfs_path}" }
       extra_binds = [] of Tuple(Path, Path)
-      workspace_path = Path["/workspace"]
+      workspace_path = SysrootWorkspace::ROOTFS_WORKSPACE
       if Dir.exists?(workspace_path)
         extra_binds << {workspace_path, workspace_path}
+      elsif SysrootWorkspace.workspace_bind_required?
+        Log.warn { "Expected #{SysrootWorkspace::ROOTFS_WORKSPACE} bind mount is missing; namespace entry may fail" }
       end
-      SysrootNamespace.enter_rootfs(WORKSPACE_ROOTFS_PATH, extra_binds: extra_binds)
+      SysrootNamespace.enter_rootfs(rootfs_path, extra_binds: extra_binds)
     end
 
     # Raised when a command fails during a SystemRunner invocation.
@@ -264,12 +257,10 @@ module Bootstrap
               run_cmd(["install", "-m", "0755", artifact, "#{bin_prefix}/bin/"], env: env)
             end
           when "crystal-build"
-            if File.exists?("shard.yml")
-              if skip_shards_install?(step, env)
-                Log.info { "Skipping shards install for #{step.name} (#{shards_install_skip_reason(step, env)})" }
-              else
-                run_cmd(["shards", "install"], env: env)
-              end
+            if File.exists?("shard.yml") && run_shards_install?(env)
+              run_cmd(["shards", "install"], env: env)
+            elsif File.exists?("shard.yml")
+              Log.info { "Skipping shards install for #{step.name} (prefetched during download phase)" }
             end
             run_cmd(["crystal", "build"] + step.configure_flags, env: env)
             bin_prefix = destdir ? "#{destdir}#{install_prefix}" : install_prefix
@@ -298,30 +289,9 @@ module Bootstrap
         end
       end
 
-      # Returns true when shards install should be skipped.
-      private def skip_shards_install?(step : BuildStep, env : Hash(String, String)) : Bool
-        # Shards itself is built from a release tarball and should not run
-        # `shards install` by default; it adds unnecessary dependency churn.
-        return true if step.name == "shards" && !force_shards_install?(env)
-        skip_shards_install_env?(env)
-      end
-
-      private def shards_install_skip_reason(step : BuildStep, env : Hash(String, String)) : String
-        return "default for shards" if step.name == "shards" && !force_shards_install?(env)
-        return "BQ2_SKIP_SHARDS_INSTALL=1" if skip_shards_install_env?(env)
-        "unspecified"
-      end
-
-      private def force_shards_install?(env : Hash(String, String)) : Bool
-        value = env["BQ2_FORCE_SHARDS_INSTALL"]?.try(&.strip.downcase)
-        return false unless value
-        !(value.empty? || value == "0" || value == "false" || value == "no")
-      end
-
-      private def skip_shards_install_env?(env : Hash(String, String)) : Bool
-        value = env["BQ2_SKIP_SHARDS_INSTALL"]?.try(&.strip.downcase)
-        return false unless value
-        !(value.empty? || value == "0" || value == "false" || value == "no")
+      # Returns true when shards install should be performed during build steps.
+      private def run_shards_install?(env : Hash(String, String)) : Bool
+        truthy_env?(env["BQ2_FORCE_SHARDS_INSTALL"]?)
       end
 
       # Many release tarballs include pre-generated autotools artifacts
@@ -451,6 +421,14 @@ module Bootstrap
         env
       end
 
+      # Returns true when a string environment value should be treated as true.
+      private def truthy_env?(value : String?) : Bool
+        return false unless value
+        normalized = value.strip.downcase
+        return false if normalized.empty?
+        !(%w[0 false no].includes?(normalized))
+      end
+
       # Returns true when a CMakeLists.txt file exists for the step.
       private def cmake_lists_present?(step : BuildStep) : Bool
         source_dir = cmake_source_dir_for(step)
@@ -574,11 +552,11 @@ module Bootstrap
                        resume : Bool = true,
                        allow_outside_rootfs : Bool = false)
       effective_phase = phase
-      if phase.environment.starts_with?("rootfs-") && !rootfs_marker_present? && workspace_rootfs_present?
+      if phase.environment.starts_with?("rootfs-") && !rootfs_marker_present? && SysrootWorkspace.workspace_rootfs_present?
         effective_phase = apply_rootfs_env_override(phase)
       end
       if !allow_outside_rootfs && effective_phase.environment.starts_with?("rootfs-") && !rootfs_marker_present?
-        enter_workspace_rootfs! if workspace_rootfs_present?
+        enter_workspace_rootfs! if SysrootWorkspace.workspace_rootfs_present?
       end
       if !allow_outside_rootfs && effective_phase.environment.starts_with?("rootfs-") && !rootfs_marker_present?
         raise "Refusing to run #{effective_phase.name} (env=#{effective_phase.environment}) outside the produced rootfs (missing #{SysrootWorkspace::ROOTFS_MARKER_PATH})"
@@ -706,7 +684,7 @@ module Bootstrap
 
     private def self.rootfs_context_label : String
       return "Alpine" unless rootfs_marker_present?
-      return "workspace-BQ2" if File.exists?(WORKSPACE_ROOTFS_MARKER_PATH)
+      return "workspace-BQ2" if SysrootWorkspace.workspace_rootfs_present?
       "seed-BQ2"
     end
 
@@ -926,13 +904,7 @@ module Bootstrap
       end
 
       if !rootfs_requested && plan_path == SysrootRunner::DEFAULT_PLAN_PATH && !plan_explicit
-        resolved = resolve_status_paths(
-          SysrootWorkspace.default_workspace.to_s,
-          nil,
-          state_path,
-          false,
-          false
-        )
+        resolved = resolve_status_paths(SysrootWorkspace.default_workspace.to_s, nil, state_path)
         plan_path = resolved.plan_path
         state_path ||= resolved.state_path
       end
@@ -966,20 +938,17 @@ module Bootstrap
       workspace = SysrootWorkspace.default_workspace.to_s
       rootfs : String? = nil
       state_path : String? = nil
-      rootfs_explicit = false
 
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-status [options]") do |p|
         p.on("-w DIR", "--workspace=DIR", "Sysroot workspace directory (default: #{workspace})") { |val| workspace = val }
         p.on("--rootfs=PATH", "Prepared rootfs directory (default: <workspace>/rootfs)") do |val|
           rootfs = val
-          rootfs_explicit = true
         end
         p.on("--state=PATH", "Explicit sysroot build state JSON path") { |val| state_path = val }
       end
       return CLI.print_help(parser) if help
 
-      resolved = resolve_status_paths(workspace, rootfs, state_path, rootfs_explicit, false)
-      rootfs_dir = resolved.rootfs_dir
+      resolved = resolve_status_paths(workspace, rootfs, state_path)
       resolved_state_path = resolved.state_path
       raise "Missing sysroot build state at #{resolved_state_path}" unless File.exists?(resolved_state_path)
 
@@ -987,7 +956,6 @@ module Bootstrap
       puts(state.progress.current_phase || "(none)")
 
       plan_path = resolved.plan_path
-      plan_path = state.plan_path unless File.exists?(plan_path)
       if File.exists?(plan_path)
         plan = BuildPlan.from_json(File.read(plan_path))
         next_phase = plan.phases.find do |phase|
