@@ -261,6 +261,8 @@ module Bootstrap
       resume_step : String? = nil
       resume_plan_path : Path? = nil
       resume_state_path : Path? = nil
+      runner_plan_path : Path? = nil
+      runner_state_path : Path? = nil
       if resume
         decision = SysrootAllResume.new(builder).decide
         puts decision.log_message
@@ -270,6 +272,8 @@ module Bootstrap
         resume_step = decision.resume_step
         resume_plan_path = decision.plan_path
         resume_state_path = decision.state_path
+        runner_plan_path = map_path_for_runner(resume_plan_path, builder)
+        runner_state_path = map_path_for_runner(resume_state_path, builder)
       end
       puts "stage_order=#{stages.join(" -> ")} start_stage=#{start_stage}"
 
@@ -297,8 +301,8 @@ module Bootstrap
               repo_root,
               use_alpine_setup,
               "all",
-              plan_path: resume_plan_path,
-              state_path: resume_state_path,
+              plan_path: runner_plan_path,
+              state_path: runner_state_path,
             )
             unless status.success?
               STDERR.puts "sysroot-runner failed with exit code #{status.exit_code}"
@@ -316,8 +320,8 @@ module Bootstrap
                 repo_root,
                 false,
                 "finalize-rootfs",
-                plan_path: resume_plan_path,
-                state_path: resume_state_path,
+                plan_path: runner_plan_path,
+                state_path: runner_state_path,
               )
               unless status.success?
                 STDERR.puts "finalize-rootfs failed with exit code #{status.exit_code}"
@@ -409,6 +413,22 @@ module Bootstrap
         output: STDOUT,
         error: STDERR,
       )
+    end
+
+    private def self.map_path_for_runner(path : Path?, builder : SysrootBuilder) : Path?
+      return nil unless path
+      absolute = path.expand
+      rootfs_dir = builder.rootfs_dir.expand
+      workspace_rootfs = (rootfs_dir / WORKSPACE_ROOTFS_RELATIVE).expand
+      if absolute.to_s.starts_with?(workspace_rootfs.to_s)
+        relative = absolute.relative_to(workspace_rootfs)
+        return Path["/workspace/rootfs"] / relative
+      end
+      if absolute.to_s.starts_with?(rootfs_dir.to_s)
+        relative = absolute.relative_to(rootfs_dir)
+        return Path["/"] / relative
+      end
+      path
     end
 
     # Convert a host path into a sysroot-relative path when it lives under the rootfs.
