@@ -10,6 +10,7 @@ require "./build_plan"
 require "./build_plan_utils"
 require "./cli"
 require "./sysroot_runner"
+require "./sysroot_workspace"
 require "./tarball"
 
 module Bootstrap
@@ -113,7 +114,7 @@ module Bootstrap
       patch_overrides : Hash(String, Array(String)) = {} of String => Array(String)
 
     # Create a sysroot builder rooted at the workspace directory.
-    def initialize(@workspace : Path = Path["data/sysroot"],
+    def initialize(@workspace : Path = SysrootWorkspace.default_workspace,
                    @architecture : String = DEFAULT_ARCH,
                    @branch : String = DEFAULT_BRANCH,
                    @base_version : String = DEFAULT_BASE_VERSION,
@@ -1453,7 +1454,7 @@ module Bootstrap
     # Build or reuse a sysroot workspace and optionally emit a tarball.
     private def self.run_builder(args : Array(String)) : Int32
       output = Path["sysroot.tar.gz"]
-      workspace = Path["data/sysroot"]
+      workspace = SysrootWorkspace.default_workspace
       architecture = SysrootBuilder::DEFAULT_ARCH
       branch = SysrootBuilder::DEFAULT_BRANCH
       base_version = SysrootBuilder::DEFAULT_BASE_VERSION

@@ -3,6 +3,7 @@ require "log"
 require "path"
 require "./alpine_setup"
 require "./cli"
+require "./sysroot_workspace"
 
 lib LibC
   # Linux syscalls documented in https://docs.kernel.org/:
@@ -87,7 +88,7 @@ module Bootstrap
 
     # Enter the rootfs namespace and exec the requested command.
     private def self.run_namespace(args : Array(String)) : Int32
-      rootfs = "data/sysroot/rootfs"
+      rootfs = SysrootWorkspace.default_rootfs.to_s
       extra_binds = [] of Tuple(Path, Path)
       command = [] of String
       codex_mode = false

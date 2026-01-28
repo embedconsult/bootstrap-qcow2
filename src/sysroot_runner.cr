@@ -12,6 +12,7 @@ require "./cli"
 require "./process_runner"
 require "./sysroot_namespace"
 require "./sysroot_build_state"
+require "./sysroot_workspace"
 
 module Bootstrap
   # SysrootRunner houses the logic that replays build steps inside the chroot.
@@ -23,20 +24,13 @@ module Bootstrap
     DEFAULT_OVERRIDES_PATH = "/var/lib/sysroot-build-overrides.json"
     DEFAULT_REPORT_DIR     = "/var/lib/sysroot-build-reports"
     DEFAULT_STATE_PATH     = SysrootBuildState::DEFAULT_PATH
-    ROOTFS_MARKER_PATH     = "/.bq2-rootfs"
-    ROOTFS_ENV_FLAG        = "BQ2_ROOTFS"
     # Default rootfs output directory from SysrootBuilder.phase_specs.
     WORKSPACE_ROOTFS_PATH        = "/workspace/rootfs"
-    WORKSPACE_ROOTFS_MARKER_PATH = "#{WORKSPACE_ROOTFS_PATH}#{ROOTFS_MARKER_PATH}"
+    WORKSPACE_ROOTFS_MARKER_PATH = "#{WORKSPACE_ROOTFS_PATH}#{SysrootWorkspace::ROOTFS_MARKER_PATH}"
 
     # Returns true when a rootfs marker is present (env override or marker file).
     def self.rootfs_marker_present? : Bool
-      if value = ENV[ROOTFS_ENV_FLAG]?
-        normalized = value.strip.downcase
-        return false if normalized.empty? || normalized == "0" || normalized == "false" || normalized == "no"
-        return true
-      end
-      File.exists?(ROOTFS_MARKER_PATH)
+      SysrootWorkspace.rootfs_marker_present?
     end
 
     # Returns true when the workspace rootfs has been created.
@@ -491,7 +485,7 @@ module Bootstrap
         enter_workspace_rootfs! if workspace_rootfs_present?
       end
       if !allow_outside_rootfs && effective_phase.environment.starts_with?("rootfs-") && !rootfs_marker_present?
-        raise "Refusing to run #{effective_phase.name} (env=#{effective_phase.environment}) outside the produced rootfs (missing #{ROOTFS_MARKER_PATH})"
+        raise "Refusing to run #{effective_phase.name} (env=#{effective_phase.environment}) outside the produced rootfs (missing #{SysrootWorkspace::ROOTFS_MARKER_PATH})"
       end
       Log.info { "Executing phase #{effective_phase.name} (env=#{effective_phase.environment}, workspace=#{effective_phase.workspace})" }
       Log.info { "**** #{effective_phase.description} ****" }
@@ -853,7 +847,7 @@ module Bootstrap
 
     # Print the current build status and next phase/step.
     private def self.run_status(args : Array(String)) : Int32
-      workspace = "data/sysroot"
+      workspace = SysrootWorkspace.default_workspace.to_s
       rootfs : String? = nil
       state_path : String? = nil
       rootfs_explicit = false

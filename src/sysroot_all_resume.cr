@@ -6,6 +6,7 @@ require "./build_plan"
 require "./cli"
 require "./sysroot_build_state"
 require "./sysroot_builder"
+require "./sysroot_workspace"
 
 module Bootstrap
   # Determines the earliest resume stage for `bq2 --all --resume`.
@@ -174,7 +175,7 @@ module Bootstrap
 
     # Execute the full --all flow (download, plan, runner, tarball).
     private def self.run_all(args : Array(String)) : Int32
-      workspace = Path["data/sysroot"]
+      workspace = SysrootWorkspace.default_workspace
       architecture = SysrootBuilder::DEFAULT_ARCH
       branch = SysrootBuilder::DEFAULT_BRANCH
       base_version = SysrootBuilder::DEFAULT_BASE_VERSION
@@ -332,7 +333,7 @@ module Bootstrap
 
     # Print the current resume decision and help output.
     private def self.run_default(args : Array(String)) : Int32
-      workspace = Path["data/sysroot"]
+      workspace = SysrootWorkspace.default_workspace
       builder = SysrootBuilder.new(workspace: workspace)
       begin
         decision = SysrootAllResume.new(builder).decide
