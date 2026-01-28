@@ -1273,6 +1273,7 @@ module Bootstrap
       env = env_overrides_for(pkg, spec)
       return llvm_stage_steps(pkg, spec, build_root, env) if pkg.name == "llvm-project"
 
+      clean_build = clean_build_for(pkg, spec)
       [BuildStep.new(
         name: pkg.name,
         strategy: pkg.strategy,
@@ -1281,6 +1282,7 @@ module Bootstrap
         patches: patches_for(pkg, spec),
         env: env,
         build_dir: build_dir_for(pkg, spec),
+        clean_build: clean_build,
       )]
     end
 
@@ -1302,6 +1304,12 @@ module Bootstrap
     private def env_overrides_for(pkg : PackageSpec, spec : PhaseSpec) : Hash(String, String)
       overrides = spec.env_overrides[pkg.name]? || ({} of String => String)
       overrides.dup
+    end
+
+    # Ensure clean rebuilds when a package is installed into multiple prefixes.
+    private def clean_build_for(pkg : PackageSpec, spec : PhaseSpec) : Bool
+      return false unless pkg.name == "bdwgc"
+      spec.name == "sysroot-from-alpine" || spec.name == "system-from-sysroot"
     end
 
     # Expand llvm-project into a two-stage CMake build using the sysroot toolchain.
