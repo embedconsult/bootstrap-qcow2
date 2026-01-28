@@ -206,8 +206,8 @@ module Bootstrap
             end
           when "crystal-build"
             if File.exists?("shard.yml")
-              if skip_shards_install?(env)
-                Log.info { "Skipping shards install for #{step.name} (BQ2_SKIP_SHARDS_INSTALL=1)" }
+              if skip_shards_install?(step, env)
+                Log.info { "Skipping shards install for #{step.name} (#{shards_install_skip_reason(step, env)})" }
               else
                 run_cmd(["shards", "install"], env: env)
               end
@@ -239,8 +239,27 @@ module Bootstrap
         end
       end
 
-      # Returns true when the environment requests skipping shards install.
-      private def skip_shards_install?(env : Hash(String, String)) : Bool
+      # Returns true when shards install should be skipped.
+      private def skip_shards_install?(step : BuildStep, env : Hash(String, String)) : Bool
+        # Shards itself is built from a release tarball and should not run
+        # `shards install` by default; it adds unnecessary dependency churn.
+        return true if step.name == "shards" && !force_shards_install?(env)
+        skip_shards_install_env?(env)
+      end
+
+      private def shards_install_skip_reason(step : BuildStep, env : Hash(String, String)) : String
+        return "default for shards" if step.name == "shards" && !force_shards_install?(env)
+        return "BQ2_SKIP_SHARDS_INSTALL=1" if skip_shards_install_env?(env)
+        "unspecified"
+      end
+
+      private def force_shards_install?(env : Hash(String, String)) : Bool
+        value = env["BQ2_FORCE_SHARDS_INSTALL"]?.try(&.strip.downcase)
+        return false unless value
+        !(value.empty? || value == "0" || value == "false" || value == "no")
+      end
+
+      private def skip_shards_install_env?(env : Hash(String, String)) : Bool
         value = env["BQ2_SKIP_SHARDS_INSTALL"]?.try(&.strip.downcase)
         return false unless value
         !(value.empty? || value == "0" || value == "false" || value == "no")
