@@ -62,6 +62,9 @@ module Bootstrap
       resolved_state_path = state_path
       if resolved_state_path.nil?
         candidates = [] of String
+        if !rootfs_explicit && allow_workspace_rootfs
+          candidates << "/workspace/rootfs"
+        end
         if rootfs_dir
           nested_rootfs = File.join(rootfs_dir.not_nil!, "workspace/rootfs")
           candidates << nested_rootfs
@@ -70,7 +73,6 @@ module Bootstrap
           candidates << rootfs_dir.not_nil! if rootfs_dir
           candidates << "/workspace/rootfs" if allow_workspace_rootfs
         else
-          candidates << "/workspace/rootfs" if allow_workspace_rootfs
           candidates << rootfs_dir.not_nil! if rootfs_dir
         end
         candidates << "/" if rootfs_marker_present?
@@ -829,6 +831,7 @@ module Bootstrap
     # Run build plan phases/steps inside the sysroot.
     private def self.run_runner(args : Array(String)) : Int32
       plan_path = SysrootRunner::DEFAULT_PLAN_PATH
+      plan_explicit = false
       phase : String? = nil
       packages = [] of String
       overrides_path : String? = nil
@@ -842,7 +845,10 @@ module Bootstrap
       extra_binds = [] of Tuple(Path, Path)
       run_alpine_setup = false
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-runner [options]") do |p|
-        p.on("--plan PATH", "Read the build plan from PATH (default: #{SysrootRunner::DEFAULT_PLAN_PATH})") { |path| plan_path = path }
+        p.on("--plan PATH", "Read the build plan from PATH (default: #{SysrootRunner::DEFAULT_PLAN_PATH})") do |path|
+          plan_path = path
+          plan_explicit = true
+        end
         p.on("--phase NAME", "Select build phase to run (default: first phase; use 'all' for every phase)") { |name| phase = name }
         p.on("--package NAME", "Only run the named package(s); repeatable") { |name| packages << name }
         p.on("--overrides PATH", "Apply runtime overrides JSON (default: #{SysrootRunner::DEFAULT_OVERRIDES_PATH} when using the default plan path)") do |path|
@@ -875,6 +881,18 @@ module Bootstrap
         SysrootNamespace.enter_rootfs_with_setup(rootfs_value,
           extra_binds: extra_binds,
           run_alpine_setup: run_alpine_setup)
+      end
+
+      if plan_path == SysrootRunner::DEFAULT_PLAN_PATH && !plan_explicit
+        resolved = resolve_status_paths(
+          SysrootWorkspace.default_workspace.to_s,
+          nil,
+          state_path,
+          false,
+          true
+        )
+        plan_path = resolved.plan_path
+        state_path ||= resolved.state_path
       end
 
       SysrootRunner.run_plan(
