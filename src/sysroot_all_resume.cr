@@ -395,10 +395,10 @@ module Bootstrap
         bind_spec,
       ]
       if plan_path
-        argv.concat(["--plan", plan_path.to_s])
+        argv.concat(["--plan", rootfs_relative_path(plan_path, builder.rootfs_dir)])
       end
       if state_path
-        argv.concat(["--state-path", state_path.to_s])
+        argv.concat(["--state-path", rootfs_relative_path(state_path, builder.rootfs_dir)])
       end
       argv << "--alpine-setup" if use_alpine_setup
       argv.concat(["--phase", phase])
@@ -409,6 +409,23 @@ module Bootstrap
         output: STDOUT,
         error: STDERR,
       )
+    end
+
+    # Convert a host path into a sysroot-relative path when it lives under the rootfs.
+    #
+    # This ensures runner arguments point at the correct locations after entering the
+    # sysroot namespace.
+    private def self.rootfs_relative_path(path : Path, rootfs_dir : Path) : String
+      expanded_path = path.expand
+      expanded_rootfs = rootfs_dir.expand
+      path_str = expanded_path.to_s
+      rootfs_str = expanded_rootfs.to_s
+      if path_str.starts_with?(rootfs_str)
+        suffix = path_str[rootfs_str.size..]
+        return "/" if suffix.empty?
+        return suffix.starts_with?("/") ? suffix : "/#{suffix}"
+      end
+      path.to_s
     end
 
     # Log the duration of a stage for the --all workflow.
