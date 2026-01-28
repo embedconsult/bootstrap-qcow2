@@ -62,20 +62,21 @@ module Bootstrap
       resolved_state_path = state_path
       if resolved_state_path.nil?
         candidates = [] of String
-        if !rootfs_explicit && allow_workspace_rootfs
-          candidates << "/workspace/rootfs"
-        end
-        if rootfs_dir
-          nested_rootfs = File.join(rootfs_dir.not_nil!, "workspace/rootfs")
-          candidates << nested_rootfs
-        end
-        if rootfs_explicit
-          candidates << rootfs_dir.not_nil! if rootfs_dir
-          candidates << "/workspace/rootfs" if allow_workspace_rootfs
+        if rootfs_marker_present?
+          candidates << "/"
         else
+          if rootfs_explicit
+            candidates << rootfs_dir.not_nil! if rootfs_dir
+          end
+          if rootfs_dir
+            nested_rootfs = File.join(rootfs_dir.not_nil!, "workspace/rootfs")
+            candidates << nested_rootfs
+          end
+          if !rootfs_explicit && allow_workspace_rootfs
+            candidates << "/workspace/rootfs"
+          end
           candidates << rootfs_dir.not_nil! if rootfs_dir
         end
-        candidates << "/" if rootfs_marker_present?
         candidates = candidates.uniq
         candidates.each do |candidate|
           candidate_state = File.join(candidate, "var/lib/sysroot-build-state.json")
