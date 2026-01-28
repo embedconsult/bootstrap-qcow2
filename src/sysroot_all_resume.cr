@@ -414,11 +414,12 @@ module Bootstrap
     # Log the duration of a stage for the --all workflow.
     private def self.time_stage(stage : String, &block : -> T) : T forall T
       Log.info { "Stage #{stage} starting" }
-      started_at = Time.instant
-      result = yield
-      elapsed = Time.instant - started_at
+      result = nil
+      elapsed = Time.measure do
+        result = yield
+      end
       Log.info { "Stage #{stage} finished in #{elapsed.total_seconds.round(2)}s" }
-      result
+      result.not_nil!
     end
 
     # Copy the produced rootfs tarball into the workspace source cache.
