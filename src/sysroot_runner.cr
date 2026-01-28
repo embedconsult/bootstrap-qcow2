@@ -718,7 +718,7 @@ module Bootstrap
     end
 
     private def self.stage_iteration_files_for_destdirs(plan : BuildPlan, overrides_path : String?) : Nil
-      plan_json = plan.to_json
+      plan_json = plan.to_pretty_json
       overrides_json = overrides_path && File.exists?(overrides_path) ? File.read(overrides_path) : nil
       plan.phases.each do |phase|
         next unless destdir = phase.destdir
@@ -829,7 +829,7 @@ module Bootstrap
         "exit_code"  => exit_code,
         "output_log" => output_log,
         "error"      => ex.message,
-      }.to_json
+      }.to_pretty_json
 
       File.write(report_path, report)
       Log.error { "Wrote build failure report to #{report_path}" }

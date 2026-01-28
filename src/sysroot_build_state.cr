@@ -119,7 +119,7 @@ module Bootstrap
     # Persist the state JSON to disk.
     def save(path : String = DEFAULT_PATH) : Nil
       FileUtils.mkdir_p(Path[path].parent)
-      File.write(path, to_json)
+      File.write(path, to_pretty_json)
     end
 
     # Returns true when the given *step_name* has already completed successfully
