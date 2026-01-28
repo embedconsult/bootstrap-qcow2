@@ -983,6 +983,10 @@ module Bootstrap
           env: rootfs_env,
           package_allowlist: nil,
           env_overrides: {
+            "fossil" => {
+              # autosetup-find-tclsh uses CC_FOR_BUILD when bootstrapping jimsh0.
+              "CC_FOR_BUILD" => "#{sysroot_prefix}/bin/clang",
+            },
             "git" => {
               "MAKEFLAGS"  => "-e",
               "NO_DOCS"    => "1",
