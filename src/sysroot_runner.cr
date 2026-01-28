@@ -38,6 +38,62 @@ module Bootstrap
       File.exists?(WORKSPACE_ROOTFS_MARKER_PATH)
     end
 
+    # Resolved paths used by sysroot-status and resume logic.
+    struct StatusPaths
+      getter rootfs_dir : String
+      getter state_path : String
+      getter plan_path : String
+
+      def initialize(@rootfs_dir : String, @state_path : String, @plan_path : String)
+      end
+    end
+
+    # Resolve the rootfs, state, and plan paths using the same logic as sysroot-status.
+    def self.resolve_status_paths(workspace : String,
+                                  rootfs : String?,
+                                  state_path : String?,
+                                  rootfs_explicit : Bool,
+                                  allow_workspace_rootfs : Bool) : StatusPaths
+      rootfs_dir = rootfs
+      if rootfs_dir.nil? && rootfs_marker_present?
+        rootfs_dir = "/"
+      end
+      rootfs_dir ||= File.join(workspace, "rootfs")
+      resolved_state_path = state_path
+      if resolved_state_path.nil?
+        candidates = [] of String
+        if rootfs_dir
+          nested_rootfs = File.join(rootfs_dir.not_nil!, "workspace/rootfs")
+          candidates << nested_rootfs
+        end
+        if rootfs_explicit
+          candidates << rootfs_dir.not_nil! if rootfs_dir
+          candidates << "/workspace/rootfs" if allow_workspace_rootfs
+        else
+          candidates << "/workspace/rootfs" if allow_workspace_rootfs
+          candidates << rootfs_dir.not_nil! if rootfs_dir
+        end
+        candidates << "/" if rootfs_marker_present?
+        candidates = candidates.uniq
+        candidates.each do |candidate|
+          candidate_state = File.join(candidate, "var/lib/sysroot-build-state.json")
+          if File.exists?(candidate_state)
+            rootfs_dir = candidate
+            resolved_state_path = candidate_state
+            break
+          end
+        end
+      end
+      resolved_state_path ||= File.join(rootfs_dir, "var/lib/sysroot-build-state.json")
+      unless File.exists?(resolved_state_path)
+        if rootfs_marker_present? && File.exists?(SysrootBuildState::DEFAULT_PATH)
+          resolved_state_path = SysrootBuildState::DEFAULT_PATH
+        end
+      end
+      plan_path = File.join(rootfs_dir, "var/lib/sysroot-build-plan.json")
+      StatusPaths.new(rootfs_dir, resolved_state_path, plan_path)
+    end
+
     # Enter the workspace rootfs when the marker is present.
     def self.enter_workspace_rootfs! : Nil
       return unless workspace_rootfs_present?
@@ -862,46 +918,15 @@ module Bootstrap
       end
       return CLI.print_help(parser) if help
 
-      rootfs_dir = rootfs
-      if rootfs_dir.nil? && SysrootRunner.rootfs_marker_present?
-        rootfs_dir = "/"
-      end
-      rootfs_dir ||= File.join(workspace, "rootfs")
-      resolved_state_path = state_path
-      if resolved_state_path.nil?
-        candidates = [] of String
-        if rootfs_dir
-          nested_rootfs = File.join(rootfs_dir.not_nil!, "workspace/rootfs")
-          candidates << nested_rootfs
-        end
-        if rootfs_explicit
-          candidates << rootfs_dir.not_nil! if rootfs_dir
-          candidates << "/workspace/rootfs"
-        else
-          candidates << "/workspace/rootfs"
-          candidates << rootfs_dir.not_nil! if rootfs_dir
-        end
-        candidates << "/"
-        candidates = candidates.uniq
-        candidates.each do |candidate|
-          candidate_state = File.join(candidate, "var/lib/sysroot-build-state.json")
-          if File.exists?(candidate_state)
-            rootfs_dir = candidate
-            resolved_state_path = candidate_state
-            break
-          end
-        end
-      end
-      resolved_state_path ||= File.join(rootfs_dir, "var/lib/sysroot-build-state.json")
-      unless File.exists?(resolved_state_path)
-        resolved_state_path = SysrootBuildState::DEFAULT_PATH if File.exists?(SysrootBuildState::DEFAULT_PATH)
-      end
+      resolved = resolve_status_paths(workspace, rootfs, state_path, rootfs_explicit, true)
+      rootfs_dir = resolved.rootfs_dir
+      resolved_state_path = resolved.state_path
       raise "Missing sysroot build state at #{resolved_state_path}" unless File.exists?(resolved_state_path)
 
       state = SysrootBuildState.load(resolved_state_path)
       puts(state.progress.current_phase || "(none)")
 
-      plan_path = File.join(rootfs_dir, "var/lib/sysroot-build-plan.json")
+      plan_path = resolved.plan_path
       plan_path = state.plan_path unless File.exists?(plan_path)
       if File.exists?(plan_path)
         plan = BuildPlan.from_json(File.read(plan_path))
