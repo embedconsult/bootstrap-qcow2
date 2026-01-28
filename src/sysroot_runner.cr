@@ -45,8 +45,13 @@ module Bootstrap
                                   rootfs : String?,
                                   state_path : String?) : StatusPaths
       rootfs_dir = rootfs || default_rootfs_dir(workspace)
-      resolved_state_path = state_path || File.join(rootfs_dir, "var/lib/sysroot-build-state.json")
+      resolved_state_path = state_path || resolve_state_path(rootfs_dir, rootfs_explicit: !rootfs.nil?)
       plan_path = File.join(rootfs_dir, "var/lib/sysroot-build-plan.json")
+      if resolved_state_path != state_path && File.exists?(resolved_state_path)
+        rootfs_root = rootfs_root_for_state(resolved_state_path)
+        plan_path = File.join(rootfs_root, "var/lib/sysroot-build-plan.json")
+        rootfs_dir = rootfs_root
+      end
       StatusPaths.new(rootfs_dir, resolved_state_path, plan_path)
     end
 
@@ -54,6 +59,29 @@ module Bootstrap
     private def self.default_rootfs_dir(workspace : String) : String
       return "/" if rootfs_marker_present?
       File.join(workspace, "rootfs")
+    end
+
+    private def self.resolve_state_path(rootfs_dir : String, rootfs_explicit : Bool) : String
+      candidates = [] of String
+      if rootfs_marker_present?
+        candidates << "/"
+      else
+        candidates << rootfs_dir if rootfs_explicit
+        candidates << File.join(rootfs_dir, "workspace/rootfs")
+        candidates << rootfs_dir
+      end
+      candidates.uniq.each do |candidate|
+        candidate_state = File.join(candidate, "var/lib/sysroot-build-state.json")
+        return candidate_state if File.exists?(candidate_state)
+      end
+      if rootfs_marker_present? && File.exists?(SysrootBuildState::DEFAULT_PATH)
+        return SysrootBuildState::DEFAULT_PATH
+      end
+      File.join(rootfs_dir, "var/lib/sysroot-build-state.json")
+    end
+
+    private def self.rootfs_root_for_state(state_path : String) : String
+      File.dirname(File.dirname(File.dirname(state_path)))
     end
 
     # Enter the workspace rootfs when the marker is present.
