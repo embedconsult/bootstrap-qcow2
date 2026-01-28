@@ -916,6 +916,7 @@ module Bootstrap
       end
       return CLI.print_help(parser) if help
 
+      rootfs_requested = !rootfs.nil?
       if rootfs
         rootfs_value = rootfs.not_nil!
         raise "Rootfs path does not exist: #{rootfs_value}" unless Dir.exists?(rootfs_value)
@@ -924,7 +925,7 @@ module Bootstrap
           run_alpine_setup: run_alpine_setup)
       end
 
-      if plan_path == SysrootRunner::DEFAULT_PLAN_PATH && !plan_explicit
+      if !rootfs_requested && plan_path == SysrootRunner::DEFAULT_PLAN_PATH && !plan_explicit
         resolved = resolve_status_paths(
           SysrootWorkspace.default_workspace.to_s,
           nil,

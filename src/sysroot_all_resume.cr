@@ -261,6 +261,8 @@ module Bootstrap
       start_stage = "download-sources"
       resume_phase : String? = nil
       resume_step : String? = nil
+      resume_plan_path : Path? = nil
+      resume_state_path : Path? = nil
       if resume
         decision = SysrootAllResume.new(builder).decide
         Log.info { decision.log_message }
@@ -268,6 +270,8 @@ module Bootstrap
         start_stage = decision.stage
         resume_phase = decision.resume_phase
         resume_step = decision.resume_step
+        resume_plan_path = decision.plan_path
+        resume_state_path = decision.state_path
       end
       Log.info { "stage_order=#{stages.join(" -> ")} start_stage=#{start_stage}" }
 
@@ -294,6 +298,8 @@ module Bootstrap
               repo_root,
               use_alpine_setup,
               "all",
+              plan_path: resume_plan_path,
+              state_path: resume_state_path,
             )
             unless status.success?
               STDERR.puts "sysroot-runner failed with exit code #{status.exit_code}"
@@ -311,6 +317,8 @@ module Bootstrap
                 repo_root,
                 false,
                 "finalize-rootfs",
+                plan_path: resume_plan_path,
+                state_path: resume_state_path,
               )
               unless status.success?
                 STDERR.puts "finalize-rootfs failed with exit code #{status.exit_code}"
@@ -376,7 +384,9 @@ module Bootstrap
                                         builder : SysrootBuilder,
                                         repo_root : Path,
                                         use_alpine_setup : Bool,
-                                        phase : String) : Process::Status
+                                        phase : String,
+                                        plan_path : Path? = nil,
+                                        state_path : Path? = nil) : Process::Status
       bind_spec = "#{repo_root}:#{repo_root}"
       argv = [
         "sysroot-runner",
@@ -385,6 +395,12 @@ module Bootstrap
         "--bind",
         bind_spec,
       ]
+      if plan_path
+        argv.concat(["--plan", plan_path.to_s])
+      end
+      if state_path
+        argv.concat(["--state-path", state_path.to_s])
+      end
       argv << "--alpine-setup" if use_alpine_setup
       argv.concat(["--phase", phase])
       Process.run(
