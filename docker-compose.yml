@@ -4,6 +4,10 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: bootstrap-qcow2
+    volumes:
+      - type: bind
+        source: .
+        target: /work/bootstrap-qcow2
     security_opt:
       - seccomp=unconfined
       - apparmor=unconfined
