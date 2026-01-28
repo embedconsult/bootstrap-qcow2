@@ -511,8 +511,8 @@ module Bootstrap
       effective_overrides_path =
         if overrides_path
           overrides_path
-        elsif use_default_overrides && path == DEFAULT_PLAN_PATH
-          DEFAULT_OVERRIDES_PATH
+        elsif use_default_overrides
+          default_overrides_path_for_plan(path)
         end
       plan = apply_overrides(plan, effective_overrides_path) if effective_overrides_path
       stage_iteration_files_for_destdirs(plan, effective_overrides_path)
@@ -768,6 +768,13 @@ module Bootstrap
         steps = phase.steps.map(&.name).join(", ")
         "#{phase.name} (#{phase.steps.size} steps): #{steps}"
       end.join(" | ")
+    end
+
+    private def self.default_overrides_path_for_plan(plan_path : String) : String?
+      return DEFAULT_OVERRIDES_PATH if plan_path == DEFAULT_PLAN_PATH
+      overrides_candidate = File.join(File.dirname(plan_path), File.basename(DEFAULT_OVERRIDES_PATH))
+      return overrides_candidate if File.exists?(overrides_candidate)
+      nil
     end
 
     # Creates a minimal directory skeleton for `DESTDIR` installs. The intent is
