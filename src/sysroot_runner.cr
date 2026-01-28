@@ -870,8 +870,21 @@ module Bootstrap
       end
       rootfs_dir ||= File.join(workspace, "rootfs")
       resolved_state_path = state_path
+      if resolved_state_path.nil?
+        candidates = [] of String
+        candidates << rootfs_dir.not_nil! if rootfs_dir
+        candidates << "/workspace/rootfs" unless candidates.includes?("/workspace/rootfs")
+        candidates << "/" unless candidates.includes?("/")
+        candidates.each do |candidate|
+          candidate_state = File.join(candidate, "var/lib/sysroot-build-state.json")
+          if File.exists?(candidate_state)
+            rootfs_dir = candidate
+            resolved_state_path = candidate_state
+            break
+          end
+        end
+      end
       resolved_state_path ||= File.join(rootfs_dir, "var/lib/sysroot-build-state.json")
-      resolved_state_path = resolved_state_path.not_nil!
       unless File.exists?(resolved_state_path)
         resolved_state_path = SysrootBuildState::DEFAULT_PATH if File.exists?(SysrootBuildState::DEFAULT_PATH)
       end
