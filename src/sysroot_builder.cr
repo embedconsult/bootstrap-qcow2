@@ -389,6 +389,7 @@ module Bootstrap
             "-DLIBCXX_USE_COMPILER_RT=ON",
             "-DLIBCXX_ENABLE_SHARED=OFF",
             "-DLIBCXX_ENABLE_STATIC=ON",
+            "-DLIBCXX_ENABLE_BENCHMARKS=OFF",
             "-DLIBCXX_INCLUDE_TESTS=OFF",
             "-DLIBCXXABI_USE_COMPILER_RT=ON",
             "-DLIBCXXABI_USE_LLVM_UNWINDER=ON",
