@@ -5,19 +5,21 @@ require "http/client"
 require "json"
 require "log"
 require "path"
+require "process"
 require "uri"
 require "./build_plan"
 require "./build_plan_utils"
 require "./cli"
+require "./process_runner"
 require "./sysroot_runner"
 require "./sysroot_workspace"
 require "./tarball"
 
 module Bootstrap
-  # SysrootBuilder prepares a chroot-able environment that can rebuild
-  # a complete sysroot using source tarballs cached on the host. The default
-  # seed uses Alpine’s minirootfs, but the seed rootfs, architecture, and
-  # package set are all swappable once a self-hosted rootfs exists.
+  # SysrootBuilder prepares a chroot-able environment that can rebuild a
+  # complete sysroot using source tarballs cached on the host. The default seed
+  # uses Alpine’s minirootfs, but the seed rootfs, architecture, and package set
+  # are all swappable once a self-hosted rootfs exists.
   #
   # Key expectations:
   # * No shell-based downloads: HTTP/Digest from Crystal stdlib only.
@@ -26,6 +28,15 @@ module Bootstrap
   #   SHA256 bookkeeping for reuse and verification.
   # * bootstrap-qcow2 source is fetched as a tarball and staged into /workspace
   #   so it participates in formatting and specs inside the rootfs.
+  #
+  # Usage references:
+  # * CLI entrypoints: `bq2 sysroot-builder`, `bq2 sysroot-plan-write`,
+  #   and `bq2 sysroot-tarball` (see `self.run`, `help_entries`, and README).
+  # * Workspace layout: `SysrootWorkspace` defines the host workspace
+  #   (data/sysroot) and the rootfs workspace (/workspace) described in
+  #   README and AGENTS.md terminology.
+  # * Build plan contract: `write_plan` persists the plan consumed by
+  #   `SysrootRunner` at `/var/lib/sysroot-build-plan.json`.
   class SysrootBuilder < CLI
     {% if flag?(:x86_64) %}
       DEFAULT_ARCH = "x86_64"
@@ -59,6 +70,8 @@ module Bootstrap
     DEFAULT_GIT           = "2.45.2"
     DEFAULT_CRYSTAL       = "1.18.2"
     DEFAULT_BQ2           = "0.0.8"
+    # Cache directory name for prefetched shards dependencies.
+    SHARDS_CACHE_DIR = ".shards-cache"
     # Source: https://curl.se/ca/cacert.pem (Mozilla CA certificate bundle).
     CA_BUNDLE_PEM = {{ read_file("#{__DIR__}/../data/ca-bundle/ca-certificates.crt") }}
 
@@ -197,7 +210,7 @@ module Bootstrap
     # Each PackageSpec can carry optional configure flags or a custom build
     # directory name when upstream archives use non-standard layouts.
     def packages : Array(PackageSpec)
-      bootstrap_repo_dir = "/workspace/bootstrap-qcow2-#{bootstrap_source_version}"
+      bootstrap_repo_dir = "#{SysrootWorkspace::ROOTFS_WORKSPACE}/bootstrap-qcow2-#{bootstrap_source_version}"
       sysroot_triple = sysroot_target_triple
       [
         PackageSpec.new("m4", DEFAULT_M4, URI.parse("https://ftp.gnu.org/gnu/m4/m4-#{DEFAULT_M4}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
@@ -255,150 +268,7 @@ module Bootstrap
           DEFAULT_LLVM_VER,
           URI.parse("https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-#{DEFAULT_LLVM_VER}.tar.gz"),
           strategy: "cmake-project",
-          configure_flags: [
-            "-DCMAKE_BUILD_TYPE=Release",
-            "-DLLVM_TARGETS_TO_BUILD=AArch64",
-            "-DLLVM_HOST_TRIPLE=#{sysroot_triple}",
-            "-DLLVM_DEFAULT_TARGET_TRIPLE=#{sysroot_triple}",
-            "-DLLVM_ENABLE_WARNINGS=OFF",
-            "-DLLVM_ENABLE_PROJECTS=clang;lld;compiler-rt",
-            "-DLLVM_ENABLE_RUNTIMES=libunwind;libcxxabi;libcxx",
-            "-DLLVM_ENABLE_LIBCXX=ON",
-            "-DLLVM_INCLUDE_TOOLS=ON",
-            "-DLLVM_BUILD_TOOLS=ON",
-            "-DLLVM_INCLUDE_UTILS=OFF",
-            "-DLLVM_INSTALL_UTILS=OFF",
-            "-DLLVM_TOOL_BUGPOINT_BUILD=OFF",
-            "-DLLVM_TOOL_BUGPOINT_PASSES_BUILD=OFF",
-            "-DLLVM_TOOL_DSYMUTIL_BUILD=OFF",
-            "-DLLVM_TOOL_DXIL_DIS_BUILD=OFF",
-            "-DLLVM_TOOL_GOLD_BUILD=OFF",
-            "-DLLVM_TOOL_LLC_BUILD=OFF",
-            "-DLLVM_TOOL_LLI_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_AS_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_AS_FUZZER_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_BCANALYZER_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_C_TEST_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_CAT_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_CFI_VERIFY_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_COV_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_CVTRES_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_CXXDUMP_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_CXXFILT_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_CXXMAP_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_DEBUGINFO_ANALYZER_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_DEBUGINFOD_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_DEBUGINFOD_FIND_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_DIFF_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_DIS_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_DIS_FUZZER_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_DLANG_DEMANGLE_FUZZER_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_DRIVER_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_DWARFDUMP_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_DWARFUTIL_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_DWP_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_EXEGESIS_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_EXTRACT_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_GSYMUTIL_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_IFS_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_ISEL_FUZZER_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_ITANIUM_DEMANGLE_FUZZER_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_JITLINK_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_JITLISTENER_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_LIBTOOL_DARWIN_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_LINK_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_LIPO_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_LTO_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_LTO2_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_MC_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_MC_ASSEMBLE_FUZZER_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_MC_DISASSEMBLE_FUZZER_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_MCA_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_MICROSOFT_DEMANGLE_FUZZER_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_ML_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_MODEXTRACT_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_MT_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_OBJCOPY_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_OBJDUMP_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_OPT_FUZZER_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_OPT_REPORT_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_PDBUTIL_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_PROFDATA_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_PROFGEN_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_RC_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_READOBJ_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_READTAPI_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_REDUCE_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_REMARKUTIL_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_RTDYLD_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_RUST_DEMANGLE_FUZZER_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_SHLIB_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_SIM_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_SIZE_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_SPECIAL_CASE_LIST_FUZZER_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_SPLIT_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_STRESS_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_STRINGS_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_SYMBOLIZER_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_TLI_CHECKER_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_UNDNAME_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_XRAY_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_YAML_NUMERIC_PARSER_FUZZER_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_YAML_PARSER_FUZZER_BUILD=OFF",
-            "-DLLVM_TOOL_LTO_BUILD=OFF",
-            "-DLLVM_TOOL_OBJ2YAML_BUILD=OFF",
-            "-DLLVM_TOOL_OPT_BUILD=OFF",
-            "-DLLVM_TOOL_OPT_VIEWER_BUILD=OFF",
-            "-DLLVM_TOOL_REMARKS_SHLIB_BUILD=OFF",
-            "-DLLVM_TOOL_SANCOV_BUILD=OFF",
-            "-DLLVM_TOOL_SANSTATS_BUILD=OFF",
-            "-DLLVM_TOOL_SPIRV_TOOLS_BUILD=OFF",
-            "-DLLVM_TOOL_VERIFY_USELISTORDER_BUILD=OFF",
-            "-DLLVM_TOOL_VFABI_DEMANGLE_FUZZER_BUILD=OFF",
-            "-DLLVM_TOOL_XCODE_TOOLCHAIN_BUILD=OFF",
-            "-DLLVM_TOOL_YAML2OBJ_BUILD=OFF",
-            "-DLLVM_TOOL_LLVM_AR_BUILD=ON",
-            "-DLLVM_TOOL_LLVM_NM_BUILD=ON",
-            "-DLLVM_TOOL_LLVM_RANLIB_BUILD=ON",
-            "-DLLVM_TOOL_LLVM_STRIP_BUILD=ON",
-            "-DLLVM_TOOL_LLVM_CONFIG_BUILD=ON",
-            "-DLLVM_INCLUDE_TESTS=OFF",
-            "-DLLVM_INCLUDE_EXAMPLES=OFF",
-            "-DLLVM_INCLUDE_BENCHMARKS=OFF",
-            "-DLLVM_BUILD_DOCS=OFF",
-            "-DLLVM_ENABLE_DOXYGEN=OFF",
-            "-DLLVM_ENABLE_SPHINX=OFF",
-            "-DCLANG_BUILD_DOCS=OFF",
-            "-DCLANG_ENABLE_STATIC_ANALYZER=OFF",
-            "-DCLANG_ENABLE_ARCMT=OFF",
-            "-DLLVM_ENABLE_TERMINFO=OFF",
-            "-DLLVM_ENABLE_PYTHON=OFF",
-            "-DLLVM_ENABLE_PIC=OFF",
-            "-DCOMPILER_RT_BUILD_BUILTINS=ON",
-            "-DCOMPILER_RT_BUILD_CRT=ON",
-            "-DCOMPILER_RT_INCLUDE_TESTS=OFF",
-            "-DCOMPILER_RT_BUILD_SANITIZERS=OFF",
-            "-DCOMPILER_RT_BUILD_XRAY=OFF",
-            "-DCOMPILER_RT_BUILD_LIBFUZZER=OFF",
-            "-DCOMPILER_RT_BUILD_PROFILE=OFF",
-            "-DCOMPILER_RT_BUILD_MEMPROF=OFF",
-            "-DLIBUNWIND_USE_COMPILER_RT=ON",
-            "-DLIBUNWIND_ENABLE_SHARED=OFF",
-            "-DLIBUNWIND_ENABLE_STATIC=ON",
-            "-DLIBUNWIND_INCLUDE_TESTS=OFF",
-            "-DLIBCXX_HAS_MUSL_LIBC=ON",
-            "-DLIBCXX_USE_COMPILER_RT=ON",
-            "-DLIBCXX_ENABLE_SHARED=OFF",
-            "-DLIBCXX_ENABLE_STATIC=ON",
-            "-DLIBCXX_ENABLE_BENCHMARKS=OFF",
-            "-DLIBCXX_INCLUDE_BENCHMARKS=OFF",
-            "-DLIBCXX_INCLUDE_TESTS=OFF",
-            "-DLIBCXXABI_USE_COMPILER_RT=ON",
-            "-DLIBCXXABI_USE_LLVM_UNWINDER=ON",
-            "-DLIBCXXABI_ENABLE_SHARED=OFF",
-            "-DLIBCXXABI_ENABLE_STATIC=ON",
-            "-DLIBCXXABI_INCLUDE_TESTS=OFF",
-          ],
+          configure_flags: llvm_configure_flags(sysroot_triple),
           patches: [
             "#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/smallvector-include-cstdint.patch",
             "#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/cmake-guard-cxx-compiler-id.patch",
@@ -684,6 +554,8 @@ module Bootstrap
     # When *skip_existing* is true, source archives are only extracted when the
     # expected build directory does not already exist.
     def stage_sources(skip_existing : Bool, workspace_path : Path = rootfs_dir / "workspace") : Nil
+      shard_projects = [] of Path
+      shards_cache = workspace_path / SHARDS_CACHE_DIR
       packages.each do |pkg|
         archives = download_all(pkg)
         archives.each_with_index do |archive, idx|
@@ -700,6 +572,29 @@ module Bootstrap
           end
           Log.debug { "Extracting source archive #{archive} into #{workspace_path}" }
           Tarball.extract(archive, workspace_path, @preserve_ownership_for_sources, @owner_uid, @owner_gid, force_system_tar: @use_system_tar_for_sources)
+          shard_projects << build_root if File.exists?(build_root / "shard.yml")
+        end
+      end
+      prefetch_shards_dependencies(shard_projects, shards_cache) unless shard_projects.empty?
+    end
+
+    # Prefetch shards dependencies into a shared cache so later build phases
+    # can run offline without network access.
+    private def prefetch_shards_dependencies(projects : Array(Path), cache_dir : Path) : Nil
+      shards_exe = Process.find_executable("shards")
+      raise "shards executable not found (needed to prefetch shard dependencies)" unless shards_exe
+
+      FileUtils.mkdir_p(cache_dir)
+      env = {"SHARDS_CACHE_PATH" => cache_dir.to_s}
+      projects.uniq.each do |project|
+        shard_file = project / "shard.yml"
+        next unless File.exists?(shard_file)
+        Log.info { "Prefetching shards dependencies for #{project}" }
+        Dir.cd(project) do
+          result = ProcessRunner.run([shards_exe, "install"], env: env)
+          unless result.status.success?
+            raise "shards install failed in #{project} (exit=#{result.status.exit_code})"
+          end
         end
       end
     end
@@ -739,6 +634,176 @@ module Bootstrap
       end
     end
 
+    # Build the LLVM configure flags for the sysroot toolchain.
+    private def llvm_configure_flags(sysroot_triple : String) : Array(String)
+      llvm_targets = llvm_targets_to_build(@architecture)
+      enabled_tools = %w[LLVM_AR LLVM_NM LLVM_RANLIB LLVM_STRIP LLVM_CONFIG]
+      disabled_tools = %w[
+        BUGPOINT
+        BUGPOINT_PASSES
+        DSYMUTIL
+        DXIL_DIS
+        GOLD
+        LLC
+        LLI
+        LLVM_AS
+        LLVM_AS_FUZZER
+        LLVM_BCANALYZER
+        LLVM_C_TEST
+        LLVM_CAT
+        LLVM_CFI_VERIFY
+        LLVM_COV
+        LLVM_CVTRES
+        LLVM_CXXDUMP
+        LLVM_CXXFILT
+        LLVM_CXXMAP
+        LLVM_DEBUGINFO_ANALYZER
+        LLVM_DEBUGINFOD
+        LLVM_DEBUGINFOD_FIND
+        LLVM_DIFF
+        LLVM_DIS
+        LLVM_DIS_FUZZER
+        LLVM_DLANG_DEMANGLE_FUZZER
+        LLVM_DRIVER
+        LLVM_DWARFDUMP
+        LLVM_DWARFUTIL
+        LLVM_DWP
+        LLVM_EXEGESIS
+        LLVM_EXTRACT
+        LLVM_GSYMUTIL
+        LLVM_IFS
+        LLVM_ISEL_FUZZER
+        LLVM_ITANIUM_DEMANGLE_FUZZER
+        LLVM_JITLINK
+        LLVM_JITLISTENER
+        LLVM_LIBTOOL_DARWIN
+        LLVM_LINK
+        LLVM_LIPO
+        LLVM_LTO
+        LLVM_LTO2
+        LLVM_MC
+        LLVM_MC_ASSEMBLE_FUZZER
+        LLVM_MC_DISASSEMBLE_FUZZER
+        LLVM_MCA
+        LLVM_MICROSOFT_DEMANGLE_FUZZER
+        LLVM_ML
+        LLVM_MODEXTRACT
+        LLVM_MT
+        LLVM_OBJCOPY
+        LLVM_OBJDUMP
+        LLVM_OPT_FUZZER
+        LLVM_OPT_REPORT
+        LLVM_PDBUTIL
+        LLVM_PROFDATA
+        LLVM_PROFGEN
+        LLVM_RC
+        LLVM_READOBJ
+        LLVM_READTAPI
+        LLVM_REDUCE
+        LLVM_REMARKUTIL
+        LLVM_RTDYLD
+        LLVM_RUST_DEMANGLE_FUZZER
+        LLVM_SHLIB
+        LLVM_SIM
+        LLVM_SIZE
+        LLVM_SPECIAL_CASE_LIST_FUZZER
+        LLVM_SPLIT
+        LLVM_STRESS
+        LLVM_STRINGS
+        LLVM_SYMBOLIZER
+        LLVM_TLI_CHECKER
+        LLVM_UNDNAME
+        LLVM_XRAY
+        LLVM_YAML_NUMERIC_PARSER_FUZZER
+        LLVM_YAML_PARSER_FUZZER
+        LTO
+        OBJ2YAML
+        OPT
+        OPT_VIEWER
+        REMARKS_SHLIB
+        SANCOV
+        SANSTATS
+        SPIRV_TOOLS
+        VERIFY_USELISTORDER
+        VFABI_DEMANGLE_FUZZER
+        XCODE_TOOLCHAIN
+        YAML2OBJ
+      ]
+      flags = [
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DLLVM_TARGETS_TO_BUILD=#{llvm_targets}",
+        "-DLLVM_HOST_TRIPLE=#{sysroot_triple}",
+        "-DLLVM_DEFAULT_TARGET_TRIPLE=#{sysroot_triple}",
+        "-DLLVM_ENABLE_WARNINGS=OFF",
+        "-DLLVM_ENABLE_PROJECTS=clang;lld;compiler-rt",
+        "-DLLVM_ENABLE_RUNTIMES=libunwind;libcxxabi;libcxx",
+        "-DLLVM_ENABLE_LIBCXX=ON",
+        "-DLLVM_INCLUDE_TOOLS=ON",
+        "-DLLVM_BUILD_TOOLS=ON",
+        "-DLLVM_INCLUDE_UTILS=OFF",
+        "-DLLVM_INSTALL_UTILS=OFF",
+      ]
+      flags.concat(llvm_tool_flags(disabled_tools, enabled: false))
+      flags.concat(llvm_tool_flags(enabled_tools, enabled: true))
+      flags.concat([
+        "-DLLVM_INCLUDE_TESTS=OFF",
+        "-DLLVM_INCLUDE_EXAMPLES=OFF",
+        "-DLLVM_INCLUDE_BENCHMARKS=OFF",
+        "-DLLVM_BUILD_DOCS=OFF",
+        "-DLLVM_ENABLE_DOXYGEN=OFF",
+        "-DLLVM_ENABLE_SPHINX=OFF",
+        "-DCLANG_BUILD_DOCS=OFF",
+        "-DCLANG_ENABLE_STATIC_ANALYZER=OFF",
+        "-DCLANG_ENABLE_ARCMT=OFF",
+        "-DLLVM_ENABLE_TERMINFO=OFF",
+        "-DLLVM_ENABLE_PYTHON=OFF",
+        "-DLLVM_ENABLE_PIC=OFF",
+        "-DCOMPILER_RT_BUILD_BUILTINS=ON",
+        "-DCOMPILER_RT_BUILD_CRT=ON",
+        "-DCOMPILER_RT_INCLUDE_TESTS=OFF",
+        "-DCOMPILER_RT_BUILD_SANITIZERS=OFF",
+        "-DCOMPILER_RT_BUILD_XRAY=OFF",
+        "-DCOMPILER_RT_BUILD_LIBFUZZER=OFF",
+        "-DCOMPILER_RT_BUILD_PROFILE=OFF",
+        "-DCOMPILER_RT_BUILD_MEMPROF=OFF",
+        "-DLIBUNWIND_USE_COMPILER_RT=ON",
+        "-DLIBUNWIND_ENABLE_SHARED=OFF",
+        "-DLIBUNWIND_ENABLE_STATIC=ON",
+        "-DLIBUNWIND_INCLUDE_TESTS=OFF",
+        "-DLIBCXX_HAS_MUSL_LIBC=ON",
+        "-DLIBCXX_USE_COMPILER_RT=ON",
+        "-DLIBCXX_ENABLE_SHARED=OFF",
+        "-DLIBCXX_ENABLE_STATIC=ON",
+        "-DLIBCXX_ENABLE_BENCHMARKS=OFF",
+        "-DLIBCXX_INCLUDE_TESTS=OFF",
+        "-DLIBCXXABI_USE_COMPILER_RT=ON",
+        "-DLIBCXXABI_USE_LLVM_UNWINDER=ON",
+        "-DLIBCXXABI_ENABLE_SHARED=OFF",
+        "-DLIBCXXABI_ENABLE_STATIC=ON",
+        "-DLIBCXXABI_INCLUDE_TESTS=OFF",
+      ])
+      flags
+    end
+
+    # Select LLVM target names for the configured architecture.
+    # Uses LLVM target identifiers (e.g. AArch64, X86).
+    private def llvm_targets_to_build(architecture : String) : String
+      case architecture
+      when "aarch64", "arm64"
+        "AArch64"
+      when "x86_64", "amd64"
+        "X86"
+      else
+        architecture.upcase
+      end
+    end
+
+    # Format LLVM tool enable/disable flags from tool name lists.
+    private def llvm_tool_flags(tools : Array(String), enabled : Bool) : Array(String)
+      value = enabled ? "ON" : "OFF"
+      tools.map { |tool| "-DLLVM_TOOL_#{tool}_BUILD=#{value}" }
+    end
+
     # Define the multi-phase build in an LFS-inspired style:
     # 1. build a complete sysroot from sources using Alpine's seed environment
     # 2. validate the sysroot by using it as the toolchain when assembling a rootfs
@@ -749,10 +814,10 @@ module Bootstrap
     # - system-from-sysroot/tools-from-system/finalize-rootfs: run inside the workspace rootfs,
     #   prefer /usr/bin, and rely on musl's /etc/ld-musl-<arch>.path for runtime lookup.
     def phase_specs : Array(PhaseSpec)
-      bootstrap_repo_dir = "/workspace/bootstrap-qcow2-#{bootstrap_source_version}"
+      bootstrap_repo_dir = "#{SysrootWorkspace::ROOTFS_WORKSPACE}/bootstrap-qcow2-#{bootstrap_source_version}"
       sysroot_prefix = "/opt/sysroot"
-      rootfs_destdir = "/workspace/rootfs"
-      rootfs_tarball = "/workspace/bq2-rootfs-#{bootstrap_source_version}.tar.gz"
+      rootfs_destdir = SysrootWorkspace::WORKSPACE_ROOTFS.to_s
+      rootfs_tarball = "#{SysrootWorkspace::ROOTFS_WORKSPACE}/bq2-rootfs-#{bootstrap_source_version}.tar.gz"
       sysroot_triple = sysroot_target_triple
       sysroot_env = sysroot_phase_env(sysroot_prefix)
       rootfs_env = rootfs_phase_env(sysroot_prefix)
@@ -768,6 +833,7 @@ module Bootstrap
       cmake_archive_create = "#{sysroot_prefix}/bin/llvm-ar qc <TARGET> <OBJECTS>"
       cmake_archive_append = "#{sysroot_prefix}/bin/llvm-ar q <TARGET> <OBJECTS>"
       cmake_archive_finish = "#{sysroot_prefix}/bin/llvm-ranlib <TARGET>"
+      shards_cache_root = "#{SysrootWorkspace::ROOTFS_WORKSPACE}/#{SHARDS_CACHE_DIR}"
       libxml2_env = {
         "CPPFLAGS" => "-I#{sysroot_prefix}/include",
         "LDFLAGS"  => "-L#{sysroot_prefix}/lib",
@@ -793,7 +859,7 @@ module Bootstrap
         PhaseSpec.new(
           name: "sysroot-from-alpine",
           description: "Build a self-contained sysroot using Alpine-hosted tools.",
-          workspace: "/workspace",
+          workspace: SysrootWorkspace::ROOTFS_WORKSPACE.to_s,
           environment: "alpine-seed",
           install_prefix: sysroot_prefix,
           destdir: nil,
@@ -821,7 +887,7 @@ module Bootstrap
               "LIBRARY_PATH"      => "#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
             },
             "shards" => {
-              "SHARDS_CACHE_PATH" => "/tmp/shards-cache",
+              "SHARDS_CACHE_PATH" => shards_cache_root,
               "CC"                => "#{sysroot_prefix}/bin/clang --target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld",
               "CXX"               => "#{sysroot_prefix}/bin/clang++ --target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -stdlib=libc++",
               "LDFLAGS"           => "-L#{sysroot_prefix}/lib/#{sysroot_triple} -L#{sysroot_prefix}/lib",
@@ -848,7 +914,7 @@ module Bootstrap
         PhaseSpec.new(
           name: "rootfs-from-sysroot",
           description: "Build a minimal rootfs using the newly built sysroot toolchain.",
-          workspace: "/workspace",
+          workspace: SysrootWorkspace::ROOTFS_WORKSPACE.to_s,
           environment: "sysroot-toolchain",
           install_prefix: "/usr",
           destdir: rootfs_destdir,
@@ -864,45 +930,23 @@ module Bootstrap
             },
           },
           extra_steps: [
-            BuildStep.new(
-              name: "musl-ld-path",
-              strategy: "write-file",
-              workdir: "/",
-              configure_flags: [] of String,
-              patches: [] of String,
-              install_prefix: musl_ld_path,
-              env: {
-                "CONTENT" => "/lib:/usr/lib:/opt/sysroot/lib:/opt/sysroot/lib/#{sysroot_triple}:/opt/sysroot/usr/lib\n",
-              },
+            write_file_step(
+              "musl-ld-path",
+              musl_ld_path,
+              "/lib:/usr/lib:/opt/sysroot/lib:/opt/sysroot/lib/#{sysroot_triple}:/opt/sysroot/usr/lib\n",
             ),
-            BuildStep.new(
-              name: "prepare-rootfs",
-              strategy: "prepare-rootfs",
-              workdir: "/",
-              configure_flags: [] of String,
-              patches: [] of String,
-              install_prefix: "/",
-              env: {
-                "FILE_0_PATH"    => "/etc/os-release",
-                "FILE_0_CONTENT" => os_release_content,
-                "FILE_1_PATH"    => "/etc/profile",
-                "FILE_1_CONTENT" => profile_content,
-                "FILE_2_PATH"    => "/etc/resolv.conf",
-                "FILE_2_CONTENT" => resolv_conf_content,
-                "FILE_3_PATH"    => "/etc/hosts",
-                "FILE_3_CONTENT" => hosts_content,
-                "FILE_4_PATH"    => "/etc/ssl/certs/ca-certificates.crt",
-                "FILE_4_CONTENT" => rootfs_ca_bundle_content,
-                "FILE_5_PATH"    => "/.bq2-rootfs",
-                "FILE_5_CONTENT" => "bq2-rootfs\n",
-              },
-            ),
-            BuildStep.new(
+            prepare_rootfs_step([
+              {"/etc/os-release", os_release_content},
+              {"/etc/profile", profile_content},
+              {"/etc/resolv.conf", resolv_conf_content},
+              {"/etc/hosts", hosts_content},
+              {"/etc/ssl/certs/ca-certificates.crt", rootfs_ca_bundle_content},
+              {"/.bq2-rootfs", "bq2-rootfs\n"},
+            ]),
+            build_step(
               name: "sysroot",
               strategy: "copy-tree",
               workdir: sysroot_prefix,
-              configure_flags: [] of String,
-              patches: [] of String,
               install_prefix: sysroot_prefix,
             ),
           ],
@@ -910,7 +954,7 @@ module Bootstrap
         PhaseSpec.new(
           name: "system-from-sysroot",
           description: "Rebuild sysroot packages into /usr inside the new rootfs (prefix-free).",
-          workspace: "/workspace",
+          workspace: SysrootWorkspace::ROOTFS_WORKSPACE.to_s,
           environment: "rootfs-system",
           install_prefix: "/usr",
           destdir: nil,
@@ -924,6 +968,9 @@ module Bootstrap
             },
             "m4" => {
               "INSTALL" => "./build-aux/install-sh",
+            },
+            "bootstrap-qcow2" => {
+              "SHARDS_CACHE_PATH" => shards_cache_root,
             },
           },
           configure_overrides: {
@@ -956,28 +1003,20 @@ module Bootstrap
             "libxml2" => libxml2_cmake_flags,
           },
           extra_steps: [
-            BuildStep.new(
-              name: "bq2-symlinks",
-              strategy: "symlink",
-              workdir: "/",
-              configure_flags: [] of String,
-              patches: [] of String,
-              install_prefix: "/",
-              env: {
-                "LINK_0_SRC"  => "bq2",
-                "LINK_0_DEST" => "/usr/bin/curl",
-                "LINK_1_SRC"  => "bq2",
-                "LINK_1_DEST" => "/usr/bin/git-remote-https",
-                "LINK_2_SRC"  => "bq2",
-                "LINK_2_DEST" => "/usr/bin/pkg-config",
-              },
+            symlink_step(
+              "bq2-symlinks",
+              [
+                {"bq2", "/usr/bin/curl"},
+                {"bq2", "/usr/bin/git-remote-https"},
+                {"bq2", "/usr/bin/pkg-config"},
+              ],
             ),
           ],
         ),
         PhaseSpec.new(
           name: "tools-from-system",
           description: "Build additional developer tools inside the new rootfs.",
-          workspace: "/workspace",
+          workspace: SysrootWorkspace::ROOTFS_WORKSPACE.to_s,
           environment: "rootfs-system",
           install_prefix: "/usr",
           destdir: nil,
@@ -995,38 +1034,24 @@ module Bootstrap
         PhaseSpec.new(
           name: "finalize-rootfs",
           description: "Strip the sysroot prefix and emit a prefix-free rootfs tarball.",
-          workspace: "/workspace",
+          workspace: SysrootWorkspace::ROOTFS_WORKSPACE.to_s,
           environment: "rootfs-finalize",
           install_prefix: "/usr",
           destdir: rootfs_destdir,
           env: rootfs_phase_env(sysroot_prefix),
           package_allowlist: [] of String,
           extra_steps: [
-            BuildStep.new(
+            build_step(
               name: "strip-sysroot",
               strategy: "remove-tree",
               workdir: "/",
-              configure_flags: [] of String,
-              patches: [] of String,
               install_prefix: sysroot_prefix,
             ),
-            BuildStep.new(
-              name: "musl-ld-path-final",
-              strategy: "write-file",
-              workdir: "/",
-              configure_flags: [] of String,
-              patches: [] of String,
-              install_prefix: musl_ld_path,
-              env: {
-                "CONTENT" => "/lib:/usr/lib\n",
-              },
-            ),
-            BuildStep.new(
+            write_file_step("musl-ld-path-final", musl_ld_path, "/lib:/usr/lib\n"),
+            build_step(
               name: "rootfs-tarball",
               strategy: "tarball",
               workdir: "/",
-              configure_flags: [] of String,
-              patches: [] of String,
               install_prefix: rootfs_tarball,
             ),
           ],
@@ -1169,6 +1194,72 @@ module Bootstrap
         destdir: spec.destdir,
         env: spec.env,
         steps: steps,
+      )
+    end
+
+    # Create a BuildStep with defaulted arrays for simple helper usage.
+    private def build_step(name : String,
+                           strategy : String,
+                           workdir : String,
+                           install_prefix : String? = nil,
+                           env : Hash(String, String) = {} of String => String,
+                           configure_flags : Array(String) = [] of String,
+                           patches : Array(String) = [] of String,
+                           destdir : String? = nil,
+                           build_dir : String? = nil) : BuildStep
+      BuildStep.new(
+        name: name,
+        strategy: strategy,
+        workdir: workdir,
+        configure_flags: configure_flags,
+        patches: patches,
+        install_prefix: install_prefix,
+        destdir: destdir,
+        env: env,
+        build_dir: build_dir,
+      )
+    end
+
+    # Build a write-file step for a single content payload.
+    private def write_file_step(name : String, path : String, content : String) : BuildStep
+      build_step(
+        name: name,
+        strategy: "write-file",
+        workdir: "/",
+        install_prefix: path,
+        env: {"CONTENT" => content},
+      )
+    end
+
+    # Build a prepare-rootfs step for a list of path/content pairs.
+    private def prepare_rootfs_step(files : Array(Tuple(String, String))) : BuildStep
+      env = {} of String => String
+      files.each_with_index do |(path, content), idx|
+        env["FILE_#{idx}_PATH"] = path
+        env["FILE_#{idx}_CONTENT"] = content
+      end
+      build_step(
+        name: "prepare-rootfs",
+        strategy: "prepare-rootfs",
+        workdir: "/",
+        install_prefix: "/",
+        env: env,
+      )
+    end
+
+    # Build a symlink step from a list of source/destination pairs.
+    private def symlink_step(name : String, links : Array(Tuple(String, String))) : BuildStep
+      env = {} of String => String
+      links.each_with_index do |(source, dest), idx|
+        env["LINK_#{idx}_SRC"] = source
+        env["LINK_#{idx}_DEST"] = dest
+      end
+      build_step(
+        name: name,
+        strategy: "symlink",
+        workdir: "/",
+        install_prefix: "/",
+        env: env,
       )
     end
 
@@ -1498,7 +1589,7 @@ module Bootstrap
         p.on("--no-tarball", "Prepare the chroot tree without writing a tarball") { write_tarball = false }
         p.on("--reuse-rootfs", "Reuse an existing prepared rootfs when present") { reuse_rootfs = true }
         p.on("--refresh-plan", "Rewrite the build plan inside an existing rootfs (requires --reuse-rootfs)") { refresh_plan = true }
-        p.on("--restage-sources", "Extract missing sources into an existing rootfs /workspace (requires --reuse-rootfs)") { restage_sources = true }
+        p.on("--restage-sources", "Extract missing sources into an existing rootfs #{SysrootWorkspace::ROOTFS_WORKSPACE} (requires --reuse-rootfs)") { restage_sources = true }
       end
       return CLI.print_help(parser) if help
 
@@ -1522,7 +1613,7 @@ module Bootstrap
         puts "Build plan found at #{builder.plan_path} (iteration state is maintained by sysroot-runner)"
         if include_sources && restage_sources
           builder.stage_sources(skip_existing: true)
-          puts "Staged missing sources into #{builder.rootfs_dir}/workspace"
+          puts "Staged missing sources into #{builder.rootfs_dir}#{SysrootWorkspace::ROOTFS_WORKSPACE}"
         end
         if refresh_plan
           builder.write_plan
@@ -1552,7 +1643,7 @@ module Bootstrap
       force = false
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-plan-write [options]") do |p|
         p.on("--output PATH", "Write the plan to PATH (default: #{SysrootRunner::DEFAULT_PLAN_PATH})") { |path| output = path }
-        p.on("--workspace-root PATH", "Rewrite plan workdirs rooted at /workspace to PATH (default: #{workspace_root})") { |path| workspace_root = path }
+        p.on("--workspace-root PATH", "Rewrite plan workdirs rooted at #{SysrootWorkspace::ROOTFS_WORKSPACE} to PATH (default: #{workspace_root})") { |path| workspace_root = path }
         p.on("--force", "Overwrite an existing plan at the output path") { force = true }
       end
       return CLI.print_help(parser) if help

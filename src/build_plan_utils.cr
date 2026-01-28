@@ -1,10 +1,11 @@
 require "./build_plan"
+require "./sysroot_workspace"
 
 module Bootstrap
   # Helpers for adjusting serialized build plans without regenerating the
   # underlying rootfs.
   module BuildPlanUtils
-    DEFAULT_WORKSPACE_ROOT = "/workspace"
+    DEFAULT_WORKSPACE_ROOT = SysrootWorkspace::ROOTFS_WORKSPACE.to_s
 
     # Returns a copy of *plan* with its workspace-root rewritten.
     #
