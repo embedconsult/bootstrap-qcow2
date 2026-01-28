@@ -74,9 +74,7 @@ module Bootstrap
       resolved = SysrootRunner.resolve_status_paths(
         builder.workspace.to_s,
         nil,
-        nil,
-        false,
-        false
+        nil
       )
       @plan_path = Path[resolved.plan_path]
       @state_path = Path[resolved.state_path]
@@ -416,9 +414,9 @@ module Bootstrap
     # Log the duration of a stage for the --all workflow.
     private def self.time_stage(stage : String, &block : -> T) : T forall T
       Log.info { "Stage #{stage} starting" }
-      started_at = Time.monotonic
+      started_at = Time.instant
       result = yield
-      elapsed = Time.monotonic - started_at
+      elapsed = Time.instant - started_at
       Log.info { "Stage #{stage} finished in #{elapsed.total_seconds.round(2)}s" }
       result
     end

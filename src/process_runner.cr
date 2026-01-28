@@ -39,7 +39,7 @@ module Bootstrap
                  flush_interval : Time::Span = DEFAULT_FLUSH_INTERVAL,
                  capture_path : String? = nil,
                  capture_on_error : Bool = false) : Result
-      started = Time.monotonic
+      started = Time.instant
       capture_io = nil
       if capture_path
         FileUtils.mkdir_p(File.dirname(capture_path))
@@ -56,7 +56,7 @@ module Bootstrap
           output_path = capture_path
         end
       end
-      Result.new(status, Time.monotonic - started, output_path)
+      Result.new(status, Time.instant - started, output_path)
     end
 
     # Run a command with throttled stdout/stderr output.

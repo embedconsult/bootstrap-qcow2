@@ -117,7 +117,12 @@ module Bootstrap
         # TODO: if there isn't a git checkout in codex/work/bootstrap-qcow2, make one
         FileUtils.mkdir_p("codex/work/bootstrap-qcow2")
         extra_binds << {Path["codex/work"], Path["/work"]}
-        command = ["/bin/sh", "--login", "-c", "/work/bin/codex --add-dir /var --add-dir /opt --add-dir /workspace -C /work/bootstrap-qcow2 -s workspace-write"]
+        command = [
+          "/bin/sh",
+          "--login",
+          "-c",
+          "/work/bin/codex --add-dir /var --add-dir /opt --add-dir #{SysrootWorkspace::ROOTFS_WORKSPACE} -C /work/bootstrap-qcow2 -s workspace-write",
+        ]
         unless remaining.empty?
           command[-1] = [command[-1], remaining.join(" ")].join(" ")
         end
