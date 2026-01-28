@@ -856,10 +856,14 @@ module Bootstrap
       workspace = "data/sysroot"
       rootfs : String? = nil
       state_path : String? = nil
+      rootfs_explicit = false
 
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-status [options]") do |p|
         p.on("-w DIR", "--workspace=DIR", "Sysroot workspace directory (default: #{workspace})") { |val| workspace = val }
-        p.on("--rootfs=PATH", "Prepared rootfs directory (default: <workspace>/rootfs)") { |val| rootfs = val }
+        p.on("--rootfs=PATH", "Prepared rootfs directory (default: <workspace>/rootfs)") do |val|
+          rootfs = val
+          rootfs_explicit = true
+        end
         p.on("--state=PATH", "Explicit sysroot build state JSON path") { |val| state_path = val }
       end
       return CLI.print_help(parser) if help
@@ -872,9 +876,19 @@ module Bootstrap
       resolved_state_path = state_path
       if resolved_state_path.nil?
         candidates = [] of String
-        candidates << rootfs_dir.not_nil! if rootfs_dir
-        candidates << "/workspace/rootfs" unless candidates.includes?("/workspace/rootfs")
-        candidates << "/" unless candidates.includes?("/")
+        if rootfs_dir
+          nested_rootfs = File.join(rootfs_dir.not_nil!, "workspace/rootfs")
+          candidates << nested_rootfs
+        end
+        if rootfs_explicit
+          candidates << rootfs_dir.not_nil! if rootfs_dir
+          candidates << "/workspace/rootfs"
+        else
+          candidates << "/workspace/rootfs"
+          candidates << rootfs_dir.not_nil! if rootfs_dir
+        end
+        candidates << "/"
+        candidates = candidates.uniq
         candidates.each do |candidate|
           candidate_state = File.join(candidate, "var/lib/sysroot-build-state.json")
           if File.exists?(candidate_state)
