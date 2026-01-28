@@ -275,6 +275,14 @@ module Bootstrap
             run_cmd(["make", "install", "PREFIX=#{install_prefix}"], env: install_env)
           else # autotools/default
             if File.exists?("configure")
+              if step.clean_build && File.exists?("Makefile")
+                status = run_cmd_status(["make", "distclean"], env: env)
+                unless status.success?
+                  Log.warn { "make distclean failed (#{status.exit_code}); attempting make clean" }
+                  status = run_cmd_status(["make", "clean"], env: env)
+                  Log.warn { "make clean failed (#{status.exit_code}); continuing" } unless status.success?
+                end
+              end
               normalize_autotools_timestamps
               run_cmd(["./configure", "--prefix=#{install_prefix}"] + step.configure_flags, env: env)
               run_cmd(["make", "-j#{cpus}"], env: env)
