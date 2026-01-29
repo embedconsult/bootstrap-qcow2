@@ -197,9 +197,18 @@ module Bootstrap
       destdir = diff_nullable_path("phase #{phase_name} step #{base_step.name} destdir", base_step.destdir, target_step.destdir)
       env = diff_env("phase #{phase_name} step #{base_step.name} env", base_step.env, target_step.env)
       clean_build = base_step.clean_build == target_step.clean_build ? nil : target_step.clean_build
-      configure_flags_add = diff_appended_list("phase #{phase_name} step #{base_step.name} configure_flags", base_step.configure_flags, target_step.configure_flags)
-      patches_add = diff_appended_list("phase #{phase_name} step #{base_step.name} patches", base_step.patches, target_step.patches)
-      return nil if workdir.nil? && build_dir.nil? && install_prefix.nil? && destdir.nil? && env.nil? && clean_build.nil? && configure_flags_add.empty? && patches_add.empty?
+      configure_flags_override = diff_list_override("phase #{phase_name} step #{base_step.name} configure_flags", base_step.configure_flags, target_step.configure_flags)
+      patches_override = diff_list_override("phase #{phase_name} step #{base_step.name} patches", base_step.patches, target_step.patches)
+      return nil if workdir.nil? &&
+                    build_dir.nil? &&
+                    install_prefix.nil? &&
+                    destdir.nil? &&
+                    env.nil? &&
+                    clean_build.nil? &&
+                    configure_flags_override[:replace].nil? &&
+                    configure_flags_override[:append].empty? &&
+                    patches_override[:replace].nil? &&
+                    patches_override[:append].empty?
 
       StepOverride.new(
         workdir: workdir,
@@ -208,20 +217,21 @@ module Bootstrap
         destdir: destdir,
         env: env,
         clean_build: clean_build,
-        configure_flags_add: configure_flags_add,
-        patches_add: patches_add,
+        configure_flags: configure_flags_override[:replace],
+        configure_flags_add: configure_flags_override[:append],
+        patches: patches_override[:replace],
+        patches_add: patches_override[:append],
       )
     end
 
-    # Compute changes for append-only lists, raising if removal/reordering occurs.
-    private def self.diff_appended_list(context : String, base : Array(String), target : Array(String)) : Array(String)
-      if target.size < base.size
-        raise "Target plan removes entries from #{context}"
+    # Compute changes for list overrides. Prefer append-only overrides, but
+    # fall back to replacement when the target list diverges.
+    private def self.diff_list_override(context : String, base : Array(String), target : Array(String)) : NamedTuple(replace: Array(String)?, append: Array(String))
+      return {replace: nil, append: [] of String} if base == target
+      if target.size >= base.size && target[0, base.size] == base
+        return {replace: nil, append: target[base.size..] || [] of String}
       end
-      if target[0, base.size] != base
-        raise "Target plan reorders or edits existing entries in #{context}"
-      end
-      target[base.size..] || [] of String
+      {replace: target, append: [] of String}
     end
 
     # Compute env additions/changes, raising if keys are removed.

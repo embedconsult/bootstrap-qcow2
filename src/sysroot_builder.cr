@@ -1443,7 +1443,9 @@ module Bootstrap
       "#{flags} #{warning_flag}"
     end
 
-    # Stage 1 LLVM flags use the host compiler and skip the libC++ toggle.
+    # Stage 1 LLVM flags use the host compiler, skip the libC++ toggle, and
+    # avoid linking tools against the shared libLLVM dylib to prevent build-time
+    # failures while still producing the library for stage 2 to consume.
     private def llvm_stage1_flags(base_flags : Array(String),
                                   phase_env : Hash(String, String)) : Array(String)
       cc_value = phase_env["CC"]? || "clang"
@@ -1452,9 +1454,13 @@ module Bootstrap
       cxx, cxx_flags = split_compiler_flags(cxx_value)
       cxx_flags = append_warning_suppression(cxx_flags)
 
-      flags = base_flags.reject { |flag| flag.starts_with?("-DLLVM_ENABLE_LIBCXX=") }
+      flags = base_flags.reject do |flag|
+        flag.starts_with?("-DLLVM_ENABLE_LIBCXX=") ||
+          flag.starts_with?("-DLLVM_LINK_LLVM_DYLIB=")
+      end
       flags << "-DCMAKE_C_COMPILER=#{cc}"
       flags << "-DCMAKE_CXX_COMPILER=#{cxx}"
+      flags << "-DLLVM_LINK_LLVM_DYLIB=OFF"
       unless cc_flags.empty? || flags.any? { |flag| flag.starts_with?("-DCMAKE_C_FLAGS=") }
         flags << "-DCMAKE_C_FLAGS=#{cc_flags}"
       end
@@ -1464,7 +1470,8 @@ module Bootstrap
       flags
     end
 
-    # Stage 2 LLVM flags use the sysroot compiler and static runtimes.
+    # Stage 2 LLVM flags use the sysroot compiler and link against the sysroot
+    # libc++/libunwind runtimes for a self-contained toolchain.
     private def llvm_stage2_flags(base_flags : Array(String),
                                   sysroot_prefix : String,
                                   sysroot_triple : String) : Array(String)
