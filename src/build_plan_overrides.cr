@@ -93,8 +93,8 @@ module Bootstrap
       install_prefix = override.install_prefix || step.install_prefix
       destdir = override.destdir || step.destdir
       env = merge_env(step.env, override.env)
-      configure_flags = step.configure_flags + override.configure_flags_add
-      patches = step.patches + override.patches_add
+      configure_flags = (override.configure_flags || step.configure_flags) + override.configure_flags_add
+      patches = (override.patches || step.patches) + override.patches_add
       clean_build = override.clean_build.nil? ? step.clean_build : override.clean_build.not_nil!
       BuildStep.new(
         name: step.name,
@@ -270,7 +270,13 @@ module Bootstrap
     getter destdir : String?
     getter env : Hash(String, String)?
     getter clean_build : Bool?
+    # Replace configure flags entirely for a step.
+    getter configure_flags : Array(String)?
+    # Replace patches entirely for a step.
+    getter patches : Array(String)?
+    # Append configure flags to the existing (or replaced) list.
     getter configure_flags_add : Array(String) = [] of String
+    # Append patches to the existing (or replaced) list.
     getter patches_add : Array(String) = [] of String
 
     def initialize(@workdir : String? = nil,
@@ -279,6 +285,8 @@ module Bootstrap
                    @destdir : String? = nil,
                    @env : Hash(String, String)? = nil,
                    @clean_build : Bool? = nil,
+                   @configure_flags : Array(String)? = nil,
+                   @patches : Array(String)? = nil,
                    @configure_flags_add : Array(String) = [] of String,
                    @patches_add : Array(String) = [] of String)
     end
