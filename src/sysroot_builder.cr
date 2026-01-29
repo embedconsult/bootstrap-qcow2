@@ -1176,9 +1176,9 @@ module Bootstrap
     # the seed rootfs uses Clang for all C/C++ compilation.
     private def sysroot_phase_env(sysroot_prefix : String) : Hash(String, String)
       {
-        "PATH"            => "#{sysroot_prefix}/bin:#{sysroot_prefix}/sbin:/usr/bin:/bin",
-        "CC"              => "/usr/bin/clang",
-        "CXX"             => "/usr/bin/clang++",
+        "PATH" => "#{sysroot_prefix}/bin:#{sysroot_prefix}/sbin:/usr/bin:/bin",
+        "CC"   => "/usr/bin/clang",
+        "CXX"  => "/usr/bin/clang++",
         # TODO: determine if this should be here.
         "LD_LIBRARY_PATH" => "#{sysroot_prefix}/lib",
       }
