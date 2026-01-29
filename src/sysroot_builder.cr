@@ -240,7 +240,13 @@ module Bootstrap
           ],
           phases: ["sysroot-from-alpine", "rootfs-from-sysroot", "system-from-sysroot"],
         ),
-        PackageSpec.new("libressl", DEFAULT_LIBRESSL, URI.parse("https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-#{DEFAULT_LIBRESSL}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
+        PackageSpec.new(
+          "libressl",
+          DEFAULT_LIBRESSL,
+          URI.parse("https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-#{DEFAULT_LIBRESSL}.tar.gz"),
+          phases: ["sysroot-from-alpine", "system-from-sysroot"],
+          configure_flags: ["--enable-shared", "--disable-static"],
+        ),
         PackageSpec.new(
           "cmake",
           DEFAULT_CMAKE,
@@ -252,6 +258,9 @@ module Bootstrap
             "-DCMake_HAVE_CXX_UNIQUE_PTR=ON",
             "-DCMake_HAVE_CXX_FILESYSTEM=ON",
             "-DBUILD_DOCS=OFF",
+            "-DCMAKE_ENABLE_BASH_COMPLETION=OFF",
+            "-DCMAKE_DOC_DIR=",
+            "-DCMAKE_MAN_DIR=",
             "-DSPHINX_MAN=OFF",
             "-DSPHINX_HTML=OFF",
             "-DBUILD_CursesDialog=OFF",
@@ -263,7 +272,13 @@ module Bootstrap
           patches: ["#{bootstrap_repo_dir}/patches/cmake-#{DEFAULT_CMAKE}/cmcppdap-include-cstdint.patch"],
           phases: ["sysroot-from-alpine", "system-from-sysroot"],
         ),
-        PackageSpec.new("libatomic_ops", DEFAULT_LIBATOMIC_OPS, URI.parse("https://github.com/ivmai/libatomic_ops/releases/download/v#{DEFAULT_LIBATOMIC_OPS}/libatomic_ops-#{DEFAULT_LIBATOMIC_OPS}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
+        PackageSpec.new(
+          "libatomic_ops",
+          DEFAULT_LIBATOMIC_OPS,
+          URI.parse("https://github.com/ivmai/libatomic_ops/releases/download/v#{DEFAULT_LIBATOMIC_OPS}/libatomic_ops-#{DEFAULT_LIBATOMIC_OPS}.tar.gz"),
+          phases: ["sysroot-from-alpine", "system-from-sysroot"],
+          configure_flags: ["--enable-shared", "--disable-static"],
+        ),
         PackageSpec.new(
           "llvm-project",
           DEFAULT_LLVM_VER,
@@ -280,24 +295,64 @@ module Bootstrap
           ],
           phases: ["sysroot-from-alpine", "system-from-sysroot"],
         ),
-        PackageSpec.new("bdwgc", DEFAULT_BDWGC, URI.parse("https://github.com/ivmai/bdwgc/releases/download/v#{DEFAULT_BDWGC}/gc-#{DEFAULT_BDWGC}.tar.gz"), build_directory: "gc-#{DEFAULT_BDWGC}", phases: ["sysroot-from-alpine", "system-from-sysroot"]),
-        PackageSpec.new("pcre2", DEFAULT_PCRE2, URI.parse("https://github.com/PhilipHazel/pcre2/releases/download/pcre2-#{DEFAULT_PCRE2}/pcre2-#{DEFAULT_PCRE2}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
-        PackageSpec.new("gmp", DEFAULT_GMP, URI.parse("https://ftp.gnu.org/gnu/gmp/gmp-#{DEFAULT_GMP}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
-        PackageSpec.new("libiconv", DEFAULT_LIBICONV, URI.parse("https://ftp.gnu.org/pub/gnu/libiconv/libiconv-#{DEFAULT_LIBICONV}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
+        PackageSpec.new(
+          "bdwgc",
+          DEFAULT_BDWGC,
+          URI.parse("https://github.com/ivmai/bdwgc/releases/download/v#{DEFAULT_BDWGC}/gc-#{DEFAULT_BDWGC}.tar.gz"),
+          build_directory: "gc-#{DEFAULT_BDWGC}",
+          phases: ["sysroot-from-alpine", "system-from-sysroot"],
+          configure_flags: ["--enable-shared", "--disable-static"],
+        ),
+        PackageSpec.new(
+          "pcre2",
+          DEFAULT_PCRE2,
+          URI.parse("https://github.com/PhilipHazel/pcre2/releases/download/pcre2-#{DEFAULT_PCRE2}/pcre2-#{DEFAULT_PCRE2}.tar.gz"),
+          phases: ["sysroot-from-alpine", "system-from-sysroot"],
+          configure_flags: ["--enable-shared", "--disable-static"],
+        ),
+        PackageSpec.new(
+          "gmp",
+          DEFAULT_GMP,
+          URI.parse("https://ftp.gnu.org/gnu/gmp/gmp-#{DEFAULT_GMP}.tar.gz"),
+          phases: ["sysroot-from-alpine", "system-from-sysroot"],
+          configure_flags: ["--enable-shared", "--disable-static"],
+        ),
+        PackageSpec.new(
+          "libiconv",
+          DEFAULT_LIBICONV,
+          URI.parse("https://ftp.gnu.org/pub/gnu/libiconv/libiconv-#{DEFAULT_LIBICONV}.tar.gz"),
+          phases: ["sysroot-from-alpine", "system-from-sysroot"],
+          configure_flags: ["--enable-shared", "--disable-static", "--disable-nls"],
+        ),
         PackageSpec.new(
           "libxml2",
           DEFAULT_LIBXML2,
           URI.parse("https://github.com/GNOME/libxml2/archive/refs/tags/v#{DEFAULT_LIBXML2}.tar.gz"),
           build_directory: "libxml2-#{DEFAULT_LIBXML2}",
           configure_flags: [
+            "-DBUILD_SHARED_LIBS=ON",
+            "-DBUILD_STATIC=OFF",
             "-DLIBXML2_WITH_PYTHON=OFF",
             "-DLIBXML2_WITH_TESTS=OFF",
             "-DLIBXML2_WITH_LZMA=OFF",
           ],
           phases: ["sysroot-from-alpine", "system-from-sysroot"],
         ),
-        PackageSpec.new("libyaml", DEFAULT_LIBYAML, URI.parse("https://pyyaml.org/download/libyaml/yaml-#{DEFAULT_LIBYAML}.tar.gz"), build_directory: "yaml-#{DEFAULT_LIBYAML}", phases: ["sysroot-from-alpine", "system-from-sysroot"]),
-        PackageSpec.new("libffi", DEFAULT_LIBFFI, URI.parse("https://github.com/libffi/libffi/releases/download/v#{DEFAULT_LIBFFI}/libffi-#{DEFAULT_LIBFFI}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
+        PackageSpec.new(
+          "libyaml",
+          DEFAULT_LIBYAML,
+          URI.parse("https://pyyaml.org/download/libyaml/yaml-#{DEFAULT_LIBYAML}.tar.gz"),
+          build_directory: "yaml-#{DEFAULT_LIBYAML}",
+          phases: ["sysroot-from-alpine", "system-from-sysroot"],
+          configure_flags: ["--enable-shared", "--disable-static"],
+        ),
+        PackageSpec.new(
+          "libffi",
+          DEFAULT_LIBFFI,
+          URI.parse("https://github.com/libffi/libffi/releases/download/v#{DEFAULT_LIBFFI}/libffi-#{DEFAULT_LIBFFI}.tar.gz"),
+          phases: ["sysroot-from-alpine", "system-from-sysroot"],
+          configure_flags: ["--enable-shared", "--disable-static"],
+        ),
         PackageSpec.new(
           "crystal",
           DEFAULT_CRYSTAL,
@@ -333,6 +388,7 @@ module Bootstrap
           DEFAULT_SQLITE,
           URI.parse("https://www.sqlite.org/2024/sqlite-autoconf-#{DEFAULT_SQLITE}.tar.gz"),
           phases: ["tools-from-system"],
+          configure_flags: ["--enable-shared", "--disable-static"],
         ),
         PackageSpec.new(
           "fossil",
@@ -745,6 +801,7 @@ module Bootstrap
       ]
       flags = [
         "-DCMAKE_BUILD_TYPE=Release",
+        "-DBUILD_SHARED_LIBS=ON",
         "-DLLVM_TARGETS_TO_BUILD=#{llvm_targets}",
         "-DLLVM_HOST_TRIPLE=#{sysroot_triple}",
         "-DLLVM_DEFAULT_TARGET_TRIPLE=#{sysroot_triple}",
@@ -766,6 +823,12 @@ module Bootstrap
         "-DLLVM_BUILD_DOCS=OFF",
         "-DLLVM_ENABLE_DOXYGEN=OFF",
         "-DLLVM_ENABLE_SPHINX=OFF",
+        "-DLLVM_ENABLE_SHARED=ON",
+        "-DLLVM_BUILD_LLVM_DYLIB=ON",
+        "-DLLVM_LINK_LLVM_DYLIB=ON",
+        "-DLLVM_INSTALL_CMAKE_DIR=",
+        "-DCLANG_INSTALL_CMAKE_DIR=",
+        "-DLLD_INSTALL_CMAKE_DIR=",
         "-DCLANG_BUILD_DOCS=OFF",
         "-DCLANG_ENABLE_STATIC_ANALYZER=OFF",
         "-DCLANG_ENABLE_ARCMT=OFF",
@@ -781,19 +844,19 @@ module Bootstrap
         "-DCOMPILER_RT_BUILD_PROFILE=OFF",
         "-DCOMPILER_RT_BUILD_MEMPROF=OFF",
         "-DLIBUNWIND_USE_COMPILER_RT=ON",
-        "-DLIBUNWIND_ENABLE_SHARED=OFF",
-        "-DLIBUNWIND_ENABLE_STATIC=ON",
+        "-DLIBUNWIND_ENABLE_SHARED=ON",
+        "-DLIBUNWIND_ENABLE_STATIC=OFF",
         "-DLIBUNWIND_INCLUDE_TESTS=OFF",
         "-DLIBCXX_HAS_MUSL_LIBC=ON",
         "-DLIBCXX_USE_COMPILER_RT=ON",
-        "-DLIBCXX_ENABLE_SHARED=OFF",
-        "-DLIBCXX_ENABLE_STATIC=ON",
+        "-DLIBCXX_ENABLE_SHARED=ON",
+        "-DLIBCXX_ENABLE_STATIC=OFF",
         "-DLIBCXX_ENABLE_BENCHMARKS=OFF",
         "-DLIBCXX_INCLUDE_TESTS=OFF",
         "-DLIBCXXABI_USE_COMPILER_RT=ON",
         "-DLIBCXXABI_USE_LLVM_UNWINDER=ON",
-        "-DLIBCXXABI_ENABLE_SHARED=OFF",
-        "-DLIBCXXABI_ENABLE_STATIC=ON",
+        "-DLIBCXXABI_ENABLE_SHARED=ON",
+        "-DLIBCXXABI_ENABLE_STATIC=OFF",
         "-DLIBCXXABI_INCLUDE_TESTS=OFF",
       ])
       flags
@@ -1046,6 +1109,7 @@ module Bootstrap
               "NO_DOCS"    => "1",
               "NO_GETTEXT" => "1",
               "NO_TCLTK"   => "1",
+              "NO_GITWEB"  => "1",
             },
           },
         ),
@@ -1406,13 +1470,11 @@ module Bootstrap
       libcxx_include = "#{sysroot_prefix}/include/c++/v1"
       libcxx_target_include = "#{sysroot_prefix}/include/#{sysroot_triple}/c++/v1"
       libcxx_libdir = "#{sysroot_prefix}/lib/#{sysroot_triple}"
-      libcxx_archive = "#{libcxx_libdir}/libc++.a"
-      libcxxabi_archive = "#{libcxx_libdir}/libc++abi.a"
-      libunwind_archive = "#{libcxx_libdir}/libunwind.a"
-      cxx_standard_libs = "-Wl,--start-group #{libcxx_archive} #{libcxxabi_archive} #{libunwind_archive} -Wl,--end-group"
+      cxx_rpath = "-Wl,-rpath,#{libcxx_libdir}"
+      cxx_standard_libs = "-lc++ -lc++abi -lunwind #{cxx_rpath}"
       c_flags = "--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -Wno-unused-command-line-argument"
       cxx_flags = "-nostdinc++ -isystem #{libcxx_include} -isystem #{libcxx_target_include} -nostdlib++ -stdlib=libc++ --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -Wno-unused-command-line-argument -Wno-unnecessary-virtual-specifier -L#{libcxx_libdir} -L#{sysroot_prefix}/lib"
-      linker_flags = "--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{sysroot_prefix}/lib"
+      linker_flags = "--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{sysroot_prefix}/lib #{cxx_rpath}"
 
       flags = base_flags.reject { |flag| flag.starts_with?("-DLLVM_ENABLE_RUNTIMES=") }
       flags << "-DCMAKE_C_COMPILER=#{sysroot_prefix}/bin/clang"
