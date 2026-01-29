@@ -1455,11 +1455,13 @@ module Bootstrap
       cxx_flags = append_warning_suppression(cxx_flags)
 
       flags = base_flags.reject do |flag|
-        flag.starts_with?("-DLLVM_ENABLE_LIBCXX=") ||
+        flag.starts_with?("-DBUILD_SHARED_LIBS=") ||
+          flag.starts_with?("-DLLVM_ENABLE_LIBCXX=") ||
           flag.starts_with?("-DLLVM_LINK_LLVM_DYLIB=")
       end
       flags << "-DCMAKE_C_COMPILER=#{cc}"
       flags << "-DCMAKE_CXX_COMPILER=#{cxx}"
+      flags << "-DBUILD_SHARED_LIBS=ON"
       flags << "-DLLVM_LINK_LLVM_DYLIB=OFF"
       unless cc_flags.empty? || flags.any? { |flag| flag.starts_with?("-DCMAKE_C_FLAGS=") }
         flags << "-DCMAKE_C_FLAGS=#{cc_flags}"
