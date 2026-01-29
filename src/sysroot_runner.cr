@@ -249,7 +249,12 @@ module Bootstrap
             end
             raise "Missing tarball source #{source_root}" unless Dir.exists?(source_root)
             FileUtils.mkdir_p(File.dirname(output))
-            run_cmd(["tar", "-czf", output, "-C", source_root, "."], env: env)
+            tar_excludes = [
+              "--exclude=var/lib",
+              "--exclude=var/lib/**",
+              "--exclude=.bq2-rootfs",
+            ]
+            run_cmd(["tar", "-czf", output] + tar_excludes + ["-C", source_root, "."], env: env)
           when "linux-headers"
             install_root = destdir ? "#{destdir}#{install_prefix}" : install_prefix
             run_cmd(["make"] + step.configure_flags + ["headers"], env: env)
