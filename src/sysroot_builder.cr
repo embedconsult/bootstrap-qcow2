@@ -1470,10 +1470,11 @@ module Bootstrap
       libcxx_include = "#{sysroot_prefix}/include/c++/v1"
       libcxx_target_include = "#{sysroot_prefix}/include/#{sysroot_triple}/c++/v1"
       libcxx_libdir = "#{sysroot_prefix}/lib/#{sysroot_triple}"
-      cxx_standard_libs = "-lc++ -lc++abi -lunwind"
+      cxx_rpath = "-Wl,-rpath,#{libcxx_libdir}"
+      cxx_standard_libs = "-lc++ -lc++abi -lunwind #{cxx_rpath}"
       c_flags = "--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -Wno-unused-command-line-argument"
       cxx_flags = "-nostdinc++ -isystem #{libcxx_include} -isystem #{libcxx_target_include} -nostdlib++ -stdlib=libc++ --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -Wno-unused-command-line-argument -Wno-unnecessary-virtual-specifier -L#{libcxx_libdir} -L#{sysroot_prefix}/lib"
-      linker_flags = "--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{sysroot_prefix}/lib"
+      linker_flags = "--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{sysroot_prefix}/lib #{cxx_rpath}"
 
       flags = base_flags.reject { |flag| flag.starts_with?("-DLLVM_ENABLE_RUNTIMES=") }
       flags << "-DCMAKE_C_COMPILER=#{sysroot_prefix}/bin/clang"
