@@ -66,10 +66,12 @@ module Bootstrap
     DEFAULT_LIBYAML       = "0.2.5"
     DEFAULT_LIBFFI        = "3.4.6"
     DEFAULT_BDWGC         = "8.2.6"
-    DEFAULT_FOSSIL        = "2.25"
-    DEFAULT_GIT           = "2.45.2"
-    DEFAULT_CRYSTAL       = "1.18.2"
-    DEFAULT_BQ2           = "0.0.8"
+    # Source: https://www.sqlite.org/2024/sqlite-autoconf-3460000.tar.gz (SQLite 3.46.0).
+    DEFAULT_SQLITE  = "3460000"
+    DEFAULT_FOSSIL  = "2.25"
+    DEFAULT_GIT     = "2.45.2"
+    DEFAULT_CRYSTAL = "1.18.2"
+    DEFAULT_BQ2     = "0.0.8"
     # Cache directory name for prefetched shards dependencies.
     SHARDS_CACHE_DIR = ".shards-cache"
     # Source: https://curl.se/ca/cacert.pem (Mozilla CA certificate bundle).
@@ -322,15 +324,23 @@ module Bootstrap
           phases: ["system-from-sysroot"],
         ),
         PackageSpec.new(
-          "fossil",
-          DEFAULT_FOSSIL,
-          URI.parse("https://www.fossil-scm.org/home/tarball/fossil-src-#{DEFAULT_FOSSIL}.tar.gz"),
-          phases: ["tools-from-system"],
-        ),
-        PackageSpec.new(
           "git",
           DEFAULT_GIT,
           URI.parse("https://www.kernel.org/pub/software/scm/git/git-#{DEFAULT_GIT}.tar.gz"),
+          phases: ["tools-from-system"],
+        ),
+        PackageSpec.new(
+          "sqlite",
+          DEFAULT_SQLITE,
+          URI.parse("https://www.sqlite.org/2024/sqlite-autoconf-#{DEFAULT_SQLITE}.tar.gz"),
+          phases: ["tools-from-system"],
+        ),
+        PackageSpec.new(
+          "fossil",
+          DEFAULT_FOSSIL,
+          URI.parse("https://www.fossil-scm.org/home/tarball/fossil-src-#{DEFAULT_FOSSIL}.tar.gz"),
+          strategy: "makefile-classic",
+          patches: ["#{bootstrap_repo_dir}/patches/fossil-#{DEFAULT_FOSSIL}/makefile-bq2.patch"],
           phases: ["tools-from-system"],
         ),
       ]
@@ -525,7 +535,7 @@ module Bootstrap
     # Assemble a chroot-able rootfs:
     # * extracts the seed rootfs
     # * creates workspace/var/lib directories (/workspace holds extracted sources,
-    #   /var/lib holds the build plan)
+    #   /var/lib and /workspace/rootfs/var/lib hold the build plan)
     # * stages source archives (including bootstrap-qcow2) into /workspace
     # Returns the rootfs path on success.
     # Invoked by `generate_chroot_tarball` and can also be used directly in callers.
@@ -537,7 +547,7 @@ module Bootstrap
       tarball = resolve_base_rootfs_tarball(base_rootfs)
       Log.debug { "Extracting base rootfs from #{tarball}" }
       Tarball.extract(tarball, rootfs_dir, @preserve_ownership_for_rootfs, @owner_uid, @owner_gid, force_system_tar: @use_system_tar_for_rootfs)
-      FileUtils.mkdir_p(rootfs_dir / "workspace")
+      FileUtils.mkdir_p(rootfs_dir / "workspace/rootfs/var/lib")
       FileUtils.mkdir_p(rootfs_dir / "var/lib")
       stage_sources if include_sources
       rootfs_dir
@@ -1178,8 +1188,12 @@ module Bootstrap
 
     # Persist the build plan JSON into the chroot at /var/lib/sysroot-build-plan.json.
     def write_plan(plan : BuildPlan = build_plan) : Path
+      plan_json = plan.to_pretty_json
       FileUtils.mkdir_p(self.plan_path.parent)
-      File.write(self.plan_path, plan.to_pretty_json)
+      File.write(self.plan_path, plan_json)
+      inner_plan_path = rootfs_dir / "workspace/rootfs/var/lib/sysroot-build-plan.json"
+      FileUtils.mkdir_p(inner_plan_path.parent)
+      File.write(inner_plan_path, plan_json)
       self.plan_path
     end
 

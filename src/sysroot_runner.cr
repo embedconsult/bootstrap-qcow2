@@ -168,6 +168,15 @@ module Bootstrap
             run_cmd(["make", "-j#{cpus}"], env: env)
             install_root = destdir || install_prefix
             run_cmd(["make", "CONFIG_PREFIX=#{install_root}", "install"], env: env)
+          when "makefile-classic"
+            makefile = "Makefile.bq2"
+            raise "Missing #{makefile} in #{step.workdir}" unless File.exists?(makefile)
+            run_cmd(["make", "-f", makefile, "-j#{cpus}"], env: env)
+            if destdir
+              run_cmd(["make", "-f", makefile, "DESTDIR=#{destdir}", "install"], env: env)
+            else
+              run_cmd(["make", "-f", makefile, "install"], env: env)
+            end
           when "copy-tree"
             raise "copy-tree requires step.install_prefix (destination path)" unless step.install_prefix
             install_root = destdir ? "#{destdir}#{install_prefix}" : install_prefix
@@ -703,22 +712,17 @@ module Bootstrap
       overrides.apply(plan)
     end
 
-    private def self.stage_iteration_files_for_destdirs(plan : BuildPlan, overrides_path : String?) : Nil
-      plan_json = plan.to_pretty_json
-      overrides_json = overrides_path && File.exists?(overrides_path) ? File.read(overrides_path) : nil
+    # Ensure report directories exist for phases that stage into a destdir
+    # rootfs. The build plan and overrides are treated as immutable and must
+    # never be rewritten by sysroot-runner.
+    private def self.stage_iteration_files_for_destdirs(plan : BuildPlan, _overrides_path : String?) : Nil
       plan.phases.each do |phase|
         next unless destdir = phase.destdir
-        stage_path = File.join(destdir, DEFAULT_PLAN_PATH.lchop('/'))
-        overrides_stage = File.join(destdir, DEFAULT_OVERRIDES_PATH.lchop('/'))
         report_stage = File.join(destdir, DEFAULT_REPORT_DIR.lchop('/'))
-
-        FileUtils.mkdir_p(File.dirname(stage_path))
-        File.write(stage_path, plan_json)
-        File.write(overrides_stage, overrides_json || "{}\n")
         FileUtils.mkdir_p(report_stage)
       end
     rescue ex
-      Log.warn { "Failed to stage iteration files into destdir rootfs: #{ex.message}" }
+      Log.warn { "Failed to stage iteration report directories into destdir rootfs: #{ex.message}" }
     end
 
     private def self.filter_phases_by_packages(phases : Array(BuildPhase), packages : Array(String)) : Array(BuildPhase)
