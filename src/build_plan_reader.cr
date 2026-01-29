@@ -1,5 +1,6 @@
 require "json"
 require "./build_plan"
+require "./sysroot_workspace"
 
 module Bootstrap
   # Loads and parses serialized build plans written into the sysroot.
@@ -48,7 +49,7 @@ module Bootstrap
       phase = BuildPhase.new(
         name: "sysroot-from-alpine",
         description: "Legacy plan (unphased)",
-        workspace: "/workspace",
+        workspace: SysrootWorkspace::ROOTFS_WORKSPACE.to_s,
         environment: "legacy",
         install_prefix: install_prefix,
         steps: steps,

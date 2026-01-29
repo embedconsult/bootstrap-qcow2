@@ -103,10 +103,23 @@ module Bootstrap
       state
     end
 
+    # Return the SHA256 hex digest for *path*, or nil when the file is missing.
+    def self.digest_for?(path : String) : String?
+      return nil unless File.exists?(path)
+      digest = Digest::SHA256.new
+      File.open(path) do |file|
+        buffer = Bytes.new(8192)
+        while (read = file.read(buffer)) > 0
+          digest.update(buffer[0, read])
+        end
+      end
+      digest.final.hexstring
+    end
+
     # Persist the state JSON to disk.
     def save(path : String = DEFAULT_PATH) : Nil
       FileUtils.mkdir_p(Path[path].parent)
-      File.write(path, to_json)
+      File.write(path, to_pretty_json)
     end
 
     # Returns true when the given *step_name* has already completed successfully
@@ -152,8 +165,8 @@ module Bootstrap
     def reconcile_inputs! : Nil
       previous_plan = plan_digest
       previous_overrides = overrides_digest
-      current_plan = digest_for?(plan_path)
-      current_overrides = overrides_path ? digest_for?(overrides_path.not_nil!) : nil
+      current_plan = self.class.digest_for?(plan_path)
+      current_overrides = overrides_path ? self.class.digest_for?(overrides_path.not_nil!) : nil
 
       self.plan_digest = current_plan
       self.overrides_digest = current_overrides
@@ -173,16 +186,66 @@ module Bootstrap
       self.invalidation_reason = "Build plan/overrides changed; cleared completed steps"
     end
 
-    private def digest_for?(path : String) : String?
-      return nil unless File.exists?(path)
-      digest = Digest::SHA256.new
-      File.open(path) do |file|
-        buffer = Bytes.new(8192)
-        while (read = file.read(buffer)) > 0
-          digest.update(buffer[0, read])
+    # Return true when the resume step matches the most recent failure.
+    def retrying_last_failure?(phase : String?, step : String?) : Bool
+      return false unless phase && step
+      failure = progress.last_failure
+      return false unless failure
+      failure.phase == phase && failure.step == step
+    end
+
+    # Resolve a rootfs-absolute *path* based on the location of *state_path*.
+    def resolve_rootfs_path(path : String, state_path : String?) : String
+      return path unless path.starts_with?("/") && state_path
+      rootfs_root = Path[state_path].expand.parent.parent.parent
+      (rootfs_root / path.lchop("/")).to_s
+    end
+
+    # Read the overrides JSON contents if the file exists.
+    def overrides_contents(state_path : String? = nil) : String?
+      path = overrides_path
+      return nil unless path
+      resolved = resolve_rootfs_path(path, state_path)
+      return nil unless File.exists?(resolved)
+      File.read(resolved)
+    end
+
+    # Determine the most relevant failure report path, if any.
+    def failure_report_path(state_path : String? = nil) : String?
+      if (failure = progress.last_failure)
+        report_path = failure.report_path
+        if report_path
+          resolved = resolve_rootfs_path(report_path, state_path)
+          return resolved if File.exists?(resolved)
         end
       end
-      digest.final.hexstring
+
+      reports_dir = report_dir
+      return nil unless reports_dir
+      resolved_reports_dir = resolve_rootfs_path(reports_dir, state_path)
+      return nil unless Dir.exists?(resolved_reports_dir)
+
+      latest_path = nil
+      latest_mtime = Time::UNIX_EPOCH
+      Dir.each_child(resolved_reports_dir) do |entry|
+        next unless entry.ends_with?(".json")
+        path = File.join(resolved_reports_dir, entry)
+        next unless File.file?(path)
+        mtime = File.info(path).modification_time
+        if latest_path.nil? || mtime > latest_mtime
+          latest_path = path
+          latest_mtime = mtime
+        end
+      end
+
+      latest_path
+    end
+
+    # Read the most recent failure report JSON if available.
+    def failure_report_contents(state_path : String? = nil) : String?
+      path = failure_report_path(state_path)
+      return nil unless path && File.exists?(path)
+      File.read(path)
     end
 
     # Minimal step reference used for progress tracking.

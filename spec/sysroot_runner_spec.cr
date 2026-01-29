@@ -135,6 +135,88 @@ describe Bootstrap::SysrootRunner do
     runner.calls.first[:phase].should eq "two"
   end
 
+  it "defaults to the first phase when not running inside the rootfs" do
+    steps = [Bootstrap::BuildStep.new(name: "step", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
+    plan = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(name: "one", description: "a", workspace: "/workspace", environment: "alpine-seed", install_prefix: "/opt/sysroot", steps: steps),
+      Bootstrap::BuildPhase.new(name: "two", description: "b", workspace: "/workspace", environment: "rootfs-system", install_prefix: "/usr", steps: steps),
+    ])
+
+    previous = ENV["BQ2_ROOTFS"]?
+    ENV["BQ2_ROOTFS"] = "0"
+    begin
+      runner = RecordingRunner.new
+      Bootstrap::SysrootRunner.run_plan(plan, runner)
+      runner.calls.size.should eq 1
+      runner.calls.first[:phase].should eq "one"
+    ensure
+      if previous
+        ENV["BQ2_ROOTFS"] = previous
+      else
+        ENV.delete("BQ2_ROOTFS")
+      end
+    end
+  end
+
+  it "defaults to the first rootfs phase when running inside the rootfs" do
+    steps = [Bootstrap::BuildStep.new(name: "step", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
+    plan = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(name: "one", description: "a", workspace: "/workspace", environment: "alpine-seed", install_prefix: "/opt/sysroot", steps: steps),
+      Bootstrap::BuildPhase.new(name: "two", description: "b", workspace: "/workspace", environment: "rootfs-system", install_prefix: "/usr", steps: steps),
+    ])
+
+    previous = ENV["BQ2_ROOTFS"]?
+    ENV["BQ2_ROOTFS"] = "1"
+    begin
+      runner = RecordingRunner.new
+      Bootstrap::SysrootRunner.run_plan(plan, runner)
+      runner.calls.size.should eq 1
+      runner.calls.first[:phase].should eq "two"
+    ensure
+      if previous
+        ENV["BQ2_ROOTFS"] = previous
+      else
+        ENV.delete("BQ2_ROOTFS")
+      end
+    end
+  end
+
+  restrictions = Bootstrap::SysrootNamespace.collect_restrictions
+  if restrictions.empty?
+    it "allows rootfs phases to run outside the rootfs when requested" do
+      phase = Bootstrap::BuildPhase.new(
+        name: "rootfs-phase",
+        description: "rootfs phase",
+        workspace: "/workspace",
+        environment: "rootfs-system",
+        install_prefix: "/usr",
+        steps: [] of Bootstrap::BuildStep,
+      )
+      runner = RecordingRunner.new
+      previous = ENV["BQ2_ROOTFS"]?
+      ENV["BQ2_ROOTFS"] = "0"
+
+      begin
+        Bootstrap::SysrootRunner.run_phase(phase, runner, report_dir: nil)
+        raise "Expected refusal when running outside the rootfs"
+      rescue ex
+        ex.message.should match(/Refusing to run/)
+      ensure
+        if previous
+          ENV["BQ2_ROOTFS"] = previous
+        else
+          ENV.delete("BQ2_ROOTFS")
+        end
+      end
+
+      Bootstrap::SysrootRunner.run_phase(phase, runner, report_dir: nil, allow_outside_rootfs: true)
+    end
+  else
+    reason = restrictions.join("; ")
+    pending "allows rootfs phases to run outside the rootfs when requested (#{reason})" do
+    end
+  end
+
   it "raises when a requested phase does not exist" do
     plan = Bootstrap::BuildPlan.new([
       Bootstrap::BuildPhase.new(name: "one", description: "a", workspace: "/workspace", environment: "test", install_prefix: "/opt/sysroot", steps: [] of Bootstrap::BuildStep),

@@ -2,6 +2,7 @@ require "file_utils"
 require "log"
 require "path"
 require "process"
+require "./process_runner"
 
 module Bootstrap
   # Shared Alpine-specific setup for sysroot iteration.
@@ -22,24 +23,20 @@ module Bootstrap
       clang
       libgcc
       libstdc++-dev
+      libressl-dev
       crystal
       lld
       linux-headers
       make
       musl-dev
       patch
+      zlib-dev
+      pcre2-dev
+      gc-dev
+      yaml-dev
       perl
+      python3
       shards
-    ]
-
-    # Extra packages needed to run Codex via `npx codex` inside Alpine.
-    CODEX_PACKAGES = %w[
-      nodejs-lts
-      npm
-    ]
-
-    CODEX_NPM_PACKAGES = %w[
-      @openai/codex
     ]
 
     def self.write_resolv_conf(rootfs : Path, nameserver : String = DEFAULT_NAMESERVER) : Nil
@@ -52,26 +49,13 @@ module Bootstrap
       apk_add(SYSROOT_RUNNER_PACKAGES)
     end
 
-    def self.install_codex_packages(install_npm_global : Bool = true) : Nil
-      apk_add(CODEX_PACKAGES)
-      return unless install_npm_global
-      npm_install_global(CODEX_NPM_PACKAGES)
-    end
-
     def self.apk_add(packages : Array(String)) : Nil
       return if packages.empty?
       argv = ["add", "--no-cache"] + packages
       Log.info { "apk #{argv.join(" ")}" }
-      status = Process.run("apk", argv, output: STDOUT, error: STDERR)
+      result = ProcessRunner.run(["apk"] + argv)
+      status = result.status
       raise "apk add failed (#{status.exit_code})" unless status.success?
-    end
-
-    def self.npm_install_global(packages : Array(String)) : Nil
-      return if packages.empty?
-      argv = ["i", "-g"] + packages
-      Log.info { "npm #{argv.join(" ")}" }
-      status = Process.run("npm", argv, output: STDOUT, error: STDERR)
-      raise "npm install failed (#{status.exit_code})" unless status.success?
     end
   end
 end

@@ -12,6 +12,8 @@ describe Bootstrap::BuildPlan do
       install_prefix: "/usr",
       destdir: "/workspace/rootfs",
       env: {"CC" => "clang"} of String => String,
+      build_dir: "/workspace/musl-build",
+      clean_build: true,
     )
 
     phase = Bootstrap::BuildPhase.new(
@@ -34,5 +36,7 @@ describe Bootstrap::BuildPlan do
     parsed.phases.first.destdir.should eq "/workspace/rootfs"
     parsed.phases.first.steps.first.install_prefix.should eq "/usr"
     parsed.phases.first.steps.first.env["CC"].should eq "clang"
+    parsed.phases.first.steps.first.build_dir.should eq "/workspace/musl-build"
+    parsed.phases.first.steps.first.clean_build.should eq true
   end
 end

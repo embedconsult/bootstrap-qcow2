@@ -1,5 +1,9 @@
 require "file_utils"
+require "log"
 require "path"
+require "./alpine_setup"
+require "./cli"
+require "./sysroot_workspace"
 
 lib LibC
   # Linux syscalls documented in https://docs.kernel.org/:
@@ -20,7 +24,7 @@ module Bootstrap
   # SysrootNamespace encapsulates user/mount namespaces and optional rootfs
   # mounting to provide a sudo-less entrypoint into the sysroot when supported
   # by the kernel.
-  class SysrootNamespace
+  class SysrootNamespace < CLI
     USERNS_TOGGLE_PATH = "/proc/sys/kernel/unprivileged_userns_clone"
     # Linux kernel sysctl: Documentation/admin-guide/sysctl/kernel.rst
     USERNS_TOGGLE_ENABLED_VALUE  = "1"
@@ -38,17 +42,211 @@ module Bootstrap
     CLONE_NEWUSER = 0x10000000
     CLONE_NEWNET  = 0x40000000
 
-    MS_BIND    =  4096_u64
-    MS_REC     = 16384_u64
-    MS_RDONLY  = (1_u64 << 0)
-    MS_NOSUID  = (1_u64 << 1)
-    MS_NODEV   = (1_u64 << 2)
-    MS_NOEXEC  = (1_u64 << 3)
-    MS_REMOUNT = (1_u64 << 5)
-    MS_PRIVATE = (1_u64 << 18)
-    MNT_DETACH = 2
+    MS_BIND      =  4096_u64
+    MS_REC       = 16384_u64
+    MS_RDONLY    = (1_u64 << 0)
+    MS_NOSUID    = (1_u64 << 1)
+    MS_NODEV     = (1_u64 << 2)
+    MS_NOEXEC    = (1_u64 << 3)
+    MS_REMOUNT   = (1_u64 << 5)
+    MS_PRIVATE   = (1_u64 << 18)
+    MNT_DETACH   = 2
+    DEFAULT_PATH = "/opt/sysroot/bin:/opt/sysroot/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
 
     class NamespaceError < RuntimeError
+    end
+
+    # Summarize the sysroot namespace CLI behavior for help output.
+    def self.summary : String
+      "Enter a namespaced rootfs and exec a command"
+    end
+
+    # Return additional command aliases for sysroot namespace tooling.
+    def self.aliases : Array(String)
+      ["sysroot-namespace-check"]
+    end
+
+    # Describe help output entries for sysroot namespace commands.
+    def self.help_entries : Array(Tuple(String, String))
+      [
+        {"sysroot-namespace", "Enter a namespaced rootfs and exec a command"},
+        {"sysroot-namespace-check", "Check host namespace prerequisites"},
+      ]
+    end
+
+    # Dispatch sysroot namespace subcommands by command name.
+    def self.run(args : Array(String), command_name : String) : Int32
+      case command_name
+      when "sysroot-namespace"
+        run_namespace(args)
+      when "sysroot-namespace-check"
+        run_namespace_check(args)
+      else
+        raise "Unknown sysroot namespace command #{command_name}"
+      end
+    end
+
+    # Enter the rootfs namespace and exec the requested command.
+    private def self.run_namespace(args : Array(String)) : Int32
+      rootfs = SysrootWorkspace.default_rootfs.to_s
+      extra_binds = [] of Tuple(Path, Path)
+      command = [] of String
+      codex_mode = false
+      run_alpine_setup = false
+      parser, remaining, help = CLI.parse(args, "Usage: bq2 sysroot-namespace [options] [-- command...]") do |p|
+        p.on("--rootfs=PATH", "Path to the sysroot rootfs (default: #{rootfs})") { |val| rootfs = val }
+        p.on("--bind=SRC:DST", "Bind-mount SRC into DST inside the rootfs (repeatable; DST is inside rootfs)") do |val|
+          parts = val.split(":", 2)
+          raise "Expected --bind=SRC:DST" unless parts.size == 2
+          src = Path[parts[0]].expand
+          dst = normalize_bind_target(parts[1])
+          extra_binds << {src, dst}
+        end
+        p.on("--alpine-setup", "Install Alpine packages needed to replay the sysroot build plan") do
+          run_alpine_setup = true
+        end
+        p.on("--codex", "Bind ./codex/work to /work and default to /work/bin/codex") do
+          codex_mode = true
+        end
+      end
+      return CLI.print_help(parser) if help
+
+      home = codex_mode ? "/work" : "/root"
+      extra_env = {} of String => String
+      if codex_mode
+        # TODO: if there isn't a git checkout in codex/work/bootstrap-qcow2, make one
+        FileUtils.mkdir_p("codex/work/bootstrap-qcow2")
+        extra_binds << {Path["codex/work"], Path["/work"]}
+        command = [
+          "/bin/sh",
+          "--login",
+          "-c",
+          "/work/bin/codex --add-dir /var --add-dir /opt --add-dir #{SysrootWorkspace::ROOTFS_WORKSPACE} -C /work/bootstrap-qcow2 -s workspace-write",
+        ]
+        unless remaining.empty?
+          command[-1] = [command[-1], remaining.join(" ")].join(" ")
+        end
+        extra_env["CODEX_HOME"] = "/work/.codex"
+        extra_env["OPENAI_API_KEY"] = ENV["OPENAI_API_KEY"]
+        STDERR.puts "codex-mode: command=#{command.join(" ")}"
+      else
+        if remaining.empty?
+          command = ["/bin/sh", "--login"]
+        else
+          command = remaining.not_nil!
+        end
+      end
+      rootfs_value = rootfs.not_nil!
+      unless Dir.exists?(rootfs_value)
+        STDERR.puts "Workspace rootfs missing at #{rootfs_value}."
+        STDERR.puts "Run ./bin/bq2 --all to generate it."
+        return 1
+      end
+      Log.info do
+        bind_summary = extra_binds.map { |(src, dst)| "#{src}:#{dst}" }.join(", ")
+        "Entering namespace with rootfs=#{rootfs_value} command=#{command.join(" ")} binds=[#{bind_summary}]"
+      end
+      STDERR.puts "Entering namespace with rootfs=#{rootfs_value}"
+      STDERR.puts "Bind mounts: #{extra_binds.map { |(src, dst)| "#{src}:#{dst}" }.join(", ")}"
+      STDERR.puts "Command: #{command.join(" ")}"
+      unless Dir.exists?(rootfs_value)
+        Log.error { "Rootfs path does not exist: #{rootfs_value}" }
+        STDERR.puts "Rootfs path does not exist: #{rootfs_value}"
+        return 1
+      end
+
+      SysrootNamespace.enter_rootfs(rootfs_value, extra_binds: extra_binds)
+      reset_environment(home, extra_env)
+      apply_toolchain_env_defaults
+      AlpineSetup.install_sysroot_runner_packages if run_alpine_setup
+      Log.info { "Executing command: #{command.join(" ")}" }
+      STDERR.puts "Executing command: #{command.join(" ")}"
+      Process.exec(command.first, command[1..])
+    rescue ex : File::Error
+      cmd = command || [] of String
+      executable = cmd.first?
+      cwd = Dir.current
+      exec_exists = executable ? File.exists?(executable) : false
+      Log.error do
+        "Process exec failed for #{cmd.join(" ")} (cwd=#{cwd}, rootfs=#{rootfs}, executable=#{executable}, exists=#{exec_exists}): #{ex.message}"
+      end
+      STDERR.puts "Process exec failed for #{cmd.join(" ")}"
+      STDERR.puts "cwd=#{cwd} rootfs=#{rootfs} executable=#{executable} exists=#{exec_exists}"
+      STDERR.puts "error=#{ex.message}"
+      raise ex
+    end
+
+    # Report namespace preflight checks and hint at host fixes.
+    private def self.run_namespace_check(args : Array(String)) : Int32
+      proc_root = Path["/proc"]
+      filesystems_path = Path["/proc/filesystems"]
+
+      parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-namespace-check [options]") do |p|
+        p.on("--proc-root=PATH", "Override proc root (default: #{proc_root})") { |val| proc_root = Path[val] }
+        p.on("--filesystems=PATH", "Override /proc/filesystems path (default: #{filesystems_path})") { |val| filesystems_path = Path[val] }
+      end
+      return CLI.print_help(parser) if help
+
+      restrictions = SysrootNamespace.collect_restrictions(
+        proc_root: proc_root,
+        filesystems_path: filesystems_path,
+      )
+
+      if restrictions.empty?
+        puts "Namespace checks: OK (no obvious restrictions detected)"
+        return 0
+      end
+
+      userns_toggle = File.exists?(SysrootNamespace::USERNS_TOGGLE_PATH) ? File.read(SysrootNamespace::USERNS_TOGGLE_PATH).strip : "missing"
+      apparmor_toggle = File.exists?(SysrootNamespace::APPARMOR_USERNS_SYSCTL_PATH) ? File.read(SysrootNamespace::APPARMOR_USERNS_SYSCTL_PATH).strip : "missing"
+      puts "Kernel userns toggles: kernel.unprivileged_userns_clone=#{userns_toggle}, kernel.apparmor_restrict_unprivileged_userns=#{apparmor_toggle}"
+
+      puts "Namespace checks: detected potential restrictions:"
+      restrictions.each { |restriction| puts "- #{restriction}" }
+
+      puts
+      puts "Suggested fixes:"
+      restrictions.each do |restriction|
+        case restriction
+        when .includes?("kernel.unprivileged_userns_clone")
+          puts "- Enable user namespaces: sudo sysctl -w kernel.unprivileged_userns_clone=1"
+        when .includes?("missing filesystem support")
+          puts "- Ensure proc/sysfs/tmpfs are enabled in the kernel (CONFIG_PROC_FS/CONFIG_SYSFS/CONFIG_TMPFS)"
+        when .includes?("no_new_privs")
+          puts "- Run without NoNewPrivs (container runtime security profile may need adjustment)"
+        when .includes?("seccomp")
+          puts "- Disable or relax the seccomp profile (e.g., --security-opt seccomp=unconfined) to allow userns mapping and sockets"
+        when .includes?("user namespace setgroups mapping failed")
+          puts "- Allow setgroups/uid_map writes inside user namespaces (adjust seccomp/LSM or run privileged)"
+        when .includes?("setgroups")
+          puts "- Ensure /proc/self/setgroups is present and writable (AppArmor/LSM/seccomp may be blocking it); consider running without seccomp/NoNewPrivs"
+        end
+      end
+      1
+    end
+
+    # Normalize a bind-mount target path inside a rootfs.
+    private def self.normalize_bind_target(value : String) : Path
+      cleaned = value.starts_with?("/") ? value[1..] : value
+      Path[cleaned]
+    end
+
+    # Reset the environment to a minimal expected set before entering the rootfs.
+    private def self.reset_environment(home : String, extra_env : Hash(String, String) = {} of String => String) : Nil
+      ENV.clear
+      ENV["HOME"] = home
+      ENV["PATH"] = DEFAULT_PATH
+      extra_env.each { |key, value| ENV[key] = value }
+    end
+
+    # Ensure the sysroot toolchain defaults are available inside the namespace.
+    private def self.apply_toolchain_env_defaults : Nil
+      ENV["CRYSTAL_CACHE_DIR"] = "/tmp/crystal_cache"
+      ENV["SSL_CERT_FILE"] = "/etc/ssl/certs/ca-certificates.crt"
+      ENV["CC"] = "clang -fuse-ld=lld -Wno-unused-command-line-argument"
+      ENV["CXX"] = "clang++ -fuse-ld=lld -Wno-unused-command-line-argument"
+      ENV["LD"] = "ld.lld"
+      ENV["PATH"] = DEFAULT_PATH
     end
 
     # Collects restriction messages that can prevent user-namespace mounts of
@@ -196,6 +394,18 @@ module Bootstrap
       pivot_root!(root_path, unmount_old_root: unmount_old_root)
     end
 
+    # Enter a rootfs and apply the standard environment/toolchain setup.
+    def self.enter_rootfs_with_setup(rootfs : String,
+                                     extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path),
+                                     home : String = "/root",
+                                     extra_env : Hash(String, String) = {} of String => String,
+                                     run_alpine_setup : Bool = false) : Nil
+      enter_rootfs(rootfs, extra_binds: extra_binds)
+      reset_environment(home, extra_env)
+      apply_toolchain_env_defaults
+      AlpineSetup.install_sysroot_runner_packages if run_alpine_setup
+    end
+
     # pivot_root requires the new root to be a mount point. A bind mount creates
     # a dedicated mount point without depending on a specific filesystem type.
     private def self.bind_mount_rootfs(rootfs : Path)
@@ -267,11 +477,12 @@ module Bootstrap
       write_id_map("/proc/self/gid_map", gid)
     end
 
-    # Returns true when the current process already has CAP_SYS_ADMIN and
-    # user namespace setup is likely to be blocked by NoNewPrivs/seccomp,
-    # so we should skip the user namespace and only isolate mounts.
+    # Returns true when the current process already has CAP_SYS_ADMIN.
+    # In that case we can skip creating a user namespace, which preserves
+    # host capabilities such as CAP_NET_RAW (needed for ping) while still
+    # isolating mounts.
     private def self.privileged_mount_only? : Bool
-      cap_sys_admin? && (no_new_privs? || seccomp_enforced?)
+      cap_sys_admin?
     end
 
     private def self.no_new_privs?(proc_status_path : Path = Path["/proc/self/status"]) : Bool
