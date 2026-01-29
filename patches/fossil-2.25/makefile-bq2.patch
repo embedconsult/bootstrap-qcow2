@@ -4,16 +4,16 @@ Date: Thu, 1 Jan 1970 00:00:00 +0000
 Subject: [PATCH] Add Makefile.bq2 for prefix-aware classic builds
 
 ---
- Makefile.bq2 | 14 ++++++++++++++
- 1 file changed, 14 insertions(+)
+ Makefile.bq2 | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
  create mode 100644 Makefile.bq2
 
 diff --git a/Makefile.bq2 b/Makefile.bq2
 new file mode 100644
-index 0000000..ad8b7f7
+index 0000000..d526dc0
 --- /dev/null
 +++ b/Makefile.bq2
-@@ -0,0 +1,14 @@
+@@ -0,0 +1,13 @@
 +# Bootstrap-Qcow2 overrides for the classic Fossil makefile.
 +# Use the environment toolchain and default to /usr installs.
 +MAKE_COMPILATION_DB = no
@@ -25,6 +25,5 @@ index 0000000..ad8b7f7
 +prefix ?= /usr
 +BCC = $(CC)
 +TCC = $(CC) -g -Os -Wall
-+TCCFLAGS += $(LDFLAGS)
-+TCCFLAGS += -Wno-unused-command-line-argument
-+CFLAGS_INCLUDE = $(CPPFLAGS)
++BCCFLAGS += -fuse-ld=lld -rtlib=compiler-rt -stdlib=libc++ -Wno-unused-command-line-argument -I./src -I./extsrc
++TCCFLAGS += -fuse-ld=lld -rtlib=compiler-rt -stdlib=libc++ -Wno-unused-command-line-argument -I./src -I./extsrc
