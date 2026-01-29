@@ -142,8 +142,7 @@ module Bootstrap
           Log.debug { "Tar entry name=#{name} typeflag=#{typeflag.inspect} normalized=#{normalized_typeflag.inspect} linkname=#{linkname}" }
 
           if normalized_typeflag.in?({TYPE_PAX_GLOBAL, TYPE_PAX_EXT})
-            payload = read_payload(size)
-            records = parse_pax_records(payload)
+            records = read_pax_records(size)
             if normalized_typeflag == TYPE_PAX_GLOBAL
               @pax_global.merge!(records)
             else
@@ -255,39 +254,74 @@ module Bootstrap
         @io.skip(skip) if skip > 0
       end
 
-      # Read an exact payload from the tar stream.
-      private def read_payload(size : Int64) : String
-        return "" if size <= 0
-        String.build do |builder|
-          bytes_left = size
-          buffer = Bytes.new(8192)
-          while bytes_left > 0
-            to_read = Math.min(buffer.size, bytes_left.to_i)
+      # Parse PAX header records into a key/value hash.
+      private def read_pax_records(size : Int64) : Hash(String, String)
+        records = {} of String => String
+        return records if size <= 0
+        bytes_left = size
+        buffer = Bytes.new(IO::DEFAULT_BUFFER_SIZE)
+        while bytes_left > 0
+          length_digits = String.build do |builder|
+            while bytes_left > 0
+              byte = @io.read_byte
+              raise "Unexpected EOF in tar" unless byte
+              bytes_left -= 1
+              if byte == ' '.ord
+                break
+              end
+              builder << byte.chr
+            end
+          end
+          break if length_digits.empty?
+          length = length_digits.to_i?
+          raise "Invalid PAX header length" unless length && length > (length_digits.bytesize + 1)
+          record_bytes = length - length_digits.bytesize - 1
+          raise "Invalid PAX header length" if record_bytes > bytes_left
+          key_builder = String::Builder.new
+          value_builder = String::Builder.new
+          value_size = 0
+          key = ""
+          key_done = false
+          capture_value = false
+          value_too_long = false
+
+          while record_bytes > 0
+            to_read = Math.min(buffer.size, record_bytes.to_i)
             read = @io.read(buffer[0, to_read])
             raise "Unexpected EOF in tar" if read == 0
-            builder.write(buffer[0, read])
+            slice = buffer[0, read]
+            slice.each do |byte|
+              if key_done
+                next unless capture_value
+                next if value_too_long
+                if value_size < LibC::PATH_MAX
+                  value_builder << byte.chr
+                  value_size += 1
+                else
+                  value_too_long = true
+                end
+              else
+                if byte == '='.ord
+                  key_done = true
+                  key = key_builder.to_s
+                  capture_value = key == "path" || key == "linkpath"
+                else
+                  key_builder << byte.chr
+                end
+              end
+            end
+            record_bytes -= read
             bytes_left -= read
           end
-        end
-      end
 
-      # Parse PAX header records into a key/value hash.
-      private def parse_pax_records(payload : String) : Hash(String, String)
-        records = {} of String => String
-        index = 0
-        while index < payload.bytesize
-          space_index = payload.index(' ', index)
-          break unless space_index
-          length = payload[index, space_index - index].to_i?
-          break unless length && length > 0
-          record_end = index + length
-          record = payload[space_index + 1, length - (space_index - index) - 1]
-          if record.ends_with?("\n")
-            record = record[0..-2]
+          if capture_value
+            if value_too_long
+              Log.warn { "Skipping PAX #{key} longer than PATH_MAX (#{LibC::PATH_MAX})" }
+            else
+              value = value_builder.to_s.chomp
+              records[key] = value
+            end
           end
-          key_value = record.split('=', 2)
-          records[key_value[0]] = key_value[1] if key_value.size == 2
-          index = record_end
         end
         records
       end
