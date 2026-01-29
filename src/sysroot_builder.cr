@@ -301,6 +301,7 @@ module Bootstrap
           URI.parse("https://github.com/ivmai/bdwgc/releases/download/v#{DEFAULT_BDWGC}/gc-#{DEFAULT_BDWGC}.tar.gz"),
           build_directory: "gc-#{DEFAULT_BDWGC}",
           phases: ["sysroot-from-alpine", "system-from-sysroot"],
+          patches: ["#{bootstrap_repo_dir}/patches/bdwgc-#{DEFAULT_BDWGC}/disable-libcord.patch"],
           configure_flags: ["--enable-shared", "--disable-static"],
         ),
         PackageSpec.new(
@@ -707,7 +708,7 @@ module Bootstrap
     # Build the LLVM configure flags for the sysroot toolchain.
     private def llvm_configure_flags(sysroot_triple : String) : Array(String)
       llvm_targets = llvm_targets_to_build(@architecture)
-      enabled_tools = %w[LLVM_AR LLVM_NM LLVM_RANLIB LLVM_STRIP LLVM_CONFIG]
+      enabled_tools = %w[LLVM_AR LLVM_NM LLVM_RANLIB LLVM_STRIP LLVM_CONFIG LLVM_SHLIB]
       disabled_tools = %w[
         BUGPOINT
         BUGPOINT_PASSES
@@ -773,7 +774,6 @@ module Bootstrap
         LLVM_REMARKUTIL
         LLVM_RTDYLD
         LLVM_RUST_DEMANGLE_FUZZER
-        LLVM_SHLIB
         LLVM_SIM
         LLVM_SIZE
         LLVM_SPECIAL_CASE_LIST_FUZZER
@@ -1401,10 +1401,14 @@ module Bootstrap
                                  build_root : String,
                                  env : Hash(String, String)) : Array(BuildStep)
       env["CMAKE_SOURCE_DIR"] = "llvm"
+      stage2_env = env.dup
+      stage2_lib = File.join(build_root, "build-stage2", "lib")
+      existing_ld = stage2_env["LD_LIBRARY_PATH"]?
+      stage2_env["LD_LIBRARY_PATH"] = existing_ld && !existing_ld.empty? ? "#{stage2_lib}:#{existing_ld}" : stage2_lib
       base_flags = configure_flags_for(pkg, spec)
       patches = patches_for(pkg, spec)
       stage1_flags = llvm_stage1_flags(base_flags, spec.env)
-      stage2_flags = llvm_stage2_flags(base_flags, spec.install_prefix, sysroot_target_triple)
+      stage2_flags = llvm_stage2_flags(base_flags, spec.install_prefix, sysroot_target_triple, build_root)
       [
         BuildStep.new(
           name: "#{pkg.name}-stage1",
@@ -1421,7 +1425,7 @@ module Bootstrap
           workdir: build_root,
           configure_flags: stage2_flags,
           patches: patches,
-          env: env,
+          env: stage2_env,
           build_dir: "build-stage2",
         ),
       ]
@@ -1443,9 +1447,8 @@ module Bootstrap
       "#{flags} #{warning_flag}"
     end
 
-    # Stage 1 LLVM flags use the host compiler, skip the libC++ toggle, and
-    # force the monolithic libLLVM shared library (CMake's equivalent of
-    # configure --enable-shared) so later stages can link against it.
+    # Stage 1 LLVM flags use the host compiler, skip libc++ toggles/runtimes,
+    # and keep LLVM static so stage 2 can build its own shared libraries.
     private def llvm_stage1_flags(base_flags : Array(String),
                                   phase_env : Hash(String, String)) : Array(String)
       cc_value = phase_env["CC"]? || "clang"
@@ -1456,15 +1459,24 @@ module Bootstrap
 
       flags = base_flags.reject do |flag|
         flag.starts_with?("-DBUILD_SHARED_LIBS=") ||
+          flag.starts_with?("-DLLVM_ENABLE_SHARED=") ||
+          flag.starts_with?("-DLLVM_ENABLE_RUNTIMES=") ||
           flag.starts_with?("-DLLVM_ENABLE_LIBCXX=") ||
           flag.starts_with?("-DLLVM_BUILD_LLVM_DYLIB=") ||
-          flag.starts_with?("-DLLVM_LINK_LLVM_DYLIB=")
+          flag.starts_with?("-DLLVM_LINK_LLVM_DYLIB=") ||
+          flag.starts_with?("-DLLVM_TOOL_LLVM_SHLIB_BUILD=") ||
+          flag.starts_with?("-DLIBUNWIND_") ||
+          flag.starts_with?("-DLIBCXXABI_") ||
+          flag.starts_with?("-DLIBCXX_")
       end
       flags << "-DCMAKE_C_COMPILER=#{cc}"
       flags << "-DCMAKE_CXX_COMPILER=#{cxx}"
       flags << "-DBUILD_SHARED_LIBS=OFF"
+      flags << "-DLLVM_ENABLE_SHARED=OFF"
       flags << "-DLLVM_BUILD_LLVM_DYLIB=ON"
-      flags << "-DLLVM_LINK_LLVM_DYLIB=ON"
+      flags << "-DLLVM_LINK_LLVM_DYLIB=OFF"
+      flags << "-DLLVM_TOOL_LLVM_SHLIB_BUILD=ON"
+      flags << "-DLLVM_ENABLE_RUNTIMES="
       unless cc_flags.empty? || flags.any? { |flag| flag.starts_with?("-DCMAKE_C_FLAGS=") }
         flags << "-DCMAKE_C_FLAGS=#{cc_flags}"
       end
@@ -1478,17 +1490,19 @@ module Bootstrap
     # libc++/libunwind runtimes for a self-contained toolchain.
     private def llvm_stage2_flags(base_flags : Array(String),
                                   sysroot_prefix : String,
-                                  sysroot_triple : String) : Array(String)
+                                  sysroot_triple : String,
+                                  build_root : String) : Array(String)
       libcxx_include = "#{sysroot_prefix}/include/c++/v1"
       libcxx_target_include = "#{sysroot_prefix}/include/#{sysroot_triple}/c++/v1"
       libcxx_libdir = "#{sysroot_prefix}/lib/#{sysroot_triple}"
-      cxx_rpath = "-Wl,-rpath,#{libcxx_libdir}"
-      cxx_standard_libs = "-lc++ -lc++abi -lunwind #{cxx_rpath}"
+      build_rpath = File.join(build_root, "build-stage2", "lib")
+      install_rpath = "#{libcxx_libdir}:#{sysroot_prefix}/lib"
+      cxx_standard_libs = "-lc++ -lc++abi -lunwind"
       c_flags = "--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -Wno-unused-command-line-argument"
       cxx_flags = "-nostdinc++ -isystem #{libcxx_include} -isystem #{libcxx_target_include} -nostdlib++ -stdlib=libc++ --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -Wno-unused-command-line-argument -Wno-unnecessary-virtual-specifier -L#{libcxx_libdir} -L#{sysroot_prefix}/lib"
-      linker_flags = "--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{sysroot_prefix}/lib #{cxx_rpath}"
+      linker_flags = "--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{sysroot_prefix}/lib"
 
-      flags = base_flags.reject { |flag| flag.starts_with?("-DLLVM_ENABLE_RUNTIMES=") }
+      flags = base_flags.dup
       flags << "-DCMAKE_C_COMPILER=#{sysroot_prefix}/bin/clang"
       flags << "-DCMAKE_CXX_COMPILER=#{sysroot_prefix}/bin/clang++"
       flags << "-DCMAKE_C_FLAGS=#{c_flags}"
@@ -1497,6 +1511,9 @@ module Bootstrap
       flags << "-DCMAKE_EXE_LINKER_FLAGS=#{linker_flags}"
       flags << "-DCMAKE_SHARED_LINKER_FLAGS=#{linker_flags}"
       flags << "-DCMAKE_MODULE_LINKER_FLAGS=#{linker_flags}"
+      flags << "-DCMAKE_BUILD_RPATH=#{build_rpath}:#{install_rpath}"
+      flags << "-DCMAKE_INSTALL_RPATH=#{install_rpath}"
+      flags << "-DCMAKE_POSITION_INDEPENDENT_CODE=ON"
       flags
     end
 
