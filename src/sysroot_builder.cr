@@ -801,7 +801,7 @@ module Bootstrap
       ]
       flags = [
         "-DCMAKE_BUILD_TYPE=Release",
-        "-DBUILD_SHARED_LIBS=ON",
+        "-DBUILD_SHARED_LIBS=OFF",
         "-DLLVM_TARGETS_TO_BUILD=#{llvm_targets}",
         "-DLLVM_HOST_TRIPLE=#{sysroot_triple}",
         "-DLLVM_DEFAULT_TARGET_TRIPLE=#{sysroot_triple}",
@@ -834,7 +834,7 @@ module Bootstrap
         "-DCLANG_ENABLE_ARCMT=OFF",
         "-DLLVM_ENABLE_TERMINFO=OFF",
         "-DLLVM_ENABLE_PYTHON=OFF",
-        "-DLLVM_ENABLE_PIC=OFF",
+        "-DLLVM_ENABLE_PIC=ON",
         "-DCOMPILER_RT_BUILD_BUILTINS=ON",
         "-DCOMPILER_RT_BUILD_CRT=ON",
         "-DCOMPILER_RT_INCLUDE_TESTS=OFF",
