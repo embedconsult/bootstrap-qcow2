@@ -71,7 +71,6 @@ module Bootstrap
     DEFAULT_FOSSIL  = "2.25"
     DEFAULT_GIT     = "2.45.2"
     DEFAULT_CRYSTAL = "1.18.2"
-    DEFAULT_BQ2     = "0.0.10"
     # Cache directory name for prefetched shards dependencies.
     SHARDS_CACHE_DIR = ".shards-cache"
     # Source: https://curl.se/ca/cacert.pem (Mozilla CA certificate bundle).
@@ -610,7 +609,12 @@ module Bootstrap
     end
 
     private def bootstrap_source_version : String
-      ENV["BQ2_SOURCE_BRANCH"]? || DEFAULT_BQ2
+      ENV["BQ2_SOURCE_BRANCH"]? || Bootstrap::VERSION
+    end
+
+    # Return the expected rootfs tarball filename for the bootstrap source version.
+    def rootfs_tarball_name : String
+      "bq2-rootfs-#{bootstrap_source_version}.tar.gz"
     end
 
     # Resolve the base rootfs tarball, favoring a local override when provided.

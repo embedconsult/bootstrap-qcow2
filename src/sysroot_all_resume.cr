@@ -69,8 +69,8 @@ module Bootstrap
     def initialize(@builder : SysrootBuilder,
                    @plan_path : Path = builder.plan_path,
                    @state_path : Path = builder.rootfs_dir / "var/lib/sysroot-build-state.json",
-                   @rootfs_tarball_path : Path = builder.rootfs_dir / "workspace" / "bq2-rootfs-#{Bootstrap::VERSION}.tar.gz",
-                   @output_tarball_path : Path = builder.sources_dir / "bq2-rootfs-#{Bootstrap::VERSION}.tar.gz")
+                   @rootfs_tarball_path : Path = builder.rootfs_dir / "workspace" / builder.rootfs_tarball_name,
+                   @output_tarball_path : Path = builder.sources_dir / builder.rootfs_tarball_name)
       resolved = SysrootRunner.resolve_status_paths(
         builder.workspace.to_s,
         nil,
@@ -249,7 +249,7 @@ module Bootstrap
         return 1
       end
 
-      default_rootfs_path = builder.sources_dir / "bq2-rootfs-#{Bootstrap::VERSION}.tar.gz"
+      default_rootfs_path = builder.sources_dir / builder.rootfs_tarball_name
       rootfs_tarball = base_rootfs_path || (File.exists?(default_rootfs_path) ? default_rootfs_path : nil)
       use_bq2_rootfs = rootfs_tarball ? bq2_rootfs_tarball?(rootfs_tarball) : false
       use_alpine_setup = rootfs_tarball.nil? || !use_bq2_rootfs
@@ -311,7 +311,7 @@ module Bootstrap
           end
         when "rootfs-tarball"
           time_stage(stage) do
-            if File.exists?(builder.rootfs_dir / "workspace" / "bq2-rootfs-#{Bootstrap::VERSION}.tar.gz")
+            if File.exists?(builder.rootfs_dir / "workspace" / builder.rootfs_tarball_name)
               Log.info { "Rootfs tarball already present; skipping finalize-rootfs" }
             else
               status = run_sysroot_runner(
@@ -334,7 +334,7 @@ module Bootstrap
       end
 
       unless copy_rootfs_tarball(builder)
-        produced_tarball = builder.rootfs_dir / "workspace" / "bq2-rootfs-#{Bootstrap::VERSION}.tar.gz"
+        produced_tarball = builder.rootfs_dir / "workspace" / builder.rootfs_tarball_name
         STDERR.puts "Expected rootfs tarball missing at #{produced_tarball}"
         STDERR.puts "Resume hint: #{resume_phase}/#{resume_step}" if resume_phase || resume_step
         return 1
@@ -461,9 +461,9 @@ module Bootstrap
 
     # Copy the produced rootfs tarball into the workspace source cache.
     private def self.copy_rootfs_tarball(builder : SysrootBuilder) : Bool
-      produced_tarball = builder.rootfs_dir / "workspace" / "bq2-rootfs-#{Bootstrap::VERSION}.tar.gz"
+      produced_tarball = builder.rootfs_dir / "workspace" / builder.rootfs_tarball_name
       return false unless File.exists?(produced_tarball)
-      output = builder.sources_dir / "bq2-rootfs-#{Bootstrap::VERSION}.tar.gz"
+      output = builder.sources_dir / builder.rootfs_tarball_name
       FileUtils.mkdir_p(output.parent)
       FileUtils.cp(produced_tarball, output)
       puts "Generated rootfs tarball at #{output}"
