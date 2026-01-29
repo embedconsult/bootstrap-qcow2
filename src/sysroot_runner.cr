@@ -510,7 +510,7 @@ module Bootstrap
           default_overrides_path_for_plan(path)
         end
       plan = apply_overrides(plan, effective_overrides_path) if effective_overrides_path
-      stage_iteration_files_for_destdirs(plan, effective_overrides_path)
+      stage_report_dirs_for_destdirs(plan)
       effective_state_path = state_path || (resume && path == DEFAULT_PLAN_PATH ? DEFAULT_STATE_PATH : nil)
       state = effective_state_path ? SysrootBuildState.load_or_init(effective_state_path, plan_path: path, overrides_path: effective_overrides_path, report_dir: report_dir) : nil
       state.try(&.save(effective_state_path.not_nil!)) if effective_state_path
@@ -714,8 +714,8 @@ module Bootstrap
 
     # Ensure report directories exist for phases that stage into a destdir
     # rootfs. The build plan and overrides are treated as immutable and must
-    # never be rewritten by sysroot-runner.
-    private def self.stage_iteration_files_for_destdirs(plan : BuildPlan, _overrides_path : String?) : Nil
+    # be staged by the builder or plan writer rather than by sysroot-runner.
+    private def self.stage_report_dirs_for_destdirs(plan : BuildPlan) : Nil
       plan.phases.each do |phase|
         next unless destdir = phase.destdir
         report_stage = File.join(destdir, DEFAULT_REPORT_DIR.lchop('/'))
