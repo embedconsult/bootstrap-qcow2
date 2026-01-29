@@ -26,6 +26,7 @@ module Bootstrap
       libressl-dev
       crystal
       lld
+      llvm-libs
       linux-headers
       make
       musl-dev
