@@ -106,13 +106,17 @@ module Bootstrap
       PREFIX_OFFSET   = 345
       PREFIX_LENGTH   = 155
 
-      TYPE_DIRECTORY = '5'
-      TYPE_SYMLINK   = '2'
-      TYPE_HARDLINK  = '1'
-      TYPE_FILE      = '\u0000'
+      TYPE_DIRECTORY  = '5'
+      TYPE_SYMLINK    = '2'
+      TYPE_HARDLINK   = '1'
+      TYPE_FILE       = '\u0000'
+      TYPE_PAX_EXT    = 'x'
+      TYPE_PAX_GLOBAL = 'g'
 
       # Create a tar reader that writes entries into the destination.
       def initialize(@io : IO, @destination : Path, @preserve_ownership : Bool, @owner_uid : Int32?, @owner_gid : Int32?)
+        @pax_global = {} of String => String
+        @pax_next = {} of String => String
       end
 
       # Extract every entry in the tar stream.
@@ -137,8 +141,26 @@ module Bootstrap
           normalized_typeflag = TYPE_SYMLINK if normalized_typeflag == TYPE_FILE && !linkname.empty?
           Log.debug { "Tar entry name=#{name} typeflag=#{typeflag.inspect} normalized=#{normalized_typeflag.inspect} linkname=#{linkname}" }
 
-          # Skip metadata/pax headers or empty entries.
-          if name.empty? || name == "./" || name.starts_with?("././@PaxHeader") || normalized_typeflag.in?({'g', 'x'})
+          if normalized_typeflag.in?({TYPE_PAX_GLOBAL, TYPE_PAX_EXT})
+            payload = read_payload(size)
+            records = parse_pax_records(payload)
+            if normalized_typeflag == TYPE_PAX_GLOBAL
+              @pax_global.merge!(records)
+            else
+              @pax_next = records
+            end
+            skip_padding(size)
+            next
+          end
+
+          pax_overrides = @pax_global
+          pax_overrides = pax_overrides.merge(@pax_next) unless @pax_next.empty?
+          name = pax_overrides["path"]? || name
+          linkname = pax_overrides["linkpath"]? || linkname
+          @pax_next.clear
+
+          # Skip metadata/empty entries.
+          if name.empty? || name == "./" || name.starts_with?("././@PaxHeader")
             skip_bytes(size)
             skip_padding(size)
             next
@@ -147,6 +169,13 @@ module Bootstrap
           target = safe_target_path(name)
           unless target
             Log.warn { "Skipping unsafe tar entry #{name}" }
+            skip_bytes(size)
+            skip_padding(size)
+            next
+          end
+
+          if has_symlink_ancestor?(target)
+            Log.warn { "Skipping tar entry #{name} due to symlinked ancestor" }
             skip_bytes(size)
             skip_padding(size)
             next
@@ -188,6 +217,11 @@ module Bootstrap
               skip_padding(size)
               next
             end
+            if has_symlink_ancestor?(link_target)
+              Log.warn { "Skipping hardlink #{name} due to symlinked ancestor in #{linkname}" }
+              skip_padding(size)
+              next
+            end
             Log.debug { "Creating hardlink #{target} -> #{link_target}" }
             File.link(link_target, target)
           else # regular file
@@ -221,6 +255,43 @@ module Bootstrap
         @io.skip(skip) if skip > 0
       end
 
+      # Read an exact payload from the tar stream.
+      private def read_payload(size : Int64) : String
+        return "" if size <= 0
+        String.build do |builder|
+          bytes_left = size
+          buffer = Bytes.new(8192)
+          while bytes_left > 0
+            to_read = Math.min(buffer.size, bytes_left.to_i)
+            read = @io.read(buffer[0, to_read])
+            raise "Unexpected EOF in tar" if read == 0
+            builder.write(buffer[0, read])
+            bytes_left -= read
+          end
+        end
+      end
+
+      # Parse PAX header records into a key/value hash.
+      private def parse_pax_records(payload : String) : Hash(String, String)
+        records = {} of String => String
+        index = 0
+        while index < payload.bytesize
+          space_index = payload.index(' ', index)
+          break unless space_index
+          length = payload[index, space_index - index].to_i?
+          break unless length && length > 0
+          record_end = index + length
+          record = payload[space_index + 1, length - (space_index - index) - 1]
+          if record.ends_with?("\n")
+            record = record[0..-2]
+          end
+          key_value = record.split('=', 2)
+          records[key_value[0]] = key_value[1] if key_value.size == 2
+          index = record_end
+        end
+        records
+      end
+
       # Write a file payload from the tar stream to disk.
       private def write_file(path : Path, size : Int64, mode : Int32)
         File.open(path, "w") do |target_io|
@@ -245,6 +316,20 @@ module Bootstrap
         if info && !info.directory?
           FileUtils.rm_rf(parent)
         end
+      end
+
+      # Return true if any ancestor path component is a symlink.
+      private def has_symlink_ancestor?(target : Path) : Bool
+        relative = target.relative_to(@destination) rescue nil
+        return true unless relative
+        parts = relative.to_s.split('/')
+        current = @destination
+        parts[0...-1].each do |part|
+          current /= part
+          info = File.info(current, follow_symlinks: false) rescue nil
+          return true if info && info.symlink?
+        end
+        false
       end
 
       # Remove conflicting paths to allow tar entries to replace them.
