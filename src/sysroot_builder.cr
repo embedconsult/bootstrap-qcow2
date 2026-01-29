@@ -1734,14 +1734,29 @@ module Bootstrap
       output = SysrootRunner::DEFAULT_PLAN_PATH
       workspace_root = Bootstrap::BuildPlanUtils::DEFAULT_WORKSPACE_ROOT
       force = false
+      write_overrides = false
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-plan-write [options]") do |p|
         p.on("--output PATH", "Write the plan to PATH (default: #{SysrootRunner::DEFAULT_PLAN_PATH})") { |path| output = path }
         p.on("--workspace-root PATH", "Rewrite plan workdirs rooted at #{SysrootWorkspace::ROOTFS_WORKSPACE} to PATH (default: #{workspace_root})") { |path| workspace_root = path }
         p.on("--force", "Overwrite an existing plan at the output path") { force = true }
+        p.on("--override", "Write sysroot-build-overrides.json with differences from the existing plan") { write_overrides = true }
       end
       return CLI.print_help(parser) if help
 
-      if File.exists?(output) && !force
+      if write_overrides && force
+        STDERR.puts "Refusing to combine --override with --force"
+        return 1
+      end
+
+      existing_plan = nil
+      if write_overrides && File.exists?(output)
+        existing_plan = BuildPlan.from_json(File.read(output))
+      end
+      if write_overrides && existing_plan.nil?
+        STDERR.puts "Refusing to write overrides without an existing plan at #{output}"
+        return 1
+      end
+      if File.exists?(output) && !force && !write_overrides
         STDERR.puts "Refusing to overwrite existing plan at #{output} (pass --force)"
         return 1
       end
@@ -1751,6 +1766,15 @@ module Bootstrap
       plan = builder.build_plan
       if workspace_root != Bootstrap::BuildPlanUtils::DEFAULT_WORKSPACE_ROOT
         plan = Bootstrap::BuildPlanUtils.rewrite_workspace_root(plan, workspace_root)
+      end
+
+      if write_overrides
+        overrides = BuildPlanOverrides.from_diff(existing_plan.not_nil!, plan)
+        overrides_path = File.join(File.dirname(output), File.basename(SysrootRunner::DEFAULT_OVERRIDES_PATH))
+        FileUtils.mkdir_p(File.dirname(overrides_path))
+        File.write(overrides_path, overrides.to_pretty_json)
+        puts "Wrote build plan overrides to #{overrides_path}"
+        return 0
       end
 
       FileUtils.mkdir_p(File.dirname(output))
