@@ -112,6 +112,8 @@ module Bootstrap
       TYPE_FILE       = '\u0000'
       TYPE_PAX_EXT    = 'x'
       TYPE_PAX_GLOBAL = 'g'
+      # Linux PATH_MAX is 4096 bytes (see /usr/include/linux/limits.h).
+      PAX_VALUE_LIMIT = 4096
 
       # Create a tar reader that writes entries into the destination.
       def initialize(@io : IO, @destination : Path, @preserve_ownership : Bool, @owner_uid : Int32?, @owner_gid : Int32?)
@@ -294,7 +296,7 @@ module Bootstrap
               if key_done
                 next unless capture_value
                 next if value_too_long
-                if value_size < LibC::PATH_MAX
+                if value_size < PAX_VALUE_LIMIT
                   value_builder << byte.chr
                   value_size += 1
                 else
@@ -316,7 +318,7 @@ module Bootstrap
 
           if capture_value
             if value_too_long
-              Log.warn { "Skipping PAX #{key} longer than PATH_MAX (#{LibC::PATH_MAX})" }
+              Log.warn { "Skipping PAX #{key} longer than PATH_MAX (#{PAX_VALUE_LIMIT})" }
             else
               value = value_builder.to_s.chomp
               records[key] = value
