@@ -101,7 +101,7 @@ describe Bootstrap::SysrootBuilder do
       builder.cache_dir.should eq dir / "cache"
       builder.checksum_dir.should eq dir / "cache/checksums"
       builder.sources_dir.should eq dir / "sources"
-      builder.rootfs_dir.should eq dir / "rootfs"
+      builder.outer_rootfs_dir.should eq dir / "rootfs"
     end
   end
 
@@ -388,7 +388,7 @@ describe Bootstrap::SysrootBuilder do
       builder.fake_tarball = tarball
       builder.prepare_rootfs(include_sources: true)
       builder.stage_sources_calls.should eq 1
-      Dir.children(builder.rootfs_dir / "workspace").should_not be_empty
+      Dir.children(builder.inner_rootfs_workspace_dir).should_not be_empty
     end
   end
 
@@ -461,7 +461,7 @@ describe Bootstrap::SysrootBuilder do
       builder.skip_stage_sources = true
       builder.fake_tarball = tarball
       rootfs = builder.generate_chroot
-      rootfs.should eq builder.rootfs_dir
+      rootfs.should eq builder.outer_rootfs_dir
       File.exists?(rootfs / "workspace").should be_true
     end
   end

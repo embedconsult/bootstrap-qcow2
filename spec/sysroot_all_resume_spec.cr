@@ -51,7 +51,7 @@ end
 describe Bootstrap::SysrootAllResume do
   it "selects download-sources when the source cache is missing" do
     with_tempdir do |dir|
-      builder = Bootstrap::SysrootBuilder.new(workspace: dir)
+      builder = Bootstrap::SysrootBuilder.new(host_workdir: dir)
       decision = Bootstrap::SysrootAllResume.new(builder).decide
       decision.stage.should eq("download-sources")
     end
@@ -59,7 +59,7 @@ describe Bootstrap::SysrootAllResume do
 
   it "starts sysroot-runner when plan exists but state is missing" do
     with_tempdir do |dir|
-      builder = Bootstrap::SysrootBuilder.new(workspace: dir)
+      builder = Bootstrap::SysrootBuilder.new(host_workdir: dir)
       populate_sources(builder)
       plan_path = builder.plan_path
       write_plan(plan_path)
@@ -72,7 +72,7 @@ describe Bootstrap::SysrootAllResume do
 
   it "resumes sysroot-runner when state matches the plan" do
     with_tempdir do |dir|
-      builder = Bootstrap::SysrootBuilder.new(workspace: dir)
+      builder = Bootstrap::SysrootBuilder.new(host_workdir: dir)
       populate_sources(builder)
       plan_path = builder.plan_path
       plan = write_plan(plan_path)
@@ -88,7 +88,7 @@ describe Bootstrap::SysrootAllResume do
 
   it "selects rootfs-tarball when the plan is complete but tarball is missing" do
     with_tempdir do |dir|
-      builder = Bootstrap::SysrootBuilder.new(workspace: dir)
+      builder = Bootstrap::SysrootBuilder.new(host_workdir: dir)
       populate_sources(builder)
       plan_path = builder.plan_path
       plan = write_plan(plan_path)
@@ -102,7 +102,7 @@ describe Bootstrap::SysrootAllResume do
 
   it "ignores state when the plan digest does not match" do
     with_tempdir do |dir|
-      builder = Bootstrap::SysrootBuilder.new(workspace: dir)
+      builder = Bootstrap::SysrootBuilder.new(host_workdir: dir)
       populate_sources(builder)
       plan_path = builder.plan_path
       plan = write_plan(plan_path)
@@ -120,7 +120,7 @@ describe Bootstrap::SysrootAllResume do
 
   it "refuses to resume when state exists without a plan" do
     with_tempdir do |dir|
-      builder = Bootstrap::SysrootBuilder.new(workspace: dir)
+      builder = Bootstrap::SysrootBuilder.new(host_workdir: dir)
       populate_sources(builder)
       state_path = builder.inner_rootfs_var_lib_dir / "sysroot-build-state.json"
       write_state(state_path, builder.plan_path, Bootstrap::BuildPlan.new([] of Bootstrap::BuildPhase), [] of Tuple(String, String))

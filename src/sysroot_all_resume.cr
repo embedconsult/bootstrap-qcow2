@@ -166,7 +166,7 @@ module Bootstrap
 
     # Execute the full --all flow (download, plan, runner, tarball).
     private def self.run_all(args : Array(String)) : Int32
-      workspace = SysrootBuilder::DEFAULT_WORKSPACE
+      workspace = SysrootBuilder::DEFAULT_HOST_WORKDIR
       architecture = SysrootBuilder::DEFAULT_ARCH
       branch = SysrootBuilder::DEFAULT_BRANCH
       base_version = SysrootBuilder::DEFAULT_BASE_VERSION
@@ -211,7 +211,7 @@ module Bootstrap
       puts "repo_root=#{repo_root}"
 
       builder = SysrootBuilder.new(
-        workspace: workspace,
+        host_workdir: workspace,
         architecture: architecture,
         branch: branch,
         base_version: base_version,
@@ -285,9 +285,9 @@ module Bootstrap
         when "sysroot-runner"
           time_stage(stage) do
             builder.stage_sources(skip_existing: true)
-            Log.info { "Restaged missing sources into #{builder.rootfs_dir}/workspace" }
-            AlpineSetup.write_resolv_conf(builder.rootfs_dir)
-            Log.info { "Starting runner exe=#{bq2_path} builder_rootfs=#{builder.rootfs_dir.to_s} repo_root=#{repo_root} alpine=#{use_alpine_setup}" }
+            Log.info { "Restaged missing sources into #{builder.outer_rootfs_dir}/workspace" }
+            AlpineSetup.write_resolv_conf(builder.outer_rootfs_dir)
+            Log.info { "Starting runner exe=#{bq2_path} builder_rootfs=#{builder.outer_rootfs_dir.to_s} repo_root=#{repo_root} alpine=#{use_alpine_setup}" }
             status = run_sysroot_runner(
               bq2_path,
               builder,
@@ -337,8 +337,8 @@ module Bootstrap
 
     # Print the current resume decision and help output.
     private def self.run_default(args : Array(String)) : Int32
-      workspace = SysrootBuilder::DEFAULT_WORKSPACE
-      builder = SysrootBuilder.new(workspace: workspace)
+      workspace = SysrootBuilder::DEFAULT_HOST_WORKDIR
+      builder = SysrootBuilder.new(host_workdir: workspace)
       begin
         decision = SysrootAllResume.new(builder).decide
         puts(decision.log_message)
@@ -387,15 +387,15 @@ module Bootstrap
       argv = [
         "sysroot-runner",
         "--rootfs",
-        builder.rootfs_dir.to_s,
+        builder.outer_rootfs_dir.to_s,
         "--bind",
         bind_spec,
       ]
       if plan_path
-        argv.concat(["--plan", rootfs_relative_path(plan_path, builder.rootfs_dir)])
+        argv.concat(["--plan", rootfs_relative_path(plan_path, builder.outer_rootfs_dir)])
       end
       if state_path
-        argv.concat(["--state-path", rootfs_relative_path(state_path, builder.rootfs_dir)])
+        argv.concat(["--state-path", rootfs_relative_path(state_path, builder.outer_rootfs_dir)])
       end
       argv << "--alpine-setup" if use_alpine_setup
       argv.concat(["--phase", phase])
@@ -411,7 +411,7 @@ module Bootstrap
     private def self.map_path_for_runner(path : Path?, builder : SysrootBuilder) : Path?
       return nil unless path
       absolute = path.expand
-      rootfs_dir = builder.rootfs_dir.expand
+      rootfs_dir = builder.outer_rootfs_dir.expand
       workspace_rootfs = (rootfs_dir / WORKSPACE_ROOTFS_RELATIVE).expand
       if absolute.to_s.starts_with?(workspace_rootfs.to_s)
         relative = absolute.relative_to(workspace_rootfs)

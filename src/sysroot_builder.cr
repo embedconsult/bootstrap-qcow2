@@ -45,7 +45,11 @@ module Bootstrap
     {% else %}
       DEFAULT_ARCH = "aarch64"
     {% end %}
-    DEFAULT_WORKSPACE     = Path["data/sysroot"]
+    DEFAULT_HOST_WORKDIR  = Path["data/sysroot"]
+    OUTER_ROOTFS_DIR      = "rootfs"
+    INNER_ROOTFS_DIR      = "rootfs/workspace/rootfs"
+    WORKSPACE_DIR         = "rootfs/workspace/rootfs/workspace"
+    LOG_DIR               = "log"
     DEFAULT_BRANCH        = "v3.23"
     DEFAULT_BASE_VERSION  = "3.23.2"
     DEFAULT_LLVM_VER      = "18.1.7"
@@ -110,7 +114,15 @@ module Bootstrap
 
     getter architecture : String
     getter branch : String
-    getter workspace : Path
+    getter host_workdir : Path
+    getter cache_dir : Path
+    getter checksum_dir : Path
+    getter sources_dir : Path
+    getter outer_rootfs_dir : Path
+    getter inner_rootfs_dir : Path
+    getter inner_rootfs_var_lib_dir : Path
+    getter inner_rootfs_workspace_dir : Path
+    getter sysroot_dir : Path
     getter base_version : String
     @resolved_base_version : String?
 
@@ -128,8 +140,8 @@ module Bootstrap
       configure_overrides : Hash(String, Array(String)) = {} of String => Array(String),
       patch_overrides : Hash(String, Array(String)) = {} of String => Array(String)
 
-    # Create a sysroot builder rooted at the workspace directory.
-    def initialize(@workspace : Path = DEFAULT_WORKSPACE,
+    # Create a sysroot builder rooted at the host workdir directory.
+    def initialize(@host_workdir : Path = DEFAULT_HOST_WORKDIR,
                    @architecture : String = DEFAULT_ARCH,
                    @branch : String = DEFAULT_BRANCH,
                    @base_version : String = DEFAULT_BASE_VERSION,
@@ -140,25 +152,19 @@ module Bootstrap
                    @preserve_ownership_for_rootfs : Bool = false,
                    @owner_uid : Int32? = nil,
                    @owner_gid : Int32? = nil)
-      FileUtils.mkdir_p(@workspace)
-      FileUtils.mkdir_p(cache_dir)
-      FileUtils.mkdir_p(checksum_dir)
-      FileUtils.mkdir_p(sources_dir)
-    end
+      @cache_dir = @host_workdir / "cache"
+      @checksum_dir = @cache_dir / "checksums"
+      @sources_dir = @host_workdir / "sources"
+      @outer_rootfs_dir = @host_workdir / OUTER_ROOTFS_DIR
+      @inner_rootfs_dir = @host_workdir / INNER_ROOTFS_DIR
+      @inner_rootfs_var_lib_dir = @inner_rootfs_dir / "var/lib"
+      @inner_rootfs_workspace_dir = @host_workdir / WORKSPACE_DIR
+      @sysroot_dir = @host_workdir / "sysroot"
 
-    # Directory for cached artifacts within the workspace.
-    def cache_dir : Path
-      @workspace / "cache"
-    end
-
-    # Directory for checksum cache entries.
-    def checksum_dir : Path
-      cache_dir / "checksums"
-    end
-
-    # Directory containing downloaded source archives.
-    def sources_dir : Path
-      @workspace / "sources"
+      FileUtils.mkdir_p(@host_workdir)
+      FileUtils.mkdir_p(@cache_dir)
+      FileUtils.mkdir_p(@checksum_dir)
+      FileUtils.mkdir_p(@sources_dir)
     end
 
     # Return the expected archive paths for all configured packages.
@@ -175,26 +181,6 @@ module Bootstrap
       end
     end
 
-    # Directory containing the extracted rootfs.
-    def rootfs_dir : Path
-      @workspace / "rootfs"
-    end
-
-    # Host path to the inner rootfs directory (data/sysroot/rootfs/workspace/rootfs).
-    def inner_rootfs_dir : Path
-      rootfs_dir / "workspace/rootfs"
-    end
-
-    # Host path to the inner rootfs var/lib directory.
-    def inner_rootfs_var_lib_dir : Path
-      inner_rootfs_dir / "var/lib"
-    end
-
-    # Host path to the inner rootfs workspace directory.
-    def inner_rootfs_workspace_dir : Path
-      inner_rootfs_dir / "workspace"
-    end
-
     # Absolute path to the serialized build plan inside the inner rootfs.
     def plan_path : Path
       inner_rootfs_var_lib_dir / "sysroot-build-plan.json"
@@ -205,11 +191,6 @@ module Bootstrap
     # is not part of a clean sysroot build output.
     def rootfs_ready? : Bool
       File.exists?(plan_path)
-    end
-
-    # Directory containing the staged sysroot install prefix.
-    def sysroot_dir : Path
-      @workspace / "sysroot"
     end
 
     # Build a PackageSpec pointing at the base rootfs tarball for the configured
@@ -621,19 +602,19 @@ module Bootstrap
     # Returns the rootfs path on success.
     # Invoked by `generate_chroot_tarball` and can also be used directly in callers.
     def prepare_rootfs(base_rootfs : PackageSpec = base_rootfs_spec, include_sources : Bool = true) : Path
-      Log.info { "Preparing rootfs at #{rootfs_dir} (include_sources=#{include_sources})" }
-      FileUtils.rm_rf(rootfs_dir)
-      FileUtils.mkdir_p(rootfs_dir)
+      Log.info { "Preparing rootfs at #{outer_rootfs_dir} (include_sources=#{include_sources})" }
+      FileUtils.rm_rf(outer_rootfs_dir)
+      FileUtils.mkdir_p(outer_rootfs_dir)
 
       tarball = resolve_base_rootfs_tarball(base_rootfs)
       Log.debug { "Extracting base rootfs from #{tarball}" }
-      Tarball.extract(tarball, rootfs_dir, @preserve_ownership_for_rootfs, @owner_uid, @owner_gid, force_system_tar: @use_system_tar_for_rootfs)
+      Tarball.extract(tarball, outer_rootfs_dir, @preserve_ownership_for_rootfs, @owner_uid, @owner_gid, force_system_tar: @use_system_tar_for_rootfs)
       FileUtils.mkdir_p(inner_rootfs_var_lib_dir)
       FileUtils.mkdir_p(inner_rootfs_workspace_dir)
       File.write(inner_rootfs_dir / ".bq2-rootfs", "bq2-rootfs\n")
-      FileUtils.mkdir_p(rootfs_dir / "var/lib")
+      FileUtils.mkdir_p(outer_rootfs_dir / "var/lib")
       stage_sources if include_sources
-      rootfs_dir
+      outer_rootfs_dir
     end
 
     # Extract downloaded sources into the inner rootfs workspace for offline builds.
@@ -1588,15 +1569,15 @@ module Bootstrap
     def generate_chroot(include_sources : Bool = true) : Path
       prepare_rootfs(include_sources: include_sources)
       write_plan
-      rootfs_dir
+      outer_rootfs_dir
     end
 
     # Generate a chroot tarball for the prepared rootfs.
     def generate_chroot_tarball(output : Path? = nil, include_sources : Bool = true) : Path
       generate_chroot(include_sources: include_sources)
-      output ||= rootfs_dir.parent / "sysroot.tar.gz"
+      output ||= outer_rootfs_dir.parent / "sysroot.tar.gz"
       FileUtils.mkdir_p(output.parent) if output.parent
-      Tarball.write_gz(rootfs_dir, output)
+      Tarball.write_gz(outer_rootfs_dir, output)
       chown_tarball_to_sudo_user(output)
       output
     end
@@ -1604,13 +1585,13 @@ module Bootstrap
     # Generate a chroot tarball from an already-prepared rootfs.
     #
     # This does not regenerate the rootfs or rewrite the build plan; it only
-    # packages the existing `rootfs_dir` into a tarball. Raises when the rootfs
+    # packages the existing `outer_rootfs_dir` into a tarball. Raises when the rootfs
     # is missing the serialized build plan (i.e. `rootfs_ready?` is false).
     def write_chroot_tarball(output : Path? = nil) : Path
-      raise "Rootfs is not prepared at #{rootfs_dir}" unless rootfs_ready?
-      output ||= rootfs_dir.parent / "sysroot.tar.gz"
+      raise "Rootfs is not prepared at #{outer_rootfs_dir}" unless rootfs_ready?
+      output ||= outer_rootfs_dir.parent / "sysroot.tar.gz"
       FileUtils.mkdir_p(output.parent) if output.parent
-      Tarball.write_gz(rootfs_dir, output)
+      Tarball.write_gz(outer_rootfs_dir, output)
       chown_tarball_to_sudo_user(output)
       output
     end
@@ -1705,7 +1686,7 @@ module Bootstrap
     # Build or reuse a sysroot workspace and optionally emit a tarball.
     private def self.run_builder(args : Array(String)) : Int32
       output = Path["sysroot.tar.gz"]
-      workspace = DEFAULT_WORKSPACE
+      host_workdir = DEFAULT_HOST_WORKDIR
       architecture = SysrootBuilder::DEFAULT_ARCH
       branch = SysrootBuilder::DEFAULT_BRANCH
       base_version = SysrootBuilder::DEFAULT_BASE_VERSION
@@ -1724,7 +1705,6 @@ module Bootstrap
 
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-builder [options]") do |p|
         p.on("-o OUTPUT", "--output=OUTPUT", "Target sysroot tarball (default: #{output})") { |val| output = Path[val] }
-        p.on("-w DIR", "--workspace=DIR", "Workspace directory (default: #{workspace})") { |val| workspace = Path[val] }
         p.on("-a ARCH", "--arch=ARCH", "Target architecture (default: #{architecture})") { |val| architecture = val }
         p.on("-b BRANCH", "--branch=BRANCH", "Source branch/release tag (default: #{branch})") { |val| branch = val }
         p.on("-v VERSION", "--base-version=VERSION", "Base rootfs version/tag (default: #{base_version})") { |val| base_version = val }
@@ -1754,7 +1734,7 @@ module Bootstrap
 
       Log.info { "Sysroot builder log level=#{Log.for("").level} (env-configured)" }
       builder = SysrootBuilder.new(
-        workspace: workspace,
+        host_workdir: host_workdir,
         architecture: architecture,
         branch: branch,
         base_version: base_version,
@@ -1768,7 +1748,7 @@ module Bootstrap
       )
 
       if reuse_rootfs && builder.rootfs_ready?
-        puts "Reusing existing rootfs at #{builder.rootfs_dir}"
+        puts "Reusing existing rootfs at #{builder.outer_rootfs_dir}"
         puts "Build plan found at #{builder.plan_path} (iteration state is maintained by sysroot-runner)"
         if include_sources && restage_sources
           builder.stage_sources(skip_existing: true)
@@ -1828,7 +1808,7 @@ module Bootstrap
       end
 
       tmp_workspace = Path["/tmp/bq2-plan-write-#{Random::Secure.hex(4)}"]
-      builder = SysrootBuilder.new(workspace: tmp_workspace)
+      builder = SysrootBuilder.new(host_workdir: tmp_workspace)
       plan = builder.build_plan
       if workspace_root != Bootstrap::BuildPlanUtils::DEFAULT_WORKSPACE_ROOT
         plan = Bootstrap::BuildPlanUtils.rewrite_workspace_root(plan, workspace_root)
