@@ -97,16 +97,18 @@ describe Bootstrap::SysrootRunner do
     ])
     runner = RecordingRunner.new
 
-    plan_file = File.tempfile("plan")
-    plan_file.print(plan.to_json)
-    plan_file.flush
-    plan_path = plan_file.path
-    plan_file.close
+    with_tempdir do |dir|
+      inner_rootfs = dir / "rootfs"
+      var_lib = inner_rootfs / "var/lib"
+      FileUtils.mkdir_p(var_lib)
+      plan_path = var_lib / "sysroot-build-plan.json"
+      File.write(plan_path, plan.to_json)
 
-    Bootstrap::SysrootRunner.run_plan(plan_path, runner)
-    runner.calls.size.should eq 1
-    runner.calls.first[:workdir].should eq "/opt"
-    runner.calls.first[:name].should eq "file-a"
+      Bootstrap::SysrootRunner.run_plan(plan_path.to_s, runner)
+      runner.calls.size.should eq 1
+      runner.calls.first[:workdir].should eq "/opt"
+      runner.calls.first[:name].should eq "file-a"
+    end
   end
 
   it "runs all phases when requested" do
@@ -314,12 +316,6 @@ describe Bootstrap::SysrootRunner do
       Bootstrap::BuildPhase.new(name: "one", description: "a", workspace: "/workspace", environment: "test", install_prefix: "/opt/sysroot", steps: steps),
     ])
 
-    plan_file = File.tempfile("plan")
-    plan_file.print(plan.to_json)
-    plan_file.flush
-    plan_path = plan_file.path
-    plan_file.close
-
     overrides = {
       "phases" => {
         "one" => {
@@ -332,17 +328,22 @@ describe Bootstrap::SysrootRunner do
         },
       },
     }.to_json
-    overrides_file = File.tempfile("overrides")
-    overrides_file.print(overrides)
-    overrides_file.flush
-    overrides_path = overrides_file.path
-    overrides_file.close
-
     runner = RecordingRunner.new
-    Bootstrap::SysrootRunner.run_plan(plan_path, runner, overrides_path: overrides_path, report_dir: nil)
-    runner.calls.size.should eq 1
-    runner.calls.first[:configure_flags].should eq ["--with-foo"]
-    runner.calls.first[:env]["CC"].should eq "clang"
+
+    with_tempdir do |dir|
+      inner_rootfs = dir / "rootfs"
+      var_lib = inner_rootfs / "var/lib"
+      FileUtils.mkdir_p(var_lib)
+      plan_path = var_lib / "sysroot-build-plan.json"
+      File.write(plan_path, plan.to_json)
+      overrides_path = dir / "overrides.json"
+      File.write(overrides_path, overrides)
+
+      Bootstrap::SysrootRunner.run_plan(plan_path.to_s, runner, overrides_path: overrides_path.to_s, report_dir: nil)
+      runner.calls.size.should eq 1
+      runner.calls.first[:configure_flags].should eq ["--with-foo"]
+      runner.calls.first[:env]["CC"].should eq "clang"
+    end
   end
 
   it "supports dry-run without executing steps" do
