@@ -1,5 +1,5 @@
 require "log"
-require "./bootstrap-qcow2"
+require "./bootstrap_qcow2"
 require "./alpine_setup"
 require "./cli"
 require "./build_plan_utils"
