@@ -919,7 +919,7 @@ module Bootstrap
         SysrootNamespace.enter_rootfs_with_setup(rootfs_value,
           extra_binds: extra_binds,
           run_alpine_setup: run_alpine_setup)
-      elsif !SysrootWorkspace.rootfs_marker_present? && !SysrootWorkspace.workspace_mount_present?
+      elsif !SysrootWorkspace.rootfs_marker_present?
         rootfs_value = SysrootWorkspace.default_rootfs.to_s
         if Dir.exists?(rootfs_value)
           SysrootNamespace.enter_rootfs_with_setup(rootfs_value,

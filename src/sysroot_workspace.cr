@@ -99,16 +99,12 @@ module Bootstrap
     # Priority:
     # - Explicit rootfs path.
     # - Inner rootfs marker (we are already inside).
-    # - Workspace rootfs var/lib artifacts (outer rootfs sees /workspace/rootfs).
     # - Workspace rootfs marker (outer rootfs sees /workspace/rootfs).
     # - Host workspace fallback.
     def self.inner_rootfs_dir(workspace : Path = host_workspace_root, rootfs : Path? = nil) : Path
       return rootfs.not_nil! if rootfs
       return Path["/"] if rootfs_marker_present?
-      if workspace == host_workspace_root
-        return WORKSPACE_ROOTFS if workspace_rootfs_var_lib_present?
-        return WORKSPACE_ROOTFS if workspace_rootfs_present?
-      end
+      return WORKSPACE_ROOTFS if workspace_rootfs_present?
       host_inner_rootfs_dir(workspace)
     end
 
@@ -140,14 +136,6 @@ module Bootstrap
     # Returns true when the workspace rootfs marker exists.
     def self.workspace_rootfs_present? : Bool
       File.exists?(WORKSPACE_ROOTFS_MARKER_PATH)
-    end
-
-    # Returns true when build plan/state artifacts exist under /workspace/rootfs/var/lib.
-    def self.workspace_rootfs_var_lib_present? : Bool
-      var_lib = WORKSPACE_ROOTFS / "var/lib"
-      return false unless Dir.exists?(var_lib)
-      File.exists?(var_lib / "sysroot-build-plan.json") ||
-        File.exists?(var_lib / "sysroot-build-state.json")
     end
 
     # Returns true when /workspace is mounted (bind or otherwise).
