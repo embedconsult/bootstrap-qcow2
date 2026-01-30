@@ -1447,8 +1447,9 @@ module Bootstrap
       "#{flags} #{warning_flag}"
     end
 
-    # Stage 1 LLVM flags use the host compiler, skip libc++ toggles/runtimes,
-    # and keep LLVM static so stage 2 can build its own shared libraries.
+    # Stage 1 LLVM flags use the host compiler, keep LLVM static, and still
+    # build runtimes so stage 2 can link against libunwind/libc++ while it
+    # assembles the shared toolchain.
     private def llvm_stage1_flags(base_flags : Array(String),
                                   phase_env : Hash(String, String)) : Array(String)
       cc_value = phase_env["CC"]? || "clang"
@@ -1460,14 +1461,10 @@ module Bootstrap
       flags = base_flags.reject do |flag|
         flag.starts_with?("-DBUILD_SHARED_LIBS=") ||
           flag.starts_with?("-DLLVM_ENABLE_SHARED=") ||
-          flag.starts_with?("-DLLVM_ENABLE_RUNTIMES=") ||
           flag.starts_with?("-DLLVM_ENABLE_LIBCXX=") ||
           flag.starts_with?("-DLLVM_BUILD_LLVM_DYLIB=") ||
           flag.starts_with?("-DLLVM_LINK_LLVM_DYLIB=") ||
-          flag.starts_with?("-DLLVM_TOOL_LLVM_SHLIB_BUILD=") ||
-          flag.starts_with?("-DLIBUNWIND_") ||
-          flag.starts_with?("-DLIBCXXABI_") ||
-          flag.starts_with?("-DLIBCXX_")
+          flag.starts_with?("-DLLVM_TOOL_LLVM_SHLIB_BUILD=")
       end
       flags << "-DCMAKE_C_COMPILER=#{cc}"
       flags << "-DCMAKE_CXX_COMPILER=#{cxx}"
@@ -1475,8 +1472,7 @@ module Bootstrap
       flags << "-DLLVM_ENABLE_SHARED=OFF"
       flags << "-DLLVM_BUILD_LLVM_DYLIB=ON"
       flags << "-DLLVM_LINK_LLVM_DYLIB=OFF"
-      flags << "-DLLVM_TOOL_LLVM_SHLIB_BUILD=ON"
-      flags << "-DLLVM_ENABLE_RUNTIMES="
+      flags << "-DLLVM_TOOL_LLVM_SHLIB_BUILD=OFF"
       unless cc_flags.empty? || flags.any? { |flag| flag.starts_with?("-DCMAKE_C_FLAGS=") }
         flags << "-DCMAKE_C_FLAGS=#{cc_flags}"
       end

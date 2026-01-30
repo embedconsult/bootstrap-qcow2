@@ -436,7 +436,7 @@ module Bootstrap
         if current
           parts = current.split(':')
           return env if parts.includes?(sysroot_lib)
-          env["LD_LIBRARY_PATH"] = "#{sysroot_lib}:#{current}"
+          env["LD_LIBRARY_PATH"] = "#{current}:#{sysroot_lib}"
         else
           env["LD_LIBRARY_PATH"] = sysroot_lib
         end
