@@ -142,8 +142,8 @@ describe Bootstrap::SysrootRunner do
       Bootstrap::BuildPhase.new(name: "two", description: "b", workspace: "/workspace", environment: "rootfs-system", install_prefix: "/usr", steps: steps),
     ])
 
-    previous = ENV["BQ2_ROOTFS"]?
-    ENV["BQ2_ROOTFS"] = "0"
+    previous = ENV["BQ2_ROOTFS_MARKER"]?
+    ENV.delete("BQ2_ROOTFS_MARKER")
     begin
       runner = RecordingRunner.new
       Bootstrap::SysrootRunner.run_plan(plan, runner)
@@ -151,9 +151,9 @@ describe Bootstrap::SysrootRunner do
       runner.calls.first[:phase].should eq "one"
     ensure
       if previous
-        ENV["BQ2_ROOTFS"] = previous
+        ENV["BQ2_ROOTFS_MARKER"] = previous
       else
-        ENV.delete("BQ2_ROOTFS")
+        ENV.delete("BQ2_ROOTFS_MARKER")
       end
     end
   end
@@ -165,18 +165,22 @@ describe Bootstrap::SysrootRunner do
       Bootstrap::BuildPhase.new(name: "two", description: "b", workspace: "/workspace", environment: "rootfs-system", install_prefix: "/usr", steps: steps),
     ])
 
-    previous = ENV["BQ2_ROOTFS"]?
-    ENV["BQ2_ROOTFS"] = "1"
-    begin
-      runner = RecordingRunner.new
-      Bootstrap::SysrootRunner.run_plan(plan, runner)
-      runner.calls.size.should eq 1
-      runner.calls.first[:phase].should eq "two"
-    ensure
-      if previous
-        ENV["BQ2_ROOTFS"] = previous
-      else
-        ENV.delete("BQ2_ROOTFS")
+    with_tempdir do |dir|
+      marker_path = dir / ".bq2-rootfs"
+      File.write(marker_path, "bq2-rootfs\n")
+      previous = ENV["BQ2_ROOTFS_MARKER"]?
+      ENV["BQ2_ROOTFS_MARKER"] = marker_path.to_s
+      begin
+        runner = RecordingRunner.new
+        Bootstrap::SysrootRunner.run_plan(plan, runner)
+        runner.calls.size.should eq 1
+        runner.calls.first[:phase].should eq "two"
+      ensure
+        if previous
+          ENV["BQ2_ROOTFS_MARKER"] = previous
+        else
+          ENV.delete("BQ2_ROOTFS_MARKER")
+        end
       end
     end
   end

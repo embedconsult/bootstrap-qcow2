@@ -68,16 +68,9 @@ module Bootstrap
     # Create a resume inspector for the provided *builder* and workspace paths.
     def initialize(@builder : SysrootBuilder,
                    @plan_path : Path = builder.plan_path,
-                   @state_path : Path = SysrootWorkspace.state_path(workspace: builder.workspace),
-                   @rootfs_tarball_path : Path = builder.rootfs_dir / "workspace" / builder.rootfs_tarball_name,
+                   @state_path : Path = builder.inner_rootfs_var_lib_dir / "sysroot-build-state.json",
+                   @rootfs_tarball_path : Path = builder.inner_rootfs_workspace_dir / builder.rootfs_tarball_name,
                    @output_tarball_path : Path = builder.sources_dir / builder.rootfs_tarball_name)
-      resolved = SysrootRunner.resolve_status_paths(
-        builder.workspace.to_s,
-        nil,
-        nil
-      )
-      @plan_path = Path[resolved.plan_path]
-      @state_path = Path[resolved.state_path]
     end
 
     # Determine the earliest incomplete stage for `--all --resume`.
@@ -173,7 +166,7 @@ module Bootstrap
 
     # Execute the full --all flow (download, plan, runner, tarball).
     private def self.run_all(args : Array(String)) : Int32
-      workspace = SysrootWorkspace.default_workspace
+      workspace = SysrootBuilder::DEFAULT_WORKSPACE
       architecture = SysrootBuilder::DEFAULT_ARCH
       branch = SysrootBuilder::DEFAULT_BRANCH
       base_version = SysrootBuilder::DEFAULT_BASE_VERSION
@@ -311,7 +304,7 @@ module Bootstrap
           end
         when "rootfs-tarball"
           time_stage(stage) do
-            if File.exists?(builder.rootfs_dir / "workspace" / builder.rootfs_tarball_name)
+            if File.exists?(builder.inner_rootfs_workspace_dir / builder.rootfs_tarball_name)
               Log.info { "Rootfs tarball already present; skipping finalize-rootfs" }
             else
               status = run_sysroot_runner(
@@ -334,7 +327,7 @@ module Bootstrap
       end
 
       unless copy_rootfs_tarball(builder)
-        produced_tarball = builder.rootfs_dir / "workspace" / builder.rootfs_tarball_name
+        produced_tarball = builder.inner_rootfs_workspace_dir / builder.rootfs_tarball_name
         STDERR.puts "Expected rootfs tarball missing at #{produced_tarball}"
         STDERR.puts "Resume hint: #{resume_phase}/#{resume_step}" if resume_phase || resume_step
         return 1
@@ -344,7 +337,7 @@ module Bootstrap
 
     # Print the current resume decision and help output.
     private def self.run_default(args : Array(String)) : Int32
-      workspace = SysrootWorkspace.default_workspace
+      workspace = SysrootBuilder::DEFAULT_WORKSPACE
       builder = SysrootBuilder.new(workspace: workspace)
       begin
         decision = SysrootAllResume.new(builder).decide
@@ -461,7 +454,7 @@ module Bootstrap
 
     # Copy the produced rootfs tarball into the workspace source cache.
     private def self.copy_rootfs_tarball(builder : SysrootBuilder) : Bool
-      produced_tarball = builder.rootfs_dir / "workspace" / builder.rootfs_tarball_name
+      produced_tarball = builder.inner_rootfs_workspace_dir / builder.rootfs_tarball_name
       return false unless File.exists?(produced_tarball)
       output = builder.sources_dir / builder.rootfs_tarball_name
       FileUtils.mkdir_p(output.parent)

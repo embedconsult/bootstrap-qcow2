@@ -26,15 +26,15 @@ module Bootstrap
   # * aarch64-first defaults, but architecture/branch/version are configurable.
   # * Deterministic source handling: every tarball is cached locally with CRC32 +
   #   SHA256 bookkeeping for reuse and verification.
-  # * bootstrap-qcow2 source is fetched as a tarball and staged into /workspace
-  #   so it participates in formatting and specs inside the rootfs.
+  # * bootstrap-qcow2 source is fetched as a tarball and staged into the inner
+  #   rootfs workspace (/workspace inside the inner rootfs).
   #
   # Usage references:
   # * CLI entrypoints: `bq2 sysroot-builder`, `bq2 sysroot-plan-write`,
   #   and `bq2 sysroot-tarball` (see `self.run`, `help_entries`, and README).
-  # * Workspace layout: `SysrootWorkspace` defines the host workspace
-  #   (data/sysroot) and the rootfs workspace (/workspace) described in
-  #   README and AGENTS.md terminology.
+  # * Workspace layout: host workspace is data/sysroot. The inner workspace is
+  #   /workspace inside the inner rootfs and /workspace/rootfs/workspace from the
+  #   outer rootfs.
   # * Build plan contract: `write_plan` persists the plan consumed by
   #   `SysrootRunner` under the inner rootfs var/lib directory.
   class SysrootBuilder < CLI
@@ -45,6 +45,7 @@ module Bootstrap
     {% else %}
       DEFAULT_ARCH = "aarch64"
     {% end %}
+    DEFAULT_WORKSPACE     = Path["data/sysroot"]
     DEFAULT_BRANCH        = "v3.23"
     DEFAULT_BASE_VERSION  = "3.23.2"
     DEFAULT_LLVM_VER      = "18.1.7"
@@ -128,7 +129,7 @@ module Bootstrap
       patch_overrides : Hash(String, Array(String)) = {} of String => Array(String)
 
     # Create a sysroot builder rooted at the workspace directory.
-    def initialize(@workspace : Path = SysrootWorkspace.default_workspace,
+    def initialize(@workspace : Path = DEFAULT_WORKSPACE,
                    @architecture : String = DEFAULT_ARCH,
                    @branch : String = DEFAULT_BRANCH,
                    @base_version : String = DEFAULT_BASE_VERSION,
@@ -179,9 +180,24 @@ module Bootstrap
       @workspace / "rootfs"
     end
 
+    # Host path to the inner rootfs directory (data/sysroot/rootfs/workspace/rootfs).
+    def inner_rootfs_dir : Path
+      rootfs_dir / "workspace/rootfs"
+    end
+
+    # Host path to the inner rootfs var/lib directory.
+    def inner_rootfs_var_lib_dir : Path
+      inner_rootfs_dir / "var/lib"
+    end
+
+    # Host path to the inner rootfs workspace directory.
+    def inner_rootfs_workspace_dir : Path
+      inner_rootfs_dir / "workspace"
+    end
+
     # Absolute path to the serialized build plan inside the inner rootfs.
     def plan_path : Path
-      SysrootWorkspace.plan_path(workspace: @workspace)
+      inner_rootfs_var_lib_dir / "sysroot-build-plan.json"
     end
 
     # Returns true when the workspace contains a prepared rootfs with a
@@ -211,7 +227,7 @@ module Bootstrap
     # Each PackageSpec can carry optional configure flags or a custom build
     # directory name when upstream archives use non-standard layouts.
     def packages : Array(PackageSpec)
-      bootstrap_repo_dir = "#{SysrootWorkspace::ROOTFS_WORKSPACE}/bootstrap-qcow2-#{bootstrap_source_version}"
+      bootstrap_repo_dir = "#{outer_sources_workspace}/bootstrap-qcow2-#{bootstrap_source_version}"
       sysroot_triple = sysroot_target_triple
       [
         PackageSpec.new("m4", DEFAULT_M4, URI.parse("https://ftp.gnu.org/gnu/m4/m4-#{DEFAULT_M4}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
@@ -402,6 +418,16 @@ module Bootstrap
       ]
     end
 
+    # Outer rootfs path used by sysroot-from-alpine and rootfs-from-sysroot.
+    private def outer_rootfs_path : String
+      "#{SysrootWorkspace::ROOTFS_WORKSPACE}/rootfs"
+    end
+
+    # Outer rootfs view of the staged source workspace.
+    private def outer_sources_workspace : String
+      "#{outer_rootfs_path}/workspace"
+    end
+
     # Download all configured package sources and return their cached paths.
     def download_sources : Array(Path)
       packages.flat_map { |pkg| download_all(pkg) }
@@ -590,9 +616,8 @@ module Bootstrap
 
     # Assemble a chroot-able rootfs:
     # * extracts the seed rootfs
-    # * creates workspace/var/lib directories (/workspace holds extracted sources,
-    #   /var/lib and /workspace/rootfs/var/lib hold the build plan)
-    # * stages source archives (including bootstrap-qcow2) into /workspace
+    # * creates inner rootfs var/lib + workspace directories
+    # * stages source archives (including bootstrap-qcow2) into /workspace/rootfs/workspace
     # Returns the rootfs path on success.
     # Invoked by `generate_chroot_tarball` and can also be used directly in callers.
     def prepare_rootfs(base_rootfs : PackageSpec = base_rootfs_spec, include_sources : Bool = true) : Path
@@ -603,23 +628,25 @@ module Bootstrap
       tarball = resolve_base_rootfs_tarball(base_rootfs)
       Log.debug { "Extracting base rootfs from #{tarball}" }
       Tarball.extract(tarball, rootfs_dir, @preserve_ownership_for_rootfs, @owner_uid, @owner_gid, force_system_tar: @use_system_tar_for_rootfs)
-      FileUtils.mkdir_p(rootfs_dir / "workspace/rootfs/var/lib")
+      FileUtils.mkdir_p(inner_rootfs_var_lib_dir)
+      FileUtils.mkdir_p(inner_rootfs_workspace_dir)
+      File.write(inner_rootfs_dir / ".bq2-rootfs", "bq2-rootfs\n")
       FileUtils.mkdir_p(rootfs_dir / "var/lib")
       stage_sources if include_sources
       rootfs_dir
     end
 
-    # Extract downloaded sources into /workspace inside the rootfs for offline builds.
+    # Extract downloaded sources into the inner rootfs workspace for offline builds.
     def stage_sources : Nil
-      workspace_path = rootfs_dir / "workspace"
+      workspace_path = inner_rootfs_workspace_dir
       stage_sources(skip_existing: false, workspace_path: workspace_path)
     end
 
-    # Extract downloaded sources into /workspace inside the rootfs for offline builds.
+    # Extract downloaded sources into the inner rootfs workspace for offline builds.
     #
     # When *skip_existing* is true, source archives are only extracted when the
     # expected build directory does not already exist.
-    def stage_sources(skip_existing : Bool, workspace_path : Path = rootfs_dir / "workspace") : Nil
+    def stage_sources(skip_existing : Bool, workspace_path : Path = inner_rootfs_workspace_dir) : Nil
       shard_projects = [] of Path
       shards_cache = workspace_path / SHARDS_CACHE_DIR
       packages.each do |pkg|
@@ -891,9 +918,11 @@ module Bootstrap
     # - system-from-sysroot/tools-from-system/finalize-rootfs: run inside the workspace rootfs,
     #   prefer /usr/bin, and rely on musl's /etc/ld-musl-<arch>.path for runtime lookup.
     def phase_specs : Array(PhaseSpec)
-      bootstrap_repo_dir = "#{SysrootWorkspace::ROOTFS_WORKSPACE}/bootstrap-qcow2-#{bootstrap_source_version}"
       sysroot_prefix = "/opt/sysroot"
-      rootfs_destdir = SysrootWorkspace::WORKSPACE_ROOTFS.to_s
+      outer_rootfs_path_value = outer_rootfs_path
+      outer_sources_workspace_value = outer_sources_workspace
+      bootstrap_repo_dir = "#{outer_sources_workspace_value}/bootstrap-qcow2-#{bootstrap_source_version}"
+      rootfs_destdir = outer_rootfs_path_value
       rootfs_tarball = "#{SysrootWorkspace::ROOTFS_WORKSPACE}/bq2-rootfs-#{bootstrap_source_version}.tar.gz"
       sysroot_triple = sysroot_target_triple
       sysroot_env = sysroot_phase_env(sysroot_prefix)
@@ -910,7 +939,7 @@ module Bootstrap
       cmake_archive_create = "#{sysroot_prefix}/bin/llvm-ar qc <TARGET> <OBJECTS>"
       cmake_archive_append = "#{sysroot_prefix}/bin/llvm-ar q <TARGET> <OBJECTS>"
       cmake_archive_finish = "#{sysroot_prefix}/bin/llvm-ranlib <TARGET>"
-      shards_cache_root = "#{SysrootWorkspace::ROOTFS_WORKSPACE}/#{SHARDS_CACHE_DIR}"
+      shards_cache_root = "#{outer_sources_workspace_value}/#{SHARDS_CACHE_DIR}"
       libxml2_env = {
         "CPPFLAGS" => "-I#{sysroot_prefix}/include",
         "LDFLAGS"  => "-L#{sysroot_prefix}/lib",
@@ -936,7 +965,7 @@ module Bootstrap
         PhaseSpec.new(
           name: "sysroot-from-alpine",
           description: "Build a self-contained sysroot using Alpine-hosted tools.",
-          workspace: SysrootWorkspace::ROOTFS_WORKSPACE.to_s,
+          workspace: outer_sources_workspace_value,
           environment: "alpine-seed",
           install_prefix: sysroot_prefix,
           destdir: nil,
@@ -992,7 +1021,7 @@ module Bootstrap
         PhaseSpec.new(
           name: "rootfs-from-sysroot",
           description: "Build a minimal rootfs using the newly built sysroot toolchain.",
-          workspace: SysrootWorkspace::ROOTFS_WORKSPACE.to_s,
+          workspace: outer_sources_workspace_value,
           environment: "sysroot-toolchain",
           install_prefix: "/usr",
           destdir: rootfs_destdir,
@@ -1266,10 +1295,10 @@ module Bootstrap
     end
 
     private def ensure_state_file : Nil
-      state_path = SysrootWorkspace.state_path(workspace: @workspace)
+      state_path = inner_rootfs_var_lib_dir / "sysroot-build-state.json"
       return if File.exists?(state_path)
-      overrides_path = SysrootWorkspace.overrides_path(workspace: @workspace).to_s
-      report_dir = SysrootWorkspace.report_dir(workspace: @workspace).to_s
+      overrides_path = (inner_rootfs_var_lib_dir / "sysroot-build-overrides.json").to_s
+      report_dir = (inner_rootfs_var_lib_dir / "sysroot-build-reports").to_s
       state = SysrootBuildState.new(
         plan_path: plan_path.to_s,
         overrides_path: overrides_path,
@@ -1676,7 +1705,7 @@ module Bootstrap
     # Build or reuse a sysroot workspace and optionally emit a tarball.
     private def self.run_builder(args : Array(String)) : Int32
       output = Path["sysroot.tar.gz"]
-      workspace = SysrootWorkspace.default_workspace
+      workspace = DEFAULT_WORKSPACE
       architecture = SysrootBuilder::DEFAULT_ARCH
       branch = SysrootBuilder::DEFAULT_BRANCH
       base_version = SysrootBuilder::DEFAULT_BASE_VERSION
@@ -1719,7 +1748,7 @@ module Bootstrap
         p.on("--no-tarball", "Prepare the chroot tree without writing a tarball") { write_tarball = false }
         p.on("--reuse-rootfs", "Reuse an existing prepared rootfs when present") { reuse_rootfs = true }
         p.on("--refresh-plan", "Rewrite the build plan inside an existing rootfs (requires --reuse-rootfs)") { refresh_plan = true }
-        p.on("--restage-sources", "Extract missing sources into an existing rootfs #{SysrootWorkspace::ROOTFS_WORKSPACE} (requires --reuse-rootfs)") { restage_sources = true }
+        p.on("--restage-sources", "Extract missing sources into the inner rootfs workspace (requires --reuse-rootfs)") { restage_sources = true }
       end
       return CLI.print_help(parser) if help
 
@@ -1743,7 +1772,7 @@ module Bootstrap
         puts "Build plan found at #{builder.plan_path} (iteration state is maintained by sysroot-runner)"
         if include_sources && restage_sources
           builder.stage_sources(skip_existing: true)
-          puts "Staged missing sources into #{builder.rootfs_dir}#{SysrootWorkspace::ROOTFS_WORKSPACE}"
+          puts "Staged missing sources into #{builder.inner_rootfs_workspace_dir}"
         end
         if refresh_plan
           builder.write_plan

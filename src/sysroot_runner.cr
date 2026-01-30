@@ -24,10 +24,16 @@ module Bootstrap
     DEFAULT_OVERRIDES_PATH = "/var/lib/sysroot-build-overrides.json"
     DEFAULT_REPORT_DIR     = "/var/lib/sysroot-build-reports"
     DEFAULT_STATE_PATH     = SysrootBuildState::DEFAULT_PATH
+    DEFAULT_ROOTFS         = Path["data/sysroot/rootfs"]
 
-    # Returns true when a rootfs marker is present (env override or marker file).
+    # Returns true when running inside the inner rootfs.
     def self.rootfs_marker_present? : Bool
-      SysrootWorkspace.rootfs_marker_present?
+      SysrootWorkspace.inner_rootfs_marker_present?
+    end
+
+    # Returns true when the inner rootfs marker is visible from the outer rootfs.
+    def self.outer_rootfs_marker_present? : Bool
+      SysrootWorkspace.outer_rootfs_marker_present?
     end
 
     # Resolved paths used by sysroot-status and resume logic.
@@ -42,17 +48,33 @@ module Bootstrap
     end
 
     # Resolve the rootfs, state, and plan paths using the same logic as sysroot-status.
-    def self.resolve_status_paths(workspace : String,
+    def self.resolve_status_paths(workspace : String?,
                                   rootfs : String?,
                                   state_path : String?) : StatusPaths
-      workspace_path = Path[workspace]
-      rootfs_path = rootfs ? Path[rootfs.not_nil!] : nil
-      inner_rootfs = SysrootWorkspace.inner_rootfs_dir(workspace: workspace_path, rootfs: rootfs_path)
-      var_lib = SysrootWorkspace.inner_var_lib_dir(workspace: workspace_path, rootfs: rootfs_path)
-      resolved_state_path = state_path || (var_lib / "sysroot-build-state.json").to_s
+      if state_path
+        plan_path = File.join(File.dirname(state_path), File.basename(DEFAULT_PLAN_PATH))
+        report_dir = File.join(File.dirname(state_path), File.basename(DEFAULT_REPORT_DIR))
+        rootfs_dir = rootfs || workspace || "(explicit)"
+        return StatusPaths.new(rootfs_dir, state_path, plan_path, report_dir)
+      end
+
+      if workspace || rootfs
+        rootfs_path = rootfs ? Path[rootfs.not_nil!].expand : (Path[workspace.not_nil!].expand / "rootfs")
+        inner_rootfs = rootfs_path / "workspace/rootfs"
+        marker_path = inner_rootfs / SysrootWorkspace::ROOTFS_MARKER_NAME
+        raise "Missing inner rootfs marker at #{marker_path}" unless File.exists?(marker_path)
+        var_lib = inner_rootfs / "var/lib"
+        resolved_state_path = (var_lib / "sysroot-build-state.json").to_s
+        plan_path = (var_lib / "sysroot-build-plan.json").to_s
+        report_dir = (var_lib / "sysroot-build-reports").to_s
+        return StatusPaths.new(inner_rootfs.to_s, resolved_state_path, plan_path, report_dir)
+      end
+
+      var_lib = SysrootWorkspace.inner_var_lib_dir
+      resolved_state_path = (var_lib / "sysroot-build-state.json").to_s
       plan_path = (var_lib / "sysroot-build-plan.json").to_s
       report_dir = (var_lib / "sysroot-build-reports").to_s
-      StatusPaths.new(inner_rootfs.to_s, resolved_state_path, plan_path, report_dir)
+      StatusPaths.new(SysrootWorkspace.inner_rootfs_path.to_s, resolved_state_path, plan_path, report_dir)
     end
 
     private def self.default_overrides_path_for_plan(plan_path : String) : String?
@@ -70,19 +92,11 @@ module Bootstrap
       File.join(File.dirname(plan_path), File.basename(DEFAULT_REPORT_DIR))
     end
 
-    # Enter the workspace rootfs when the marker is present.
-    def self.enter_workspace_rootfs! : Nil
-      return unless SysrootWorkspace.workspace_rootfs_present?
-      rootfs_path = SysrootWorkspace::WORKSPACE_ROOTFS.to_s
-      Log.info { "Entering inner rootfs at #{rootfs_path}" }
-      extra_binds = [] of Tuple(Path, Path)
-      workspace_path = SysrootWorkspace::ROOTFS_WORKSPACE
-      if Dir.exists?(workspace_path)
-        extra_binds << {workspace_path, workspace_path}
-      elsif SysrootWorkspace.workspace_bind_required?
-        Log.warn { "Expected #{SysrootWorkspace::ROOTFS_WORKSPACE} bind mount is missing; namespace entry may fail" }
-      end
-      SysrootNamespace.enter_rootfs(rootfs_path, extra_binds: extra_binds)
+    # Enter the inner rootfs when running inside the outer rootfs.
+    def self.enter_inner_rootfs! : Nil
+      inner_rootfs = SysrootWorkspace.outer_rootfs_path / "rootfs"
+      Log.info { "Entering inner rootfs at #{inner_rootfs}" }
+      SysrootNamespace.enter_rootfs(inner_rootfs.to_s)
     end
 
     # Raised when a command fails during a SystemRunner invocation.
@@ -571,14 +585,15 @@ module Bootstrap
                        resume : Bool = true,
                        allow_outside_rootfs : Bool = false)
       effective_phase = phase
-      if phase.environment.starts_with?("rootfs-") && !rootfs_marker_present? && SysrootWorkspace.workspace_rootfs_present?
-        effective_phase = apply_rootfs_env_override(phase)
+      if effective_phase.environment.starts_with?("rootfs-") && !rootfs_marker_present? && outer_rootfs_marker_present?
+        enter_inner_rootfs!
       end
-      if !allow_outside_rootfs && effective_phase.environment.starts_with?("rootfs-") && !rootfs_marker_present?
-        enter_workspace_rootfs! if SysrootWorkspace.workspace_rootfs_present?
-      end
-      if !allow_outside_rootfs && effective_phase.environment.starts_with?("rootfs-") && !rootfs_marker_present?
-        raise "Refusing to run #{effective_phase.name} (env=#{effective_phase.environment}) outside the produced rootfs (missing #{SysrootWorkspace::ROOTFS_MARKER_PATH})"
+      if effective_phase.environment.starts_with?("rootfs-")
+        if rootfs_marker_present?
+          effective_phase = apply_rootfs_env_override(effective_phase)
+        elsif !allow_outside_rootfs
+          raise "Refusing to run #{effective_phase.name} (env=#{effective_phase.environment}) outside the produced rootfs (missing #{SysrootWorkspace::ROOTFS_MARKER_NAME})"
+        end
       end
       Log.info { "Executing phase #{effective_phase.name} (env=#{effective_phase.environment}, workspace=#{effective_phase.workspace})" }
       Log.info { "**** #{effective_phase.description} ****" }
@@ -702,9 +717,9 @@ module Bootstrap
     end
 
     private def self.rootfs_context_label : String
-      return "Alpine" unless rootfs_marker_present?
-      return "workspace-BQ2" if SysrootWorkspace.workspace_rootfs_present?
-      "seed-BQ2"
+      return "inner-BQ2" if rootfs_marker_present?
+      return "outer-BQ2" if outer_rootfs_marker_present?
+      "Alpine"
     end
 
     private def self.apply_overrides(plan : BuildPlan, path : String) : BuildPlan
@@ -920,8 +935,8 @@ module Bootstrap
         SysrootNamespace.enter_rootfs_with_setup(rootfs_value,
           extra_binds: extra_binds,
           run_alpine_setup: run_alpine_setup)
-      elsif !SysrootWorkspace.rootfs_marker_present?
-        rootfs_value = SysrootWorkspace.default_rootfs.to_s
+      elsif !rootfs_marker_present? && !outer_rootfs_marker_present?
+        rootfs_value = DEFAULT_ROOTFS.to_s
         if Dir.exists?(rootfs_value)
           Log.info { "Entering outer rootfs at #{rootfs_value} (auto)" }
           SysrootNamespace.enter_rootfs_with_setup(rootfs_value,
@@ -931,7 +946,7 @@ module Bootstrap
       end
 
       if !rootfs_requested && plan_path == SysrootRunner::DEFAULT_PLAN_PATH && !plan_explicit
-        resolved = resolve_status_paths(SysrootWorkspace.default_workspace.to_s, nil, state_path)
+        resolved = resolve_status_paths(nil, nil, state_path)
         plan_path = resolved.plan_path
         state_path ||= resolved.state_path
         if report_dir && !report_explicit
@@ -969,7 +984,7 @@ module Bootstrap
 
     # Print the current build status and next phase/step.
     private def self.run_status(args : Array(String)) : Int32
-      workspace = SysrootWorkspace.default_workspace.to_s
+      workspace : String? = nil
       rootfs : String? = nil
       state_path : String? = nil
       report_dir : String? = nil
@@ -977,10 +992,8 @@ module Bootstrap
       show_latest_log = false
 
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-status [options]") do |p|
-        p.on("-w DIR", "--workspace=DIR", "Sysroot workspace directory (default: #{workspace})") { |val| workspace = val }
-        p.on("--rootfs=PATH", "Prepared rootfs directory (default: <workspace>/rootfs)") do |val|
-          rootfs = val
-        end
+        p.on("-w DIR", "--workspace=DIR", "Host workspace directory (debug only)") { |val| workspace = val }
+        p.on("--rootfs=PATH", "Prepared rootfs directory (debug only)") { |val| rootfs = val }
         p.on("--state=PATH", "Explicit sysroot build state JSON path") { |val| state_path = val }
         p.on("--report-dir=PATH", "Override sysroot build report directory") { |val| report_dir = val }
         p.on("--latest-report", "Print the latest failure report JSON") { show_latest_report = true }

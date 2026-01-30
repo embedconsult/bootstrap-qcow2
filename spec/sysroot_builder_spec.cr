@@ -310,7 +310,7 @@ describe Bootstrap::SysrootBuilder do
       builder.fake_tarball = tarball
       rootfs = builder.prepare_rootfs
       File.exists?(rootfs / "workspace").should be_true
-      File.exists?(rootfs / "workspace/bootstrap-qcow2/src/main.cr").should be_true
+      File.exists?(builder.inner_rootfs_workspace_dir / "bootstrap-qcow2/src/main.cr").should be_true
     end
   end
 
@@ -491,7 +491,7 @@ describe Bootstrap::SysrootBuilder do
       builder.package_tarballs["bootstrap-qcow2"] = source_tar
       builder.fake_tarball = tarball
       builder.prepare_rootfs
-      File.exists?(builder.rootfs_dir / "workspace/bootstrap-qcow2/src/main.cr").should be_true
+      File.exists?(builder.inner_rootfs_workspace_dir / "bootstrap-qcow2/src/main.cr").should be_true
     end
   end
 end
