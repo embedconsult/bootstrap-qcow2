@@ -1,7 +1,7 @@
 require "spec"
 require "log"
 require "path"
-require "../src/bootstrap-qcow2"
+require "../src/bootstrap_qcow2"
 require "../src/github_utils"
 require "../src/github_cli"
 require "../src/process_runner"
