@@ -110,8 +110,9 @@ describe Bootstrap::SysrootBuilder do
       builder = Bootstrap::SysrootBuilder.new(dir)
       builder.rootfs_ready?.should be_false
 
-      FileUtils.mkdir_p(builder.plan_path.parent)
-      File.write(builder.plan_path, "[]")
+      plan_path = builder.host_workdir / Bootstrap::SysrootBuildState::RELATIVE_VAR_LIB / Bootstrap::SysrootBuildState::PLAN_FILE
+      FileUtils.mkdir_p(plan_path.parent)
+      File.write(plan_path, "[]")
       builder.rootfs_ready?.should be_true
     end
   end

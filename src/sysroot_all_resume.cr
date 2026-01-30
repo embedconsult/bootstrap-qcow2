@@ -11,7 +11,6 @@ require "./sysroot_workspace"
 module Bootstrap
   # Determines the earliest resume stage for `bq2 --all --resume`.
   class SysrootAllResume < CLI
-    ROOTFS_MARKER_NAME        = ".bq2-rootfs"
     WORKSPACE_ROOTFS_RELATIVE = Path["workspace/rootfs"]
     # Ordered stage list for the --all workflow.
     STAGE_ORDER = [
@@ -59,18 +58,11 @@ module Bootstrap
       end
     end
 
+    getter workspace : SysrootWorkspace::Paths
     getter builder : SysrootBuilder
-    getter plan_path : Path
-    getter state_path : Path
-    getter rootfs_tarball_path : Path
-    getter output_tarball_path : Path
 
-    # Create a resume inspector for the provided *builder* and workspace paths.
-    def initialize(@builder : SysrootBuilder,
-                   @plan_path : Path = builder.plan_path,
-                   @state_path : Path = builder.inner_rootfs_var_lib_dir / "sysroot-build-state.json",
-                   @rootfs_tarball_path : Path = builder.inner_rootfs_workspace_dir / builder.rootfs_tarball_name,
-                   @output_tarball_path : Path = builder.sources_dir / builder.rootfs_tarball_name)
+    # Create a resume inspector for the provided *workspace* and *builder*.
+    def initialize(@workspace : SysrootWorkspace::Paths, @builder : SysrootBuilder)
     end
 
     # Determine the earliest incomplete stage for `--all --resume`.
@@ -116,6 +108,22 @@ module Bootstrap
     # Return true when the cached rootfs tarball exists in the sources directory.
     def tarball_present? : Bool
       File.exists?(output_tarball_path)
+    end
+
+    private def plan_path : Path
+      workspace.var_lib_dir / SysrootBuildState::PLAN_FILE
+    end
+
+    private def state_path : Path
+      workspace.var_lib_dir / SysrootBuildState::STATE_FILE
+    end
+
+    private def rootfs_tarball_path : Path
+      workspace.inner_workspace_path / builder.rootfs_tarball_name
+    end
+
+    private def output_tarball_path : Path
+      builder.sources_dir / builder.rootfs_tarball_name
     end
 
     # Find the next incomplete step in the build plan for the given *state*.
@@ -257,7 +265,8 @@ module Bootstrap
       runner_plan_path : Path? = nil
       runner_state_path : Path? = nil
       if resume
-        decision = SysrootAllResume.new(builder).decide
+        workspace_paths = SysrootWorkspace::Paths.new(builder.inner_rootfs_dir, builder.outer_rootfs_dir)
+        decision = SysrootAllResume.new(workspace_paths, builder).decide
         puts decision.log_message
         return 0 if decision.stage == "complete"
         start_stage = decision.stage
@@ -340,7 +349,8 @@ module Bootstrap
       workspace = SysrootBuilder::DEFAULT_HOST_WORKDIR
       builder = SysrootBuilder.new(host_workdir: workspace)
       begin
-        decision = SysrootAllResume.new(builder).decide
+        workspace_paths = SysrootWorkspace::Paths.new(builder.inner_rootfs_dir, builder.outer_rootfs_dir)
+        decision = SysrootAllResume.new(workspace_paths, builder).decide
         puts(decision.log_message)
         if decision.stage == "sysroot-runner" && (state_path = decision.state_path)
           state = SysrootBuildState.load(state_path.to_s)

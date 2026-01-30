@@ -49,7 +49,6 @@ module Bootstrap
     OUTER_ROOTFS_DIR      = "rootfs"
     INNER_ROOTFS_DIR      = "rootfs/workspace/rootfs"
     WORKSPACE_DIR         = "rootfs/workspace/rootfs/workspace"
-    LOG_DIR               = "log"
     DEFAULT_BRANCH        = "v3.23"
     DEFAULT_BASE_VERSION  = "3.23.2"
     DEFAULT_LLVM_VER      = "18.1.7"
@@ -120,7 +119,6 @@ module Bootstrap
     getter sources_dir : Path
     getter outer_rootfs_dir : Path
     getter inner_rootfs_dir : Path
-    getter inner_rootfs_var_lib_dir : Path
     getter inner_rootfs_workspace_dir : Path
     getter sysroot_dir : Path
     getter base_version : String
@@ -157,7 +155,6 @@ module Bootstrap
       @sources_dir = @host_workdir / "sources"
       @outer_rootfs_dir = @host_workdir / OUTER_ROOTFS_DIR
       @inner_rootfs_dir = @host_workdir / INNER_ROOTFS_DIR
-      @inner_rootfs_var_lib_dir = @inner_rootfs_dir / "var/lib"
       @inner_rootfs_workspace_dir = @host_workdir / WORKSPACE_DIR
       @sysroot_dir = @host_workdir / "sysroot"
 
@@ -181,16 +178,12 @@ module Bootstrap
       end
     end
 
-    # Absolute path to the serialized build plan inside the inner rootfs.
-    def plan_path : Path
-      inner_rootfs_var_lib_dir / "sysroot-build-plan.json"
-    end
-
     # Returns true when the workspace contains a prepared rootfs with a
     # serialized build plan. Iteration state is created by `SysrootRunner` and
     # is not part of a clean sysroot build output.
     def rootfs_ready? : Bool
-      File.exists?(plan_path)
+      var_lib_dir = @host_workdir / SysrootBuildState::RELATIVE_VAR_LIB
+      File.exists?(var_lib_dir / SysrootBuildState::PLAN_FILE)
     end
 
     # Build a PackageSpec pointing at the base rootfs tarball for the configured
@@ -609,7 +602,7 @@ module Bootstrap
       tarball = resolve_base_rootfs_tarball(base_rootfs)
       Log.debug { "Extracting base rootfs from #{tarball}" }
       Tarball.extract(tarball, outer_rootfs_dir, @preserve_ownership_for_rootfs, @owner_uid, @owner_gid, force_system_tar: @use_system_tar_for_rootfs)
-      FileUtils.mkdir_p(inner_rootfs_var_lib_dir)
+      FileUtils.mkdir_p(@host_workdir / SysrootBuildState::RELATIVE_VAR_LIB)
       FileUtils.mkdir_p(inner_rootfs_workspace_dir)
       File.write(inner_rootfs_dir / ".bq2-rootfs", "bq2-rootfs\n")
       FileUtils.mkdir_p(outer_rootfs_dir / "var/lib")
@@ -1269,17 +1262,19 @@ module Bootstrap
     # Persist the build plan JSON into the inner rootfs var/lib directory.
     def write_plan(plan : BuildPlan = build_plan) : Path
       plan_json = plan.to_pretty_json
-      FileUtils.mkdir_p(self.plan_path.parent)
-      File.write(self.plan_path, plan_json)
+      plan_path = @host_workdir / SysrootBuildState::RELATIVE_VAR_LIB / SysrootBuildState::PLAN_FILE
+      FileUtils.mkdir_p(plan_path.parent)
+      File.write(plan_path, plan_json)
       ensure_state_file
-      self.plan_path
+      plan_path
     end
 
     private def ensure_state_file : Nil
-      state_path = inner_rootfs_var_lib_dir / "sysroot-build-state.json"
+      plan_path = @host_workdir / SysrootBuildState::RELATIVE_VAR_LIB / SysrootBuildState::PLAN_FILE
+      state_path = @host_workdir / SysrootBuildState::RELATIVE_VAR_LIB / SysrootBuildState::STATE_FILE
       return if File.exists?(state_path)
-      overrides_path = (inner_rootfs_var_lib_dir / "sysroot-build-overrides.json").to_s
-      report_dir = (inner_rootfs_var_lib_dir / "sysroot-build-reports").to_s
+      overrides_path = (@host_workdir / SysrootBuildState::RELATIVE_VAR_LIB / SysrootBuildState::OVERRIDES_FILE).to_s
+      report_dir = (@host_workdir / SysrootBuildState::RELATIVE_VAR_LIB / SysrootBuildState::REPORT_DIR_NAME).to_s
       state = SysrootBuildState.new(
         plan_path: plan_path.to_s,
         overrides_path: overrides_path,
@@ -1749,14 +1744,14 @@ module Bootstrap
 
       if reuse_rootfs && builder.rootfs_ready?
         puts "Reusing existing rootfs at #{builder.outer_rootfs_dir}"
-        puts "Build plan found at #{builder.plan_path} (iteration state is maintained by sysroot-runner)"
+        puts "Build plan found at #{builder.host_workdir / SysrootBuildState::RELATIVE_VAR_LIB / SysrootBuildState::PLAN_FILE} (iteration state is maintained by sysroot-runner)"
         if include_sources && restage_sources
           builder.stage_sources(skip_existing: true)
           puts "Staged missing sources into #{builder.inner_rootfs_workspace_dir}"
         end
         if refresh_plan
           builder.write_plan
-          puts "Refreshed build plan at #{builder.plan_path}"
+          puts "Refreshed build plan at #{builder.host_workdir / SysrootBuildState::RELATIVE_VAR_LIB / SysrootBuildState::PLAN_FILE}"
         end
         if write_tarball
           builder.write_chroot_tarball(output)

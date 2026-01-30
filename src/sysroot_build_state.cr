@@ -4,6 +4,8 @@ require "file_utils"
 require "random/secure"
 require "time"
 
+require "./sysroot_workspace"
+
 module Bootstrap
   # Persistent, human-readable state for in-container sysroot/rootfs iterations.
   #
@@ -13,10 +15,16 @@ module Bootstrap
   struct SysrootBuildState
     include JSON::Serializable
 
-    DEFAULT_PATH      = "/var/lib/sysroot-build-state.json"
-    DEFAULT_PLAN      = "/var/lib/sysroot-build-plan.json"
-    DEFAULT_OVERRIDES = "/var/lib/sysroot-build-overrides.json"
-    DEFAULT_REPORTS   = "/var/lib/sysroot-build-reports"
+    PLAN_FILE        = "sysroot-build-plan.json"
+    STATE_FILE       = "sysroot-build-state.json"
+    OVERRIDES_FILE   = "sysroot-build-overrides.json"
+    REPORT_DIR_NAME  = "sysroot-build-reports"
+    RELATIVE_VAR_LIB = "rootfs/workspace/rootfs/var/lib"
+
+    DEFAULT_PATH      = "/var/lib/#{STATE_FILE}"
+    DEFAULT_PLAN      = "/var/lib/#{PLAN_FILE}"
+    DEFAULT_OVERRIDES = "/var/lib/#{OVERRIDES_FILE}"
+    DEFAULT_REPORTS   = "/var/lib/#{REPORT_DIR_NAME}"
     FORMAT_VERSION    = 1
 
     # Schema version for forward-compatible upgrades.
@@ -74,6 +82,21 @@ module Bootstrap
                    @invalidation_reason : String? = nil,
                    @progress : Progress = Progress.new,
                    @format_version : Int32 = FORMAT_VERSION)
+    end
+
+    # Resolve the inner rootfs var/lib directory from a host workdir.
+    def self.var_lib_dir_for_host(host_workdir : Path) : Path
+      host_workdir / RELATIVE_VAR_LIB
+    end
+
+    # Resolve the inner rootfs var/lib directory from an inner rootfs path.
+    def self.var_lib_dir_for_inner_rootfs(inner_rootfs_path : Path) : Path
+      inner_rootfs_path / "var/lib"
+    end
+
+    # Resolve the inner rootfs var/lib directory from the current workspace.
+    def self.var_lib_dir_for_workspace : Path
+      var_lib_dir_for_inner_rootfs(SysrootWorkspace.inner_rootfs_path)
     end
 
     # Load state from *path*, returning nil when the file does not exist.

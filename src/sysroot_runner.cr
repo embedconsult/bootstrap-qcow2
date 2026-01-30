@@ -52,8 +52,9 @@ module Bootstrap
                                   rootfs : String?,
                                   state_path : String?) : StatusPaths
       if state_path
-        plan_path = File.join(File.dirname(state_path), File.basename(DEFAULT_PLAN_PATH))
-        report_dir = File.join(File.dirname(state_path), File.basename(DEFAULT_REPORT_DIR))
+        base_dir = Path[state_path].expand.parent
+        plan_path = (base_dir / SysrootBuildState::PLAN_FILE).to_s
+        report_dir = (base_dir / SysrootBuildState::REPORT_DIR_NAME).to_s
         rootfs_dir = rootfs || workspace || "(explicit)"
         return StatusPaths.new(rootfs_dir, state_path, plan_path, report_dir)
       end
@@ -63,33 +64,33 @@ module Bootstrap
         inner_rootfs = rootfs_path / "workspace/rootfs"
         marker_path = inner_rootfs / SysrootWorkspace::ROOTFS_MARKER_NAME
         raise "Missing inner rootfs marker at #{marker_path}" unless File.exists?(marker_path)
-        var_lib = inner_rootfs / "var/lib"
-        resolved_state_path = (var_lib / "sysroot-build-state.json").to_s
-        plan_path = (var_lib / "sysroot-build-plan.json").to_s
-        report_dir = (var_lib / "sysroot-build-reports").to_s
+        var_lib = SysrootBuildState.var_lib_dir_for_inner_rootfs(inner_rootfs)
+        resolved_state_path = (var_lib / SysrootBuildState::STATE_FILE).to_s
+        plan_path = (var_lib / SysrootBuildState::PLAN_FILE).to_s
+        report_dir = (var_lib / SysrootBuildState::REPORT_DIR_NAME).to_s
         return StatusPaths.new(inner_rootfs.to_s, resolved_state_path, plan_path, report_dir)
       end
 
-      var_lib = SysrootWorkspace.inner_var_lib_dir
-      resolved_state_path = (var_lib / "sysroot-build-state.json").to_s
-      plan_path = (var_lib / "sysroot-build-plan.json").to_s
-      report_dir = (var_lib / "sysroot-build-reports").to_s
+      var_lib = SysrootBuildState.var_lib_dir_for_workspace
+      resolved_state_path = (var_lib / SysrootBuildState::STATE_FILE).to_s
+      plan_path = (var_lib / SysrootBuildState::PLAN_FILE).to_s
+      report_dir = (var_lib / SysrootBuildState::REPORT_DIR_NAME).to_s
       StatusPaths.new(SysrootWorkspace.inner_rootfs_path.to_s, resolved_state_path, plan_path, report_dir)
     end
 
     private def self.default_overrides_path_for_plan(plan_path : String) : String?
-      overrides_candidate = File.join(File.dirname(plan_path), File.basename(DEFAULT_OVERRIDES_PATH))
+      overrides_candidate = File.join(File.dirname(plan_path), SysrootBuildState::OVERRIDES_FILE)
       return overrides_candidate if File.basename(plan_path) == File.basename(DEFAULT_PLAN_PATH)
       return overrides_candidate if File.exists?(overrides_candidate)
       nil
     end
 
     private def self.default_state_path_for_plan(plan_path : String) : String
-      File.join(File.dirname(plan_path), File.basename(SysrootBuildState::DEFAULT_PATH))
+      File.join(File.dirname(plan_path), SysrootBuildState::STATE_FILE)
     end
 
     private def self.default_report_dir_for_plan(plan_path : String) : String
-      File.join(File.dirname(plan_path), File.basename(DEFAULT_REPORT_DIR))
+      File.join(File.dirname(plan_path), SysrootBuildState::REPORT_DIR_NAME)
     end
 
     # Enter the inner rootfs when running inside the outer rootfs.

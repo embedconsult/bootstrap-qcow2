@@ -48,11 +48,16 @@ private def write_state(path : Path, plan_path : Path, plan : Bootstrap::BuildPl
   state
 end
 
+private def resume_for(builder : Bootstrap::SysrootBuilder) : Bootstrap::SysrootAllResume
+  workspace = Bootstrap::SysrootWorkspace::Paths.new(builder.inner_rootfs_dir, builder.outer_rootfs_dir)
+  Bootstrap::SysrootAllResume.new(workspace, builder)
+end
+
 describe Bootstrap::SysrootAllResume do
   it "selects download-sources when the source cache is missing" do
     with_tempdir do |dir|
       builder = Bootstrap::SysrootBuilder.new(host_workdir: dir)
-      decision = Bootstrap::SysrootAllResume.new(builder).decide
+      decision = resume_for(builder).decide
       decision.stage.should eq("download-sources")
     end
   end
@@ -61,10 +66,10 @@ describe Bootstrap::SysrootAllResume do
     with_tempdir do |dir|
       builder = Bootstrap::SysrootBuilder.new(host_workdir: dir)
       populate_sources(builder)
-      plan_path = builder.plan_path
+      plan_path = builder.host_workdir / Bootstrap::SysrootBuildState::RELATIVE_VAR_LIB / Bootstrap::SysrootBuildState::PLAN_FILE
       write_plan(plan_path)
 
-      decision = Bootstrap::SysrootAllResume.new(builder).decide
+      decision = resume_for(builder).decide
       decision.stage.should eq("sysroot-runner")
       decision.reason.should contain("state is missing")
     end
@@ -74,12 +79,12 @@ describe Bootstrap::SysrootAllResume do
     with_tempdir do |dir|
       builder = Bootstrap::SysrootBuilder.new(host_workdir: dir)
       populate_sources(builder)
-      plan_path = builder.plan_path
+      plan_path = builder.host_workdir / Bootstrap::SysrootBuildState::RELATIVE_VAR_LIB / Bootstrap::SysrootBuildState::PLAN_FILE
       plan = write_plan(plan_path)
-      state_path = builder.inner_rootfs_var_lib_dir / "sysroot-build-state.json"
+      state_path = builder.host_workdir / Bootstrap::SysrootBuildState::RELATIVE_VAR_LIB / Bootstrap::SysrootBuildState::STATE_FILE
       write_state(state_path, plan_path, plan, [{"phase-a", "step-a"}])
 
-      decision = Bootstrap::SysrootAllResume.new(builder).decide
+      decision = resume_for(builder).decide
       decision.stage.should eq("sysroot-runner")
       decision.resume_phase.should eq("phase-b")
       decision.resume_step.should eq("step-b")
@@ -90,12 +95,12 @@ describe Bootstrap::SysrootAllResume do
     with_tempdir do |dir|
       builder = Bootstrap::SysrootBuilder.new(host_workdir: dir)
       populate_sources(builder)
-      plan_path = builder.plan_path
+      plan_path = builder.host_workdir / Bootstrap::SysrootBuildState::RELATIVE_VAR_LIB / Bootstrap::SysrootBuildState::PLAN_FILE
       plan = write_plan(plan_path)
-      state_path = builder.inner_rootfs_var_lib_dir / "sysroot-build-state.json"
+      state_path = builder.host_workdir / Bootstrap::SysrootBuildState::RELATIVE_VAR_LIB / Bootstrap::SysrootBuildState::STATE_FILE
       write_state(state_path, plan_path, plan, [{"phase-a", "step-a"}, {"phase-b", "step-b"}])
 
-      decision = Bootstrap::SysrootAllResume.new(builder).decide
+      decision = resume_for(builder).decide
       decision.stage.should eq("rootfs-tarball")
     end
   end
@@ -104,14 +109,14 @@ describe Bootstrap::SysrootAllResume do
     with_tempdir do |dir|
       builder = Bootstrap::SysrootBuilder.new(host_workdir: dir)
       populate_sources(builder)
-      plan_path = builder.plan_path
+      plan_path = builder.host_workdir / Bootstrap::SysrootBuildState::RELATIVE_VAR_LIB / Bootstrap::SysrootBuildState::PLAN_FILE
       plan = write_plan(plan_path)
-      state_path = builder.inner_rootfs_var_lib_dir / "sysroot-build-state.json"
+      state_path = builder.host_workdir / Bootstrap::SysrootBuildState::RELATIVE_VAR_LIB / Bootstrap::SysrootBuildState::STATE_FILE
       state = write_state(state_path, plan_path, plan, [{"phase-a", "step-a"}])
       state.plan_digest = "deadbeef"
       state.save(state_path.to_s)
 
-      decision = Bootstrap::SysrootAllResume.new(builder).decide
+      decision = resume_for(builder).decide
       decision.stage.should eq("sysroot-runner")
       decision.state_path.should be_nil
       decision.plan_path.should eq(plan_path)
@@ -122,12 +127,13 @@ describe Bootstrap::SysrootAllResume do
     with_tempdir do |dir|
       builder = Bootstrap::SysrootBuilder.new(host_workdir: dir)
       populate_sources(builder)
-      state_path = builder.inner_rootfs_var_lib_dir / "sysroot-build-state.json"
-      write_state(state_path, builder.plan_path, Bootstrap::BuildPlan.new([] of Bootstrap::BuildPhase), [] of Tuple(String, String))
-      File.delete(builder.plan_path) if File.exists?(builder.plan_path)
+      state_path = builder.host_workdir / Bootstrap::SysrootBuildState::RELATIVE_VAR_LIB / Bootstrap::SysrootBuildState::STATE_FILE
+      plan_path = builder.host_workdir / Bootstrap::SysrootBuildState::RELATIVE_VAR_LIB / Bootstrap::SysrootBuildState::PLAN_FILE
+      write_state(state_path, plan_path, Bootstrap::BuildPlan.new([] of Bootstrap::BuildPhase), [] of Tuple(String, String))
+      File.delete(plan_path) if File.exists?(plan_path)
 
       expect_raises(Exception, /plan is missing/) do
-        Bootstrap::SysrootAllResume.new(builder).decide
+        resume_for(builder).decide
       end
     end
   end
