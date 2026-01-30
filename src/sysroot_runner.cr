@@ -6,7 +6,6 @@ require "random/secure"
 require "set"
 require "time"
 require "./build_plan"
-require "./build_plan_reader"
 require "./build_plan_overrides"
 require "./cli"
 require "./process_runner"
@@ -496,7 +495,7 @@ module Bootstrap
       plan_path = path || build_state.plan_path_path.to_s
       raise "Missing build plan #{plan_path}" unless File.exists?(plan_path)
       Log.info { "Loading build plan from #{plan_path}" }
-      plan = BuildPlanReader.load(plan_path)
+      plan = BuildPlan.load(plan_path)
       effective_report_dir = report_dir || build_state.report_dir_path.to_s
       effective_overrides_path =
         if overrides_path

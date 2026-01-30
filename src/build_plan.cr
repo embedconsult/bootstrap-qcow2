@@ -67,7 +67,7 @@ module Bootstrap
 
   # Root object written to disk inside the inner rootfs var/lib directory
   # (for example `/var/lib/sysroot-build-plan.json` in the inner rootfs).
-  struct BuildPlan
+  class BuildPlan
     include JSON::Serializable
 
     getter format_version : Int32
@@ -76,6 +76,20 @@ module Bootstrap
     # Creates a build plan. `format_version` allows forward-compatible changes
     # to the on-disk JSON schema.
     def initialize(@phases : Array(BuildPhase), @format_version : Int32 = 1)
+    end
+
+    def_equals @format_version, @phases
+
+    def self.load(path : String) : BuildPlan
+      parse(File.read(path))
+    end
+
+    def self.parse(json : String) : BuildPlan
+      stripped = json.lstrip
+      if stripped.starts_with?("[")
+        raise "Legacy build plan format is not supported; regenerate the plan with sysroot-builder"
+      end
+      BuildPlan.from_json(json)
     end
   end
 end
