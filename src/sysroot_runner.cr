@@ -49,55 +49,10 @@ module Bootstrap
       rootfs_path = rootfs ? Path[rootfs.not_nil!] : nil
       inner_rootfs = SysrootWorkspace.inner_rootfs_dir(workspace: workspace_path, rootfs: rootfs_path)
       var_lib = SysrootWorkspace.inner_var_lib_dir(workspace: workspace_path, rootfs: rootfs_path)
-      rootfs_root = inner_rootfs.to_s
+      resolved_state_path = state_path || (var_lib / "sysroot-build-state.json").to_s
       plan_path = (var_lib / "sysroot-build-plan.json").to_s
       report_dir = (var_lib / "sysroot-build-reports").to_s
-      resolved_state_path = state_path
-      if resolved_state_path.nil?
-        candidates = [] of String
-        candidates << (var_lib / "sysroot-build-state.json").to_s
-        if workspace_path == SysrootWorkspace.host_workspace_root
-          candidates << SysrootBuildState::DEFAULT_PATH unless candidates.includes?(SysrootBuildState::DEFAULT_PATH)
-        end
-        if (best_state = select_best_state_path(candidates))
-          resolved_state_path = best_state
-          rootfs_root = rootfs_root_for_state(best_state)
-          plan_path = File.join(rootfs_root, "var/lib/sysroot-build-plan.json")
-          report_dir = File.join(rootfs_root, "var/lib/sysroot-build-reports")
-        else
-          resolved_state_path = candidates.first
-        end
-      end
-      StatusPaths.new(rootfs_root, resolved_state_path.not_nil!, plan_path, report_dir)
-    end
-
-    private def self.select_best_state_path(candidates : Array(String)) : String?
-      best_path = nil
-      best_completed = -1
-      best_activity = -1
-      best_timestamp = ""
-      candidates.each do |path|
-        next unless File.exists?(path)
-        begin
-          state = SysrootBuildState.load(path)
-        rescue
-          next
-        end
-        completed = state.progress.completed_steps.values.sum(&.size)
-        activity = 0
-        activity += 1 if state.progress.last_success
-        activity += 1 if state.progress.last_failure
-        timestamp = state.updated_at || state.created_at || ""
-        if completed > best_completed ||
-           (completed == best_completed && activity > best_activity) ||
-           (completed == best_completed && activity == best_activity && timestamp > best_timestamp)
-          best_path = path
-          best_completed = completed
-          best_activity = activity
-          best_timestamp = timestamp
-        end
-      end
-      best_path
+      StatusPaths.new(inner_rootfs.to_s, resolved_state_path, plan_path, report_dir)
     end
 
     private def self.default_overrides_path_for_plan(plan_path : String) : String?
@@ -113,10 +68,6 @@ module Bootstrap
 
     private def self.default_report_dir_for_plan(plan_path : String) : String
       File.join(File.dirname(plan_path), File.basename(DEFAULT_REPORT_DIR))
-    end
-
-    private def self.rootfs_root_for_state(state_path : String) : String
-      File.dirname(File.dirname(File.dirname(state_path)))
     end
 
     # Enter the workspace rootfs when the marker is present.
