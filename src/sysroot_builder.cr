@@ -1261,7 +1261,22 @@ module Bootstrap
       plan_json = plan.to_pretty_json
       FileUtils.mkdir_p(self.plan_path.parent)
       File.write(self.plan_path, plan_json)
+      ensure_state_file
       self.plan_path
+    end
+
+    private def ensure_state_file : Nil
+      state_path = SysrootWorkspace.state_path(workspace: @workspace)
+      return if File.exists?(state_path)
+      overrides_path = SysrootWorkspace.overrides_path(workspace: @workspace).to_s
+      report_dir = SysrootWorkspace.report_dir(workspace: @workspace).to_s
+      state = SysrootBuildState.new(
+        plan_path: plan_path.to_s,
+        overrides_path: overrides_path,
+        report_dir: report_dir,
+      )
+      state.plan_digest = SysrootBuildState.digest_for?(plan_path.to_s)
+      state.save(state_path.to_s)
     end
 
     # Convert a PhaseSpec into a concrete BuildPhase with computed workdirs and
