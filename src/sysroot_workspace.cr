@@ -27,6 +27,8 @@ module Bootstrap
   # - Path constants for "where /workspace lives" in each context.
   # - Detection of whether we are inside the inner rootfs (marker/env flag).
   # - Mount/bind checks for /workspace when running in the outer rootfs.
+  # - Location of the inner rootfs var/lib directory that hosts build plans,
+  #   overrides, state, and failure reports.
   #
   # It is referenced by:
   # - SysrootBuilder: host working directory defaults + plan roots for /workspace.
@@ -90,6 +92,45 @@ module Bootstrap
     # Default rootfs directory derived from the workspace.
     def self.default_rootfs : Path
       default_workspace / "rootfs"
+    end
+
+    # Inner rootfs directory resolved from the current context.
+    #
+    # Priority:
+    # - Explicit rootfs path.
+    # - Inner rootfs marker (we are already inside).
+    # - Workspace rootfs marker (outer rootfs sees /workspace/rootfs).
+    # - Host workspace fallback.
+    def self.inner_rootfs_dir(workspace : Path = host_workspace_root, rootfs : Path? = nil) : Path
+      return rootfs.not_nil! if rootfs
+      return Path["/"] if rootfs_marker_present?
+      return WORKSPACE_ROOTFS if workspace_rootfs_present?
+      host_inner_rootfs_dir(workspace)
+    end
+
+    # Inner rootfs var/lib directory resolved from the current context.
+    def self.inner_var_lib_dir(workspace : Path = host_workspace_root, rootfs : Path? = nil) : Path
+      inner_rootfs_dir(workspace, rootfs) / "var/lib"
+    end
+
+    # Inner rootfs build plan path resolved from the current context.
+    def self.plan_path(workspace : Path = host_workspace_root, rootfs : Path? = nil) : Path
+      inner_var_lib_dir(workspace, rootfs) / "sysroot-build-plan.json"
+    end
+
+    # Inner rootfs build overrides path resolved from the current context.
+    def self.overrides_path(workspace : Path = host_workspace_root, rootfs : Path? = nil) : Path
+      inner_var_lib_dir(workspace, rootfs) / "sysroot-build-overrides.json"
+    end
+
+    # Inner rootfs build state path resolved from the current context.
+    def self.state_path(workspace : Path = host_workspace_root, rootfs : Path? = nil) : Path
+      inner_var_lib_dir(workspace, rootfs) / "sysroot-build-state.json"
+    end
+
+    # Inner rootfs build report directory resolved from the current context.
+    def self.report_dir(workspace : Path = host_workspace_root, rootfs : Path? = nil) : Path
+      inner_var_lib_dir(workspace, rootfs) / "sysroot-build-reports"
     end
 
     # Returns true when the workspace rootfs marker exists.

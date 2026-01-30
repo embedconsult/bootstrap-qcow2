@@ -65,7 +65,8 @@ module Bootstrap
     end
   end
 
-  # Root object written to disk as `/var/lib/sysroot-build-plan.json`.
+  # Root object written to disk inside the inner rootfs var/lib directory
+  # (for example `/var/lib/sysroot-build-plan.json` in the inner rootfs).
   struct BuildPlan
     include JSON::Serializable
 

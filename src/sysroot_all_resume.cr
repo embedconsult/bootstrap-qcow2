@@ -68,7 +68,7 @@ module Bootstrap
     # Create a resume inspector for the provided *builder* and workspace paths.
     def initialize(@builder : SysrootBuilder,
                    @plan_path : Path = builder.plan_path,
-                   @state_path : Path = builder.rootfs_dir / "var/lib/sysroot-build-state.json",
+                   @state_path : Path = SysrootWorkspace.state_path(workspace: builder.workspace),
                    @rootfs_tarball_path : Path = builder.rootfs_dir / "workspace" / builder.rootfs_tarball_name,
                    @output_tarball_path : Path = builder.sources_dir / builder.rootfs_tarball_name)
       resolved = SysrootRunner.resolve_status_paths(

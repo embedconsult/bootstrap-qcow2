@@ -35,8 +35,9 @@ module Bootstrap
       getter rootfs_dir : String
       getter state_path : String
       getter plan_path : String
+      getter report_dir : String
 
-      def initialize(@rootfs_dir : String, @state_path : String, @plan_path : String)
+      def initialize(@rootfs_dir : String, @state_path : String, @plan_path : String, @report_dir : String)
       end
     end
 
@@ -44,44 +45,29 @@ module Bootstrap
     def self.resolve_status_paths(workspace : String,
                                   rootfs : String?,
                                   state_path : String?) : StatusPaths
-      rootfs_dir = rootfs || default_rootfs_dir(workspace)
-      resolved_state_path = state_path || resolve_state_path(rootfs_dir, rootfs_explicit: !rootfs.nil?)
-      plan_path = File.join(rootfs_dir, "var/lib/sysroot-build-plan.json")
-      if resolved_state_path != state_path && File.exists?(resolved_state_path)
-        rootfs_root = rootfs_root_for_state(resolved_state_path)
-        plan_path = File.join(rootfs_root, "var/lib/sysroot-build-plan.json")
-        rootfs_dir = rootfs_root
-      end
-      StatusPaths.new(rootfs_dir, resolved_state_path, plan_path)
+      workspace_path = Path[workspace]
+      rootfs_path = rootfs ? Path[rootfs.not_nil!] : nil
+      inner_rootfs = SysrootWorkspace.inner_rootfs_dir(workspace: workspace_path, rootfs: rootfs_path)
+      var_lib = SysrootWorkspace.inner_var_lib_dir(workspace: workspace_path, rootfs: rootfs_path)
+      resolved_state_path = state_path || (var_lib / "sysroot-build-state.json").to_s
+      plan_path = (var_lib / "sysroot-build-plan.json").to_s
+      report_dir = (var_lib / "sysroot-build-reports").to_s
+      StatusPaths.new(inner_rootfs.to_s, resolved_state_path, plan_path, report_dir)
     end
 
-    # Return the default rootfs directory for the provided workspace.
-    private def self.default_rootfs_dir(workspace : String) : String
-      return "/" if rootfs_marker_present?
-      File.join(workspace, "rootfs")
+    private def self.default_overrides_path_for_plan(plan_path : String) : String?
+      overrides_candidate = File.join(File.dirname(plan_path), File.basename(DEFAULT_OVERRIDES_PATH))
+      return overrides_candidate if File.basename(plan_path) == File.basename(DEFAULT_PLAN_PATH)
+      return overrides_candidate if File.exists?(overrides_candidate)
+      nil
     end
 
-    private def self.resolve_state_path(rootfs_dir : String, rootfs_explicit : Bool) : String
-      candidates = [] of String
-      if rootfs_marker_present?
-        candidates << "/"
-      else
-        candidates << rootfs_dir if rootfs_explicit
-        candidates << File.join(rootfs_dir, "workspace/rootfs")
-        candidates << rootfs_dir
-      end
-      candidates.uniq.each do |candidate|
-        candidate_state = File.join(candidate, "var/lib/sysroot-build-state.json")
-        return candidate_state if File.exists?(candidate_state)
-      end
-      if rootfs_marker_present? && File.exists?(SysrootBuildState::DEFAULT_PATH)
-        return SysrootBuildState::DEFAULT_PATH
-      end
-      File.join(rootfs_dir, "var/lib/sysroot-build-state.json")
+    private def self.default_state_path_for_plan(plan_path : String) : String
+      File.join(File.dirname(plan_path), File.basename(SysrootBuildState::DEFAULT_PATH))
     end
 
-    private def self.rootfs_root_for_state(state_path : String) : String
-      File.dirname(File.dirname(File.dirname(state_path)))
+    private def self.default_report_dir_for_plan(plan_path : String) : String
+      File.join(File.dirname(plan_path), File.basename(DEFAULT_REPORT_DIR))
     end
 
     # Enter the workspace rootfs when the marker is present.
@@ -508,6 +494,12 @@ module Bootstrap
       raise "Missing build plan #{path}" unless File.exists?(path)
       Log.info { "Loading build plan from #{path}" }
       plan = BuildPlanReader.load(path)
+      effective_report_dir =
+        if report_dir == DEFAULT_REPORT_DIR && File.basename(path) == File.basename(DEFAULT_PLAN_PATH)
+          default_report_dir_for_plan(path)
+        else
+          report_dir
+        end
       effective_overrides_path =
         if overrides_path
           overrides_path
@@ -516,18 +508,23 @@ module Bootstrap
         end
       plan = apply_overrides(plan, effective_overrides_path) if effective_overrides_path
       stage_report_dirs_for_destdirs(plan)
-      effective_state_path = state_path || (resume && path == DEFAULT_PLAN_PATH ? DEFAULT_STATE_PATH : nil)
-      state = effective_state_path ? SysrootBuildState.load_or_init(effective_state_path, plan_path: path, overrides_path: effective_overrides_path, report_dir: report_dir) : nil
+      effective_state_path =
+        if state_path
+          state_path
+        elsif resume
+          default_state_path_for_plan(path)
+        end
+      state = effective_state_path ? SysrootBuildState.load_or_init(effective_state_path, plan_path: path, overrides_path: effective_overrides_path, report_dir: effective_report_dir) : nil
       state.try(&.save(effective_state_path.not_nil!)) if effective_state_path
       effective_runner = runner
-      if runner.is_a?(SystemRunner) && report_dir && runner.report_dir.nil?
-        effective_runner = runner.with_report_dir(report_dir)
+      if runner.is_a?(SystemRunner) && effective_report_dir && runner.report_dir.nil?
+        effective_runner = runner.with_report_dir(effective_report_dir)
       end
       run_plan(plan,
         effective_runner,
         phase: phase,
         packages: packages,
-        report_dir: report_dir,
+        report_dir: effective_report_dir,
         dry_run: dry_run,
         state: state,
         state_path: effective_state_path,
@@ -765,13 +762,6 @@ module Bootstrap
       end.join(" | ")
     end
 
-    private def self.default_overrides_path_for_plan(plan_path : String) : String?
-      return DEFAULT_OVERRIDES_PATH if plan_path == DEFAULT_PLAN_PATH
-      overrides_candidate = File.join(File.dirname(plan_path), File.basename(DEFAULT_OVERRIDES_PATH))
-      return overrides_candidate if File.exists?(overrides_candidate)
-      nil
-    end
-
     # Creates a minimal directory skeleton for `DESTDIR` installs. The intent is
     # to keep packages with hard-coded expectations (e.g., `/usr/bin`) from
     # failing when the destdir tree is initially empty.
@@ -880,6 +870,7 @@ module Bootstrap
       overrides_path : String? = nil
       use_default_overrides = true
       report_dir : String? = SysrootRunner::DEFAULT_REPORT_DIR
+      report_explicit = false
       state_path : String? = nil
       dry_run = false
       resume = true
@@ -902,7 +893,10 @@ module Bootstrap
           overrides_path = nil
           use_default_overrides = false
         end
-        p.on("--report-dir PATH", "Write failure reports to PATH (default: #{SysrootRunner::DEFAULT_REPORT_DIR})") { |path| report_dir = path }
+        p.on("--report-dir PATH", "Write failure reports to PATH (default: #{SysrootRunner::DEFAULT_REPORT_DIR})") do |path|
+          report_dir = path
+          report_explicit = true
+        end
         p.on("--no-report", "Disable failure report writing") { report_dir = nil }
         p.on("--state-path PATH", "Write runner state/bookmarks to PATH (default: #{SysrootRunner::DEFAULT_STATE_PATH} when using the default plan path)") { |path| state_path = path }
         p.on("--no-resume", "Disable resume/state tracking (useful when the default state path is not writable)") { resume = false }
@@ -931,6 +925,13 @@ module Bootstrap
         resolved = resolve_status_paths(SysrootWorkspace.default_workspace.to_s, nil, state_path)
         plan_path = resolved.plan_path
         state_path ||= resolved.state_path
+        if report_dir && !report_explicit
+          report_dir = resolved.report_dir
+        end
+      end
+
+      if report_dir && !report_explicit
+        report_dir = default_report_dir_for_plan(plan_path)
       end
 
       SysrootRunner.run_plan(
@@ -962,6 +963,9 @@ module Bootstrap
       workspace = SysrootWorkspace.default_workspace.to_s
       rootfs : String? = nil
       state_path : String? = nil
+      report_dir : String? = nil
+      show_latest_report = false
+      show_latest_log = false
 
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-status [options]") do |p|
         p.on("-w DIR", "--workspace=DIR", "Sysroot workspace directory (default: #{workspace})") { |val| workspace = val }
@@ -969,6 +973,9 @@ module Bootstrap
           rootfs = val
         end
         p.on("--state=PATH", "Explicit sysroot build state JSON path") { |val| state_path = val }
+        p.on("--report-dir=PATH", "Override sysroot build report directory") { |val| report_dir = val }
+        p.on("--latest-report", "Print the latest failure report JSON") { show_latest_report = true }
+        p.on("--latest-log", "Print the output log from the latest failure report") { show_latest_log = true }
       end
       return CLI.print_help(parser) if help
 
@@ -1000,7 +1007,59 @@ module Bootstrap
       if (failure = state.progress.last_failure)
         puts("last_failure=#{failure.phase}/#{failure.step}")
       end
+
+      if show_latest_report || show_latest_log
+        report_root = report_dir || state.report_dir || resolved.report_dir
+        report_path = resolve_latest_report_path(state, report_root)
+        if report_path
+          puts("latest_report=#{report_path}")
+          if show_latest_report
+            puts(File.read(report_path))
+          end
+          if show_latest_log
+            output_log = output_log_for_report(report_path)
+            log_path = output_log || latest_log_path(report_root)
+            if log_path
+              puts("latest_log=#{log_path}")
+              puts(File.read(log_path)) if File.exists?(log_path)
+            else
+              puts("latest_log=(missing)")
+            end
+          end
+        else
+          puts("latest_report=(missing)")
+        end
+      end
       0
+    end
+
+    private def self.resolve_latest_report_path(state : SysrootBuildState, report_dir : String?) : String?
+      report_path = state.progress.last_failure.try(&.report_path)
+      return report_path if report_path && File.exists?(report_path)
+      return nil unless report_dir
+      latest_report_path(report_dir)
+    end
+
+    private def self.latest_report_path(report_dir : String) : String?
+      return nil unless Dir.exists?(report_dir)
+      files = Dir.glob(File.join(report_dir, "*.json"))
+      return nil if files.empty?
+      files.sort.last
+    end
+
+    private def self.latest_log_path(report_dir : String) : String?
+      return nil unless Dir.exists?(report_dir)
+      files = Dir.glob(File.join(report_dir, "*.log"))
+      return nil if files.empty?
+      files.sort.last
+    end
+
+    private def self.output_log_for_report(report_path : String) : String?
+      json = JSON.parse(File.read(report_path))
+      json["output_log"]?.try(&.as_s?)
+    rescue ex
+      Log.warn { "Failed to parse report #{report_path}: #{ex.message}" }
+      nil
     end
 
     private def self.slugify(value : String) : String

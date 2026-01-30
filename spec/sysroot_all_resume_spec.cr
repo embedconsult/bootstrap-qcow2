@@ -61,7 +61,7 @@ describe Bootstrap::SysrootAllResume do
     with_tempdir do |dir|
       builder = Bootstrap::SysrootBuilder.new(workspace: dir)
       populate_sources(builder)
-      plan_path = builder.rootfs_dir / "var/lib/sysroot-build-plan.json"
+      plan_path = builder.plan_path
       write_plan(plan_path)
 
       decision = Bootstrap::SysrootAllResume.new(builder).decide
@@ -74,9 +74,9 @@ describe Bootstrap::SysrootAllResume do
     with_tempdir do |dir|
       builder = Bootstrap::SysrootBuilder.new(workspace: dir)
       populate_sources(builder)
-      plan_path = builder.rootfs_dir / "var/lib/sysroot-build-plan.json"
+      plan_path = builder.plan_path
       plan = write_plan(plan_path)
-      state_path = builder.rootfs_dir / "var/lib/sysroot-build-state.json"
+      state_path = Bootstrap::SysrootWorkspace.state_path(workspace: builder.workspace)
       write_state(state_path, plan_path, plan, [{"phase-a", "step-a"}])
 
       decision = Bootstrap::SysrootAllResume.new(builder).decide
@@ -90,9 +90,9 @@ describe Bootstrap::SysrootAllResume do
     with_tempdir do |dir|
       builder = Bootstrap::SysrootBuilder.new(workspace: dir)
       populate_sources(builder)
-      plan_path = builder.rootfs_dir / "var/lib/sysroot-build-plan.json"
+      plan_path = builder.plan_path
       plan = write_plan(plan_path)
-      state_path = builder.rootfs_dir / "var/lib/sysroot-build-state.json"
+      state_path = Bootstrap::SysrootWorkspace.state_path(workspace: builder.workspace)
       write_state(state_path, plan_path, plan, [{"phase-a", "step-a"}, {"phase-b", "step-b"}])
 
       decision = Bootstrap::SysrootAllResume.new(builder).decide
@@ -104,9 +104,9 @@ describe Bootstrap::SysrootAllResume do
     with_tempdir do |dir|
       builder = Bootstrap::SysrootBuilder.new(workspace: dir)
       populate_sources(builder)
-      plan_path = builder.rootfs_dir / "var/lib/sysroot-build-plan.json"
+      plan_path = builder.plan_path
       plan = write_plan(plan_path)
-      state_path = builder.rootfs_dir / "var/lib/sysroot-build-state.json"
+      state_path = Bootstrap::SysrootWorkspace.state_path(workspace: builder.workspace)
       state = write_state(state_path, plan_path, plan, [{"phase-a", "step-a"}])
       state.plan_digest = "deadbeef"
       state.save(state_path.to_s)
@@ -122,7 +122,7 @@ describe Bootstrap::SysrootAllResume do
     with_tempdir do |dir|
       builder = Bootstrap::SysrootBuilder.new(workspace: dir)
       populate_sources(builder)
-      state_path = builder.rootfs_dir / "var/lib/sysroot-build-state.json"
+      state_path = Bootstrap::SysrootWorkspace.state_path(workspace: builder.workspace)
       write_state(state_path, builder.plan_path, Bootstrap::BuildPlan.new([] of Bootstrap::BuildPhase), [] of Tuple(String, String))
       File.delete(builder.plan_path) if File.exists?(builder.plan_path)
 

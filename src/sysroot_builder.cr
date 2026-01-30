@@ -36,7 +36,7 @@ module Bootstrap
   #   (data/sysroot) and the rootfs workspace (/workspace) described in
   #   README and AGENTS.md terminology.
   # * Build plan contract: `write_plan` persists the plan consumed by
-  #   `SysrootRunner` at `/var/lib/sysroot-build-plan.json`.
+  #   `SysrootRunner` under the inner rootfs var/lib directory.
   class SysrootBuilder < CLI
     {% if flag?(:x86_64) %}
       DEFAULT_ARCH = "x86_64"
@@ -179,9 +179,9 @@ module Bootstrap
       @workspace / "rootfs"
     end
 
-    # Absolute path to the serialized build plan inside the rootfs.
+    # Absolute path to the serialized build plan inside the inner rootfs.
     def plan_path : Path
-      rootfs_dir / "var/lib/sysroot-build-plan.json"
+      SysrootWorkspace.plan_path(workspace: @workspace)
     end
 
     # Returns true when the workspace contains a prepared rootfs with a
@@ -1256,14 +1256,11 @@ module Bootstrap
       BuildPlan.new(phases)
     end
 
-    # Persist the build plan JSON into the chroot at /var/lib/sysroot-build-plan.json.
+    # Persist the build plan JSON into the inner rootfs var/lib directory.
     def write_plan(plan : BuildPlan = build_plan) : Path
       plan_json = plan.to_pretty_json
       FileUtils.mkdir_p(self.plan_path.parent)
       File.write(self.plan_path, plan_json)
-      inner_plan_path = rootfs_dir / "workspace/rootfs/var/lib/sysroot-build-plan.json"
-      FileUtils.mkdir_p(inner_plan_path.parent)
-      File.write(inner_plan_path, plan_json)
       self.plan_path
     end
 
