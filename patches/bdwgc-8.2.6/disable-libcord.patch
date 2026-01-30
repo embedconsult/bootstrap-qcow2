@@ -1,16 +1,22 @@
-diff --git a/Makefile.in b/Makefile.in
-index 5a6ef6c..f7f2c4d 100644
 --- a/Makefile.in
 +++ b/Makefile.in
-@@ -1100,8 +1100,7 @@ EXTRA_DIST = $(am__append_3) gc_badalc.cpp gc_cpp.cpp README.QUICK 
+@@ -1096,8 +1096,7 @@
+ 
  # C Library
  # ---------
 -lib_LTLIBRARIES = libgc.la $(am__append_17) $(am__append_20) \
 -	libcord.la
 +lib_LTLIBRARIES = libgc.la $(am__append_17) $(am__append_20)
-@@ -1110,8 +1109,7 @@ pkginclude_HEADERS = $(am__append_13) $(am__append_14) \
+ 
+ # unprefixed header
+ include_HEADERS = $(am__append_19) include/extra/gc.h
+@@ -1109,8 +1108,7 @@
+ 	include/gc_backptr.h include/gc_config_macros.h \
  	include/gc_inline.h include/gc_mark.h include/gc_tiny_fl.h \
  	include/gc_typed.h include/gc_version.h include/javaxfc.h \
 -	include/leak_detector.h include/cord.h include/cord_pos.h \
 -	include/ec.h
 +	include/leak_detector.h
+ 
+ # headers which are not installed
+ #
