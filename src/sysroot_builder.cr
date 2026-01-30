@@ -962,6 +962,7 @@ module Bootstrap
               "CPPFLAGS"          => "-I#{sysroot_prefix}/include",
               "LDFLAGS"           => "-L#{sysroot_prefix}/lib/#{sysroot_triple} -L#{sysroot_prefix}/lib",
               "LIBRARY_PATH"      => "#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
+              "LD_LIBRARY_PATH"   => "#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
             },
             "shards" => {
               "SHARDS_CACHE_PATH" => shards_cache_root,
