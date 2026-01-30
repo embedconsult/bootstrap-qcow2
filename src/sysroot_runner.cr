@@ -74,7 +74,7 @@ module Bootstrap
     def self.enter_workspace_rootfs! : Nil
       return unless SysrootWorkspace.workspace_rootfs_present?
       rootfs_path = SysrootWorkspace::WORKSPACE_ROOTFS.to_s
-      Log.info { "Entering workspace rootfs at #{rootfs_path}" }
+      Log.info { "Entering inner rootfs at #{rootfs_path}" }
       extra_binds = [] of Tuple(Path, Path)
       workspace_path = SysrootWorkspace::ROOTFS_WORKSPACE
       if Dir.exists?(workspace_path)
@@ -916,12 +916,14 @@ module Bootstrap
       if rootfs
         rootfs_value = rootfs.not_nil!
         raise "Rootfs path does not exist: #{rootfs_value}" unless Dir.exists?(rootfs_value)
+        Log.info { "Entering outer rootfs at #{rootfs_value} (explicit --rootfs)" }
         SysrootNamespace.enter_rootfs_with_setup(rootfs_value,
           extra_binds: extra_binds,
           run_alpine_setup: run_alpine_setup)
       elsif !SysrootWorkspace.rootfs_marker_present?
         rootfs_value = SysrootWorkspace.default_rootfs.to_s
         if Dir.exists?(rootfs_value)
+          Log.info { "Entering outer rootfs at #{rootfs_value} (auto)" }
           SysrootNamespace.enter_rootfs_with_setup(rootfs_value,
             extra_binds: extra_binds,
             run_alpine_setup: run_alpine_setup)
