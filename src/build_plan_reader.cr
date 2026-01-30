@@ -49,7 +49,7 @@ module Bootstrap
       phase = BuildPhase.new(
         name: "sysroot-from-alpine",
         description: "Legacy plan (unphased)",
-        workspace: SysrootWorkspace::ROOTFS_WORKSPACE.to_s,
+        workspace: SysrootWorkspace::ROOTFS_WORKSPACE_PATH.to_s,
         environment: "legacy",
         install_prefix: install_prefix,
         steps: steps,

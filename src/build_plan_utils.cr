@@ -5,7 +5,7 @@ module Bootstrap
   # Helpers for adjusting serialized build plans without regenerating the
   # underlying rootfs.
   module BuildPlanUtils
-    DEFAULT_WORKSPACE_ROOT = SysrootWorkspace::ROOTFS_WORKSPACE.to_s
+    DEFAULT_WORKSPACE_ROOT = SysrootWorkspace::ROOTFS_WORKSPACE_PATH.to_s
 
     # Returns a copy of *plan* with its workspace-root rewritten.
     #

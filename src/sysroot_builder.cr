@@ -45,10 +45,7 @@ module Bootstrap
     {% else %}
       DEFAULT_ARCH = "aarch64"
     {% end %}
-    DEFAULT_HOST_WORKDIR  = Path["data/sysroot"]
-    OUTER_ROOTFS_DIR      = "rootfs"
-    INNER_ROOTFS_DIR      = "rootfs/workspace/rootfs"
-    WORKSPACE_DIR         = "rootfs/workspace/rootfs/workspace"
+    DEFAULT_HOST_WORKDIR  = SysrootWorkspace::DEFAULT_HOST_WORKDIR
     DEFAULT_BRANCH        = "v3.23"
     DEFAULT_BASE_VERSION  = "3.23.2"
     DEFAULT_LLVM_VER      = "18.1.7"
@@ -114,6 +111,7 @@ module Bootstrap
     getter architecture : String
     getter branch : String
     getter host_workdir : Path
+    getter workspace : SysrootWorkspace
     getter cache_dir : Path
     getter checksum_dir : Path
     getter sources_dir : Path
@@ -139,8 +137,7 @@ module Bootstrap
       patch_overrides : Hash(String, Array(String)) = {} of String => Array(String)
 
     # Create a sysroot builder rooted at the host workdir directory.
-    def initialize(@host_workdir : Path = DEFAULT_HOST_WORKDIR,
-                   @architecture : String = DEFAULT_ARCH,
+    def initialize(@architecture : String = DEFAULT_ARCH,
                    @branch : String = DEFAULT_BRANCH,
                    @base_version : String = DEFAULT_BASE_VERSION,
                    @base_rootfs_path : Path? = nil,
@@ -150,15 +147,16 @@ module Bootstrap
                    @preserve_ownership_for_rootfs : Bool = false,
                    @owner_uid : Int32? = nil,
                    @owner_gid : Int32? = nil)
+      @host_workdir = DEFAULT_HOST_WORKDIR
       @cache_dir = @host_workdir / "cache"
       @checksum_dir = @cache_dir / "checksums"
       @sources_dir = @host_workdir / "sources"
-      @outer_rootfs_dir = @host_workdir / OUTER_ROOTFS_DIR
-      @inner_rootfs_dir = @host_workdir / INNER_ROOTFS_DIR
-      @inner_rootfs_workspace_dir = @host_workdir / WORKSPACE_DIR
+      @workspace = SysrootWorkspace.from_host_workdir(@host_workdir)
+      @outer_rootfs_dir = @workspace.outer_rootfs_path
+      @inner_rootfs_dir = @workspace.inner_rootfs_path
+      @inner_rootfs_workspace_dir = @workspace.inner_workspace_path
       @sysroot_dir = @host_workdir / "sysroot"
 
-      FileUtils.mkdir_p(@host_workdir)
       FileUtils.mkdir_p(@cache_dir)
       FileUtils.mkdir_p(@checksum_dir)
       FileUtils.mkdir_p(@sources_dir)
@@ -182,8 +180,7 @@ module Bootstrap
     # serialized build plan. Iteration state is created by `SysrootRunner` and
     # is not part of a clean sysroot build output.
     def rootfs_ready? : Bool
-      var_lib_dir = @host_workdir / SysrootBuildState::RELATIVE_VAR_LIB
-      File.exists?(var_lib_dir / SysrootBuildState::PLAN_FILE)
+      SysrootBuildState.new(workspace: @workspace).plan_exists?
     end
 
     # Build a PackageSpec pointing at the base rootfs tarball for the configured
@@ -201,7 +198,7 @@ module Bootstrap
     # Each PackageSpec can carry optional configure flags or a custom build
     # directory name when upstream archives use non-standard layouts.
     def packages : Array(PackageSpec)
-      bootstrap_repo_dir = "#{outer_sources_workspace}/bootstrap-qcow2-#{bootstrap_source_version}"
+      bootstrap_repo_dir = "#{SysrootWorkspace::INNER_WORKSPACE_PATH_IN_OUTER}/bootstrap-qcow2-#{bootstrap_source_version}"
       sysroot_triple = sysroot_target_triple
       [
         PackageSpec.new("m4", DEFAULT_M4, URI.parse("https://ftp.gnu.org/gnu/m4/m4-#{DEFAULT_M4}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
@@ -390,16 +387,6 @@ module Bootstrap
           phases: ["tools-from-system"],
         ),
       ]
-    end
-
-    # Outer rootfs path used by sysroot-from-alpine and rootfs-from-sysroot.
-    private def outer_rootfs_path : String
-      "#{SysrootWorkspace::ROOTFS_WORKSPACE}/rootfs"
-    end
-
-    # Outer rootfs view of the staged source workspace.
-    private def outer_sources_workspace : String
-      "#{outer_rootfs_path}/workspace"
     end
 
     # Download all configured package sources and return their cached paths.
@@ -602,10 +589,10 @@ module Bootstrap
       tarball = resolve_base_rootfs_tarball(base_rootfs)
       Log.debug { "Extracting base rootfs from #{tarball}" }
       Tarball.extract(tarball, outer_rootfs_dir, @preserve_ownership_for_rootfs, @owner_uid, @owner_gid, force_system_tar: @use_system_tar_for_rootfs)
-      FileUtils.mkdir_p(@host_workdir / SysrootBuildState::RELATIVE_VAR_LIB)
-      FileUtils.mkdir_p(inner_rootfs_workspace_dir)
-      File.write(inner_rootfs_dir / ".bq2-rootfs", "bq2-rootfs\n")
-      FileUtils.mkdir_p(outer_rootfs_dir / "var/lib")
+      @workspace = SysrootWorkspace.create(@host_workdir)
+      @outer_rootfs_dir = @workspace.outer_rootfs_path
+      @inner_rootfs_dir = @workspace.inner_rootfs_path
+      @inner_rootfs_workspace_dir = @workspace.inner_workspace_path
       stage_sources if include_sources
       outer_rootfs_dir
     end
@@ -893,11 +880,11 @@ module Bootstrap
     #   prefer /usr/bin, and rely on musl's /etc/ld-musl-<arch>.path for runtime lookup.
     def phase_specs : Array(PhaseSpec)
       sysroot_prefix = "/opt/sysroot"
-      outer_rootfs_path_value = outer_rootfs_path
-      outer_sources_workspace_value = outer_sources_workspace
+      inner_rootfs_path_in_outer = SysrootWorkspace::INNER_ROOTFS_PATH_IN_OUTER.to_s
+      outer_sources_workspace_value = SysrootWorkspace::INNER_WORKSPACE_PATH_IN_OUTER.to_s
       bootstrap_repo_dir = "#{outer_sources_workspace_value}/bootstrap-qcow2-#{bootstrap_source_version}"
-      rootfs_destdir = outer_rootfs_path_value
-      rootfs_tarball = "#{SysrootWorkspace::ROOTFS_WORKSPACE}/bq2-rootfs-#{bootstrap_source_version}.tar.gz"
+      rootfs_destdir = inner_rootfs_path_in_outer
+      rootfs_tarball = "#{SysrootWorkspace::ROOTFS_WORKSPACE_PATH}/bq2-rootfs-#{bootstrap_source_version}.tar.gz"
       sysroot_triple = sysroot_target_triple
       sysroot_env = sysroot_phase_env(sysroot_prefix)
       rootfs_env = rootfs_phase_env(sysroot_prefix)
@@ -1035,7 +1022,7 @@ module Bootstrap
         PhaseSpec.new(
           name: "system-from-sysroot",
           description: "Rebuild sysroot packages into /usr inside the new rootfs (prefix-free).",
-          workspace: SysrootWorkspace::ROOTFS_WORKSPACE.to_s,
+          workspace: SysrootWorkspace::ROOTFS_WORKSPACE_PATH.to_s,
           environment: "rootfs-system",
           install_prefix: "/usr",
           destdir: nil,
@@ -1097,7 +1084,7 @@ module Bootstrap
         PhaseSpec.new(
           name: "tools-from-system",
           description: "Build additional developer tools inside the new rootfs.",
-          workspace: SysrootWorkspace::ROOTFS_WORKSPACE.to_s,
+          workspace: SysrootWorkspace::ROOTFS_WORKSPACE_PATH.to_s,
           environment: "rootfs-system",
           install_prefix: "/usr",
           destdir: nil,
@@ -1120,7 +1107,7 @@ module Bootstrap
         PhaseSpec.new(
           name: "finalize-rootfs",
           description: "Strip the sysroot prefix and emit a prefix-free rootfs tarball.",
-          workspace: SysrootWorkspace::ROOTFS_WORKSPACE.to_s,
+          workspace: SysrootWorkspace::ROOTFS_WORKSPACE_PATH.to_s,
           environment: "rootfs-finalize",
           install_prefix: "/usr",
           destdir: rootfs_destdir,
@@ -1261,27 +1248,20 @@ module Bootstrap
 
     # Persist the build plan JSON into the inner rootfs var/lib directory.
     def write_plan(plan : BuildPlan = build_plan) : Path
+      build_state = SysrootBuildState.new(workspace: @workspace)
       plan_json = plan.to_pretty_json
-      plan_path = @host_workdir / SysrootBuildState::RELATIVE_VAR_LIB / SysrootBuildState::PLAN_FILE
+      plan_path = build_state.plan_path_path
       FileUtils.mkdir_p(plan_path.parent)
       File.write(plan_path, plan_json)
-      ensure_state_file
+      ensure_state_file(build_state, plan_path)
       plan_path
     end
 
-    private def ensure_state_file : Nil
-      plan_path = @host_workdir / SysrootBuildState::RELATIVE_VAR_LIB / SysrootBuildState::PLAN_FILE
-      state_path = @host_workdir / SysrootBuildState::RELATIVE_VAR_LIB / SysrootBuildState::STATE_FILE
-      return if File.exists?(state_path)
-      overrides_path = (@host_workdir / SysrootBuildState::RELATIVE_VAR_LIB / SysrootBuildState::OVERRIDES_FILE).to_s
-      report_dir = (@host_workdir / SysrootBuildState::RELATIVE_VAR_LIB / SysrootBuildState::REPORT_DIR_NAME).to_s
-      state = SysrootBuildState.new(
-        plan_path: plan_path.to_s,
-        overrides_path: overrides_path,
-        report_dir: report_dir,
-      )
-      state.plan_digest = SysrootBuildState.digest_for?(plan_path.to_s)
-      state.save(state_path.to_s)
+    private def ensure_state_file(build_state : SysrootBuildState, plan_path : Path) : Nil
+      return if build_state.state_exists?
+      build_state.plan_path = SysrootBuildState::DEFAULT_PLAN
+      build_state.plan_digest = SysrootBuildState.digest_for?(plan_path.to_s)
+      build_state.ensure_state_file
     end
 
     # Convert a PhaseSpec into a concrete BuildPhase with computed workdirs and
@@ -1681,7 +1661,6 @@ module Bootstrap
     # Build or reuse a sysroot workspace and optionally emit a tarball.
     private def self.run_builder(args : Array(String)) : Int32
       output = Path["sysroot.tar.gz"]
-      host_workdir = DEFAULT_HOST_WORKDIR
       architecture = SysrootBuilder::DEFAULT_ARCH
       branch = SysrootBuilder::DEFAULT_BRANCH
       base_version = SysrootBuilder::DEFAULT_BASE_VERSION
@@ -1729,7 +1708,6 @@ module Bootstrap
 
       Log.info { "Sysroot builder log level=#{Log.for("").level} (env-configured)" }
       builder = SysrootBuilder.new(
-        host_workdir: host_workdir,
         architecture: architecture,
         branch: branch,
         base_version: base_version,
@@ -1744,14 +1722,15 @@ module Bootstrap
 
       if reuse_rootfs && builder.rootfs_ready?
         puts "Reusing existing rootfs at #{builder.outer_rootfs_dir}"
-        puts "Build plan found at #{builder.host_workdir / SysrootBuildState::RELATIVE_VAR_LIB / SysrootBuildState::PLAN_FILE} (iteration state is maintained by sysroot-runner)"
+        build_state = SysrootBuildState.new(workspace: builder.workspace)
+        puts "Build plan found at #{build_state.plan_path_path} (iteration state is maintained by sysroot-runner)"
         if include_sources && restage_sources
           builder.stage_sources(skip_existing: true)
           puts "Staged missing sources into #{builder.inner_rootfs_workspace_dir}"
         end
         if refresh_plan
           builder.write_plan
-          puts "Refreshed build plan at #{builder.host_workdir / SysrootBuildState::RELATIVE_VAR_LIB / SysrootBuildState::PLAN_FILE}"
+          puts "Refreshed build plan at #{build_state.plan_path_path}"
         end
         if write_tarball
           builder.write_chroot_tarball(output)
@@ -1772,13 +1751,15 @@ module Bootstrap
 
     # Writes a freshly generated build plan JSON.
     private def self.run_plan_write(args : Array(String)) : Int32
-      output = SysrootRunner::DEFAULT_PLAN_PATH
+      workspace = SysrootWorkspace.from_host_workdir(SysrootBuilder::DEFAULT_HOST_WORKDIR)
+      build_state = SysrootBuildState.new(workspace: workspace)
+      output = build_state.plan_path_path.to_s
       workspace_root = Bootstrap::BuildPlanUtils::DEFAULT_WORKSPACE_ROOT
       force = false
       write_overrides = false
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-plan-write [options]") do |p|
-        p.on("--output PATH", "Write the plan to PATH (default: #{SysrootRunner::DEFAULT_PLAN_PATH})") { |path| output = path }
-        p.on("--workspace-root PATH", "Rewrite plan workdirs rooted at #{SysrootWorkspace::ROOTFS_WORKSPACE} to PATH (default: #{workspace_root})") { |path| workspace_root = path }
+        p.on("--output PATH", "Write the plan to PATH (default: #{output})") { |path| output = path }
+        p.on("--workspace-root PATH", "Rewrite plan workdirs rooted at #{SysrootWorkspace::ROOTFS_WORKSPACE_PATH} to PATH (default: #{workspace_root})") { |path| workspace_root = path }
         p.on("--force", "Overwrite an existing plan at the output path") { force = true }
         p.on("--override", "Write sysroot-build-overrides.json with differences from the existing plan") { write_overrides = true }
       end
@@ -1802,8 +1783,7 @@ module Bootstrap
         return 1
       end
 
-      tmp_workspace = Path["/tmp/bq2-plan-write-#{Random::Secure.hex(4)}"]
-      builder = SysrootBuilder.new(host_workdir: tmp_workspace)
+      builder = SysrootBuilder.new
       plan = builder.build_plan
       if workspace_root != Bootstrap::BuildPlanUtils::DEFAULT_WORKSPACE_ROOT
         plan = Bootstrap::BuildPlanUtils.rewrite_workspace_root(plan, workspace_root)
@@ -1811,7 +1791,7 @@ module Bootstrap
 
       if write_overrides
         overrides = BuildPlanOverrides.from_diff(existing_plan.not_nil!, plan)
-        overrides_path = File.join(File.dirname(output), File.basename(SysrootRunner::DEFAULT_OVERRIDES_PATH))
+        overrides_path = File.join(File.dirname(output), SysrootBuildState::OVERRIDES_FILE)
         FileUtils.mkdir_p(File.dirname(overrides_path))
         File.write(overrides_path, overrides.to_pretty_json)
         puts "Wrote build plan overrides to #{overrides_path}"
@@ -1826,16 +1806,16 @@ module Bootstrap
 
     # Run the finalize-rootfs phase to emit a prefix-free rootfs tarball.
     private def self.run_sysroot_tarball(args : Array(String)) : Int32
-      plan_path = SysrootRunner::DEFAULT_PLAN_PATH
+      workspace = SysrootWorkspace.detect(SysrootWorkspace::DEFAULT_HOST_WORKDIR)
+      build_state = SysrootBuildState.new(workspace: workspace)
+      plan_path = build_state.plan_path_path.to_s
       overrides_path : String? = nil
       use_default_overrides = true
-      report_dir : String? = SysrootRunner::DEFAULT_REPORT_DIR
-      state_path : String? = nil
+      report_dir : String? = build_state.report_dir_path.to_s
       resume = true
       allow_outside_rootfs = false
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-tarball [options]") do |p|
-        p.on("--plan PATH", "Read the build plan from PATH (default: #{SysrootRunner::DEFAULT_PLAN_PATH})") { |path| plan_path = path }
-        p.on("--overrides PATH", "Apply runtime overrides JSON (default: #{SysrootRunner::DEFAULT_OVERRIDES_PATH} when using the default plan path)") do |path|
+        p.on("--overrides PATH", "Apply runtime overrides JSON (default: sysroot-build-overrides.json in the inner rootfs var/lib)") do |path|
           overrides_path = path
           use_default_overrides = false
         end
@@ -1843,9 +1823,8 @@ module Bootstrap
           overrides_path = nil
           use_default_overrides = false
         end
-        p.on("--report-dir PATH", "Write failure reports to PATH (default: #{SysrootRunner::DEFAULT_REPORT_DIR})") { |path| report_dir = path }
+        p.on("--report-dir PATH", "Write failure reports to PATH (default: #{report_dir})") { |path| report_dir = path }
         p.on("--no-report", "Disable failure report writing") { report_dir = nil }
-        p.on("--state-path PATH", "Write runner state/bookmarks to PATH (default: #{SysrootRunner::DEFAULT_STATE_PATH} when using the default plan path)") { |path| state_path = path }
         p.on("--no-resume", "Disable resume/state tracking (useful when the default state path is not writable)") { resume = false }
         p.on("--allow-outside-rootfs", "Allow running rootfs-* phases outside the produced rootfs (requires destdir overrides)") { allow_outside_rootfs = true }
       end
@@ -1857,7 +1836,7 @@ module Bootstrap
         overrides_path: overrides_path,
         use_default_overrides: use_default_overrides,
         report_dir: report_dir,
-        state_path: state_path,
+        state_path: resume ? build_state.state_path.to_s : nil,
         resume: resume,
         allow_outside_rootfs: allow_outside_rootfs,
       )

@@ -52,7 +52,7 @@ module Bootstrap
     MS_PRIVATE     = (1_u64 << 18)
     MNT_DETACH     = 2
     DEFAULT_PATH   = "/opt/sysroot/bin:/opt/sysroot/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
-    DEFAULT_ROOTFS = Path["data/sysroot/rootfs"]
+    DEFAULT_ROOTFS = SysrootWorkspace::DEFAULT_HOST_WORKDIR / SysrootWorkspace::OUTER_ROOTFS_DIR
 
     class NamespaceError < RuntimeError
     end
@@ -122,7 +122,7 @@ module Bootstrap
           "/bin/sh",
           "--login",
           "-c",
-          "/work/bin/codex --add-dir /var --add-dir /opt --add-dir #{SysrootWorkspace::ROOTFS_WORKSPACE} -C /work/bootstrap-qcow2 -s workspace-write",
+          "/work/bin/codex --add-dir /var --add-dir /opt --add-dir #{SysrootWorkspace::ROOTFS_WORKSPACE_PATH} -C /work/bootstrap-qcow2 -s workspace-write",
         ]
         unless remaining.empty?
           command[-1] = [command[-1], remaining.join(" ")].join(" ")

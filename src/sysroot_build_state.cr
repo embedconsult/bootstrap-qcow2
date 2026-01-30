@@ -12,14 +12,13 @@ module Bootstrap
   # The build plan JSON is treated as immutable during iterations. Instead, the
   # runner records progress into this state file so subsequent runs can pick up
   # where they left off without re-running already successful steps.
-  struct SysrootBuildState
+  class SysrootBuildState
     include JSON::Serializable
 
-    PLAN_FILE        = "sysroot-build-plan.json"
-    STATE_FILE       = "sysroot-build-state.json"
-    OVERRIDES_FILE   = "sysroot-build-overrides.json"
-    REPORT_DIR_NAME  = "sysroot-build-reports"
-    RELATIVE_VAR_LIB = "rootfs/workspace/rootfs/var/lib"
+    PLAN_FILE       = "sysroot-build-plan.json"
+    STATE_FILE      = "sysroot-build-state.json"
+    OVERRIDES_FILE  = "sysroot-build-overrides.json"
+    REPORT_DIR_NAME = "sysroot-build-reports"
 
     DEFAULT_PATH      = "/var/lib/#{STATE_FILE}"
     DEFAULT_PLAN      = "/var/lib/#{PLAN_FILE}"
@@ -29,6 +28,9 @@ module Bootstrap
 
     # Schema version for forward-compatible upgrades.
     getter format_version : Int32 = FORMAT_VERSION
+
+    @[JSON::Field(ignore: true)]
+    property workspace : SysrootWorkspace?
 
     # Identifier for the prepared rootfs. This changes whenever the rootfs is
     # regenerated from scratch.
@@ -70,7 +72,8 @@ module Bootstrap
     # Runner progress tracked per phase/package.
     getter progress : Progress = Progress.new
 
-    def initialize(@rootfs_id : String = Random::Secure.hex(8),
+    def initialize(@workspace : SysrootWorkspace? = nil,
+                   @rootfs_id : String = Random::Secure.hex(8),
                    @created_at : String = Time.utc.to_s,
                    @updated_at : String? = nil,
                    @plan_path : String = DEFAULT_PLAN,
@@ -84,43 +87,86 @@ module Bootstrap
                    @format_version : Int32 = FORMAT_VERSION)
     end
 
-    # Resolve the inner rootfs var/lib directory from a host workdir.
-    def self.var_lib_dir_for_host(host_workdir : Path) : Path
-      host_workdir / RELATIVE_VAR_LIB
+    # Return the inner rootfs var/lib directory for this workspace.
+    def log_dir : Path
+      workspace_or_raise.var_lib_dir
     end
 
-    # Resolve the inner rootfs var/lib directory from an inner rootfs path.
-    def self.var_lib_dir_for_inner_rootfs(inner_rootfs_path : Path) : Path
-      inner_rootfs_path / "var/lib"
+    # Return the rootfs-absolute state path for this workspace.
+    def state_path : Path
+      log_dir / STATE_FILE
     end
 
-    # Resolve the inner rootfs var/lib directory from the current workspace.
-    def self.var_lib_dir_for_workspace : Path
-      var_lib_dir_for_inner_rootfs(SysrootWorkspace.inner_rootfs_path)
+    # Return the rootfs-absolute plan path for this workspace.
+    def plan_path_path : Path
+      log_dir / PLAN_FILE
+    end
+
+    # Return the rootfs-absolute overrides path for this workspace.
+    def overrides_path_path : Path
+      log_dir / OVERRIDES_FILE
+    end
+
+    # Return the rootfs-absolute report directory for this workspace.
+    def report_dir_path : Path
+      log_dir / REPORT_DIR_NAME
+    end
+
+    # Returns true when the build plan file exists for this workspace.
+    def plan_exists? : Bool
+      File.exists?(plan_path_path)
+    end
+
+    # Returns true when the build state file exists for this workspace.
+    def state_exists? : Bool
+      File.exists?(state_path)
+    end
+
+    # Ensure a state file exists on disk, creating an empty one when needed.
+    def ensure_state_file : Nil
+      return if File.exists?(state_path)
+      save(state_path)
     end
 
     # Load state from *path*, returning nil when the file does not exist.
-    def self.load?(path : String = DEFAULT_PATH) : SysrootBuildState?
+    def self.load?(workspace : SysrootWorkspace, path : Path? = nil) : SysrootBuildState?
+      path ||= workspace.var_lib_dir / STATE_FILE
       return nil unless File.exists?(path)
-      from_json(File.read(path))
+      state = from_json(File.read(path))
+      state.attach_workspace!(workspace)
+      state
     end
 
     # Load state from *path*, raising when the file does not exist.
-    def self.load(path : String = DEFAULT_PATH) : SysrootBuildState
+    def self.load(workspace : SysrootWorkspace, path : Path? = nil) : SysrootBuildState
+      path ||= workspace.var_lib_dir / STATE_FILE
       raise "Missing sysroot build state #{path}" unless File.exists?(path)
-      from_json(File.read(path))
+      state = from_json(File.read(path))
+      state.attach_workspace!(workspace)
+      state
     end
 
     # Load state from *path* if present; otherwise initialize a new state file.
     # Always updates the metadata fields to reflect the current runner config.
-    def self.load_or_init(path : String = DEFAULT_PATH,
-                          plan_path : String = DEFAULT_PLAN,
-                          overrides_path : String? = DEFAULT_OVERRIDES,
-                          report_dir : String? = DEFAULT_REPORTS) : SysrootBuildState
-      state = load?(path) || new(plan_path: plan_path, overrides_path: overrides_path, report_dir: report_dir)
-      state.plan_path = plan_path
-      state.overrides_path = overrides_path
-      state.report_dir = report_dir
+    def self.load_or_init(workspace : SysrootWorkspace,
+                          path : Path? = nil,
+                          overrides_path : Path? = nil,
+                          report_dir : Path? = nil) : SysrootBuildState
+      path ||= workspace.var_lib_dir / STATE_FILE
+      plan_path_value = DEFAULT_PLAN
+      overrides_path_value = overrides_path ? overrides_path.not_nil!.to_s : DEFAULT_OVERRIDES
+      report_dir_value = report_dir ? report_dir.not_nil!.to_s : DEFAULT_REPORTS
+
+      state = load?(workspace, path) || new(
+        workspace: workspace,
+        plan_path: plan_path_value,
+        overrides_path: overrides_path_value,
+        report_dir: report_dir_value
+      )
+      state.workspace = workspace
+      state.plan_path = plan_path_value
+      state.overrides_path = overrides_path_value
+      state.report_dir = report_dir_value
       state.reconcile_inputs!
       state.touch!
       state
@@ -140,8 +186,9 @@ module Bootstrap
     end
 
     # Persist the state JSON to disk.
-    def save(path : String = DEFAULT_PATH) : Nil
-      FileUtils.mkdir_p(Path[path].parent)
+    def save(path : Path? = nil) : Nil
+      path ||= state_path
+      FileUtils.mkdir_p(path.parent)
       File.write(path, to_pretty_json)
     end
 
@@ -188,8 +235,8 @@ module Bootstrap
     def reconcile_inputs! : Nil
       previous_plan = plan_digest
       previous_overrides = overrides_digest
-      current_plan = self.class.digest_for?(plan_path)
-      current_overrides = overrides_path ? self.class.digest_for?(overrides_path.not_nil!) : nil
+      current_plan = self.class.digest_for?(resolved_plan_path)
+      current_overrides = resolved_overrides_path.try { |path| self.class.digest_for?(path) }
 
       self.plan_digest = current_plan
       self.overrides_digest = current_overrides
@@ -271,6 +318,17 @@ module Bootstrap
       File.read(path)
     end
 
+    private def resolved_plan_path : String
+      return plan_path unless plan_path == DEFAULT_PLAN
+      plan_path_path.to_s
+    end
+
+    private def resolved_overrides_path : String?
+      return nil unless overrides_path
+      return overrides_path.not_nil! unless overrides_path == DEFAULT_OVERRIDES
+      overrides_path_path.to_s
+    end
+
     # Minimal step reference used for progress tracking.
     struct StepRef
       include JSON::Serializable
@@ -314,6 +372,28 @@ module Bootstrap
                      @completed_steps : Hash(String, Array(String)) = {} of String => Array(String),
                      @last_success : StepRef? = nil,
                      @last_failure : FailureRef? = nil)
+      end
+    end
+
+    private def workspace_or_raise : SysrootWorkspace
+      workspace || raise "SysrootWorkspace is required to resolve build state paths"
+    end
+
+    protected def attach_workspace!(workspace : SysrootWorkspace) : Nil
+      self.workspace = workspace
+      normalize_rootfs_paths!(workspace)
+    end
+
+    private def normalize_rootfs_paths!(workspace : SysrootWorkspace) : Nil
+      var_lib_prefix = workspace.var_lib_dir.to_s
+      if plan_path.starts_with?(var_lib_prefix)
+        self.plan_path = DEFAULT_PLAN
+      end
+      if overrides_path.nil? || overrides_path.not_nil!.starts_with?(var_lib_prefix)
+        self.overrides_path = DEFAULT_OVERRIDES
+      end
+      if report_dir.nil? || report_dir.not_nil!.starts_with?(var_lib_prefix)
+        self.report_dir = DEFAULT_REPORTS
       end
     end
   end

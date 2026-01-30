@@ -94,96 +94,116 @@ def with_http_server(body : String, &)
   end
 end
 
+private def with_temp_workdir(&block : Path ->)
+  with_tempdir do |dir|
+    Dir.cd(dir) do
+      yield dir
+    end
+  end
+end
+
 describe Bootstrap::SysrootBuilder do
   it "exposes workspace directories" do
-    with_tempdir do |dir|
-      builder = Bootstrap::SysrootBuilder.new(dir)
-      builder.cache_dir.should eq dir / "cache"
-      builder.checksum_dir.should eq dir / "cache/checksums"
-      builder.sources_dir.should eq dir / "sources"
-      builder.outer_rootfs_dir.should eq dir / "rootfs"
+    with_temp_workdir do |dir|
+      builder = Bootstrap::SysrootBuilder.new
+      host_workdir = Path["data/sysroot"].expand
+      builder.cache_dir.expand.should eq host_workdir / "cache"
+      builder.checksum_dir.expand.should eq host_workdir / "cache/checksums"
+      builder.sources_dir.expand.should eq host_workdir / "sources"
+      builder.outer_rootfs_dir.expand.should eq host_workdir / "rootfs"
     end
   end
 
   it "treats the serialized plan file as rootfs readiness" do
-    with_tempdir do |dir|
-      builder = Bootstrap::SysrootBuilder.new(dir)
+    with_temp_workdir do |dir|
+      builder = Bootstrap::SysrootBuilder.new
       builder.rootfs_ready?.should be_false
 
-      plan_path = builder.host_workdir / Bootstrap::SysrootBuildState::RELATIVE_VAR_LIB / Bootstrap::SysrootBuildState::PLAN_FILE
-      FileUtils.mkdir_p(plan_path.parent)
-      File.write(plan_path, "[]")
+      workspace = Bootstrap::SysrootWorkspace.from_host_workdir(builder.host_workdir)
+      build_state = Bootstrap::SysrootBuildState.new(workspace: workspace)
+      FileUtils.mkdir_p(build_state.plan_path_path.parent)
+      File.write(build_state.plan_path_path, "[]")
       builder.rootfs_ready?.should be_true
     end
   end
 
   it "builds a base rootfs spec for the configured architecture" do
-    builder = Bootstrap::SysrootBuilder.new(Path["/tmp/work"], "arm64", "edge", "edge")
-    spec = builder.base_rootfs_spec
-    spec.name.should eq "bootstrap-rootfs"
-    spec.url.to_s.should contain("arm64")
+    with_temp_workdir do |_dir|
+      builder = Bootstrap::SysrootBuilder.new(architecture: "arm64", branch: "edge", base_version: "edge")
+      spec = builder.base_rootfs_spec
+      spec.name.should eq "bootstrap-rootfs"
+      spec.url.to_s.should contain("arm64")
+    end
   end
 
   it "lists default packages" do
-    names = Bootstrap::SysrootBuilder.new.packages.map(&.name)
-    names.should contain("musl")
-    names.should contain("shards")
-    names.should contain("llvm-project")
+    with_temp_workdir do |_dir|
+      names = Bootstrap::SysrootBuilder.new.packages.map(&.name)
+      names.should contain("musl")
+      names.should contain("shards")
+      names.should contain("llvm-project")
+    end
   end
 
   it "expands llvm into staged cmake steps" do
-    builder = Bootstrap::SysrootBuilder.new(Path["/tmp/work"])
-    plan = builder.build_plan
-    sysroot_phase = plan.phases.find(&.name.==("sysroot-from-alpine")).not_nil!
-    llvm_steps = sysroot_phase.steps.select { |step| step.name.starts_with?("llvm-project-stage") }
-    llvm_steps.map(&.name).should eq ["llvm-project-stage1", "llvm-project-stage2"]
-    llvm_steps.all? { |step| step.strategy == "cmake-project" }.should be_true
-    llvm_steps.each do |step|
-      step.env["CMAKE_SOURCE_DIR"].should eq "llvm"
+    with_temp_workdir do |_dir|
+      builder = Bootstrap::SysrootBuilder.new
+      plan = builder.build_plan
+      sysroot_phase = plan.phases.find(&.name.==("sysroot-from-alpine")).not_nil!
+      llvm_steps = sysroot_phase.steps.select { |step| step.name.starts_with?("llvm-project-stage") }
+      llvm_steps.map(&.name).should eq ["llvm-project-stage1", "llvm-project-stage2"]
+      llvm_steps.all? { |step| step.strategy == "cmake-project" }.should be_true
+      llvm_steps.each do |step|
+        step.env["CMAKE_SOURCE_DIR"].should eq "llvm"
+      end
+      sysroot_phase.steps.any? { |step| step.name == "llvm-project" }.should be_false
     end
-    sysroot_phase.steps.any? { |step| step.name == "llvm-project" }.should be_false
   end
 
   it "lists build phase names" do
-    phases = Bootstrap::SysrootBuilder.new.phase_specs.map(&.name)
-    phases.should eq ["sysroot-from-alpine", "rootfs-from-sysroot", "system-from-sysroot", "tools-from-system", "finalize-rootfs"]
+    with_temp_workdir do |_dir|
+      phases = Bootstrap::SysrootBuilder.new.phase_specs.map(&.name)
+      phases.should eq ["sysroot-from-alpine", "rootfs-from-sysroot", "system-from-sysroot", "tools-from-system", "finalize-rootfs"]
+    end
   end
 
   it "seeds rootfs profile, CA bundle, and final musl loader path" do
-    builder = Bootstrap::SysrootBuilder.new(Path["/tmp/work"])
-    sysroot_phase = builder.phase_specs.find(&.name.==("sysroot-from-alpine")).not_nil!
-    sysroot_zlib_env = sysroot_phase.env_overrides["zlib"]
-    sysroot_zlib_env["CFLAGS"].should contain("-fPIC")
-    rootfs_phase = builder.phase_specs.find(&.name.==("rootfs-from-sysroot")).not_nil!
-    prepare_step = rootfs_phase.extra_steps.find(&.name.==("prepare-rootfs")).not_nil!
-    profile = prepare_step.env["FILE_1_CONTENT"]
-    profile.should contain("SSL_CERT_FILE=\"/etc/ssl/certs/ca-certificates.crt\"")
-    profile.should contain("LANG=C.UTF-8")
-    ca_bundle = prepare_step.env["FILE_4_CONTENT"]
-    ca_bundle.should contain("BEGIN CERTIFICATE")
+    with_temp_workdir do |_dir|
+      builder = Bootstrap::SysrootBuilder.new
+      sysroot_phase = builder.phase_specs.find(&.name.==("sysroot-from-alpine")).not_nil!
+      sysroot_zlib_env = sysroot_phase.env_overrides["zlib"]
+      sysroot_zlib_env["CFLAGS"].should contain("-fPIC")
+      rootfs_phase = builder.phase_specs.find(&.name.==("rootfs-from-sysroot")).not_nil!
+      prepare_step = rootfs_phase.extra_steps.find(&.name.==("prepare-rootfs")).not_nil!
+      profile = prepare_step.env["FILE_1_CONTENT"]
+      profile.should contain("SSL_CERT_FILE=\"/etc/ssl/certs/ca-certificates.crt\"")
+      profile.should contain("LANG=C.UTF-8")
+      ca_bundle = prepare_step.env["FILE_4_CONTENT"]
+      ca_bundle.should contain("BEGIN CERTIFICATE")
 
-    system_phase = builder.phase_specs.find(&.name.==("system-from-sysroot")).not_nil!
-    system_zlib_env = system_phase.env_overrides["zlib"]
-    system_zlib_env["CFLAGS"].should contain("-fPIC")
+      system_phase = builder.phase_specs.find(&.name.==("system-from-sysroot")).not_nil!
+      system_zlib_env = system_phase.env_overrides["zlib"]
+      system_zlib_env["CFLAGS"].should contain("-fPIC")
 
-    finalize_phase = builder.phase_specs.find(&.name.==("finalize-rootfs")).not_nil!
-    final_ld_step = finalize_phase.extra_steps.find(&.name.==("musl-ld-path-final")).not_nil!
-    final_ld_step.env["CONTENT"].should eq "/lib:/usr/lib\n"
+      finalize_phase = builder.phase_specs.find(&.name.==("finalize-rootfs")).not_nil!
+      final_ld_step = finalize_phase.extra_steps.find(&.name.==("musl-ld-path-final")).not_nil!
+      final_ld_step.env["CONTENT"].should eq "/lib:/usr/lib\n"
+    end
   end
 
   it "computes hashes" do
-    with_tempdir do |dir|
+    with_temp_workdir do |dir|
       path = dir / "data.txt"
       File.write(path, "hello")
-      builder = Bootstrap::SysrootBuilder.new(dir)
+      builder = Bootstrap::SysrootBuilder.new
       builder.sha256(path).size.should eq 64
       builder.crc32(path).should_not be_empty
     end
   end
 
   it "writes and caches checksums" do
-    with_tempdir do |dir|
-      builder = Bootstrap::SysrootBuilder.new(dir)
+    with_temp_workdir do |dir|
+      builder = Bootstrap::SysrootBuilder.new
       builder.write_checksum(Bootstrap::SysrootBuilder::PackageSpec.new("demo", "1", URI.parse("https://example.com/demo.tar")), "abc", "def")
       builder.cached_sha256(Bootstrap::SysrootBuilder::PackageSpec.new("demo", "1", URI.parse("https://example.com/demo.tar"))).should eq "abc"
       builder.cached_crc32(Bootstrap::SysrootBuilder::PackageSpec.new("demo", "1", URI.parse("https://example.com/demo.tar"))).should eq "def"
@@ -196,20 +216,22 @@ describe Bootstrap::SysrootBuilder do
   else
     it "fetches remote checksums" do
       with_http_server("1234 demo.tar") do |url|
-        pkg = Bootstrap::SysrootBuilder::PackageSpec.new("demo", "1", URI.parse("https://example.com/demo.tar"), checksum_url: URI.parse(url))
-        builder = Bootstrap::SysrootBuilder.new(Path["/tmp/work"])
-        builder.fetch_remote_checksum(pkg).should eq "1234"
+        with_temp_workdir do |_dir|
+          pkg = Bootstrap::SysrootBuilder::PackageSpec.new("demo", "1", URI.parse("https://example.com/demo.tar"), checksum_url: URI.parse(url))
+          builder = Bootstrap::SysrootBuilder.new
+          builder.fetch_remote_checksum(pkg).should eq "1234"
+        end
       end
     end
   end
 
   it "verifies content with explicit sha" do
-    with_tempdir do |dir|
+    with_temp_workdir do |dir|
       path = dir / "file.txt"
       File.write(path, "abc")
       sha = Digest::SHA256.hexdigest("abc")
       pkg = Bootstrap::SysrootBuilder::PackageSpec.new("demo", "1", URI.parse("https://example.com/demo.tar"), sha256: sha)
-      builder = Bootstrap::SysrootBuilder.new(dir)
+      builder = Bootstrap::SysrootBuilder.new
       builder.verify(pkg, path).should be_true
     end
   end
@@ -219,11 +241,11 @@ describe Bootstrap::SysrootBuilder do
     end
   else
     it "downloads and verifies using HTTP" do
-      with_tempdir do |dir|
+      with_temp_workdir do |dir|
         with_http_server("payload") do |url|
           sha = Digest::SHA256.hexdigest("payload")
           pkg = Bootstrap::SysrootBuilder::PackageSpec.new("demo", "1", URI.parse(url), sha256: sha)
-          builder = StubBuilder.new(dir)
+          builder = StubBuilder.new
           builder.override_packages = [pkg]
           downloaded = builder.download_and_verify(pkg)
           File.exists?(downloaded).should be_true
@@ -233,7 +255,7 @@ describe Bootstrap::SysrootBuilder do
   end
 
   it "builds a plan for each package" do
-    with_tempdir do |dir|
+    with_temp_workdir do |dir|
       pkg = Bootstrap::SysrootBuilder::PackageSpec.new("pkg", "1.0", URI.parse("https://example.com/pkg-1.0.tar.gz"), configure_flags: ["--foo"])
       musl = Bootstrap::SysrootBuilder::PackageSpec.new("musl", "1.0", URI.parse("https://example.com/musl-1.0.tar.gz"))
       busybox = Bootstrap::SysrootBuilder::PackageSpec.new("busybox", "1.0", URI.parse("https://example.com/busybox-1.0.tar.gz"), strategy: "busybox")
@@ -244,7 +266,7 @@ describe Bootstrap::SysrootBuilder do
         strategy: "linux-headers",
         phases: ["rootfs-from-sysroot"],
       )
-      builder = StubBuilder.new(dir)
+      builder = StubBuilder.new
       builder.override_packages = [pkg, musl, busybox, linux_headers]
       plan = builder.build_plan
       plan.phases.map(&.name).should eq ["sysroot-from-alpine", "rootfs-from-sysroot", "system-from-sysroot", "finalize-rootfs"]
@@ -265,8 +287,8 @@ describe Bootstrap::SysrootBuilder do
   end
 
   it "writes a phased build plan into the chroot var/lib directory" do
-    with_tempdir do |dir|
-      builder = StubBuilder.new(dir)
+    with_temp_workdir do |dir|
+      builder = StubBuilder.new
       builder.override_packages = [
         Bootstrap::SysrootBuilder::PackageSpec.new("musl", "1.0", URI.parse("https://example.com/musl.tar.gz")),
         Bootstrap::SysrootBuilder::PackageSpec.new("busybox", "1.0", URI.parse("https://example.com/busybox.tar.gz"), strategy: "busybox"),
@@ -286,14 +308,14 @@ describe Bootstrap::SysrootBuilder do
   end
 
   it "prepares rootfs from a local tarball" do
-    with_tempdir do |dir|
+    with_temp_workdir do |dir|
       tar_dir = dir / "tarroot"
       FileUtils.mkdir_p(tar_dir)
       File.write(tar_dir / "etc.txt", "config")
       tarball = dir / "miniroot.tar"
       Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
 
-      builder = StubBuilder.new(dir)
+      builder = StubBuilder.new
       source_tar = dir / "bootstrap.tar"
       source_dir = dir / "bootstrap-qcow2"
       FileUtils.mkdir_p(source_dir / "src")
@@ -316,14 +338,14 @@ describe Bootstrap::SysrootBuilder do
   end
 
   it "prepares rootfs from a base rootfs tarball path" do
-    with_tempdir do |dir|
+    with_temp_workdir do |dir|
       tar_dir = dir / "tarroot"
       FileUtils.mkdir_p(tar_dir)
       File.write(tar_dir / "etc.txt", "config")
       tarball = dir / "miniroot.tar"
       Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
 
-      builder = StubBuilder.new(dir, base_rootfs_path: tarball)
+      builder = StubBuilder.new(base_rootfs_path: tarball)
       builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
       builder.skip_stage_sources = true
       rootfs = builder.prepare_rootfs(include_sources: false)
@@ -332,7 +354,7 @@ describe Bootstrap::SysrootBuilder do
   end
 
   it "replaces directories with files when tar entries conflict" do
-    with_tempdir do |dir|
+    with_temp_workdir do |dir|
       tarball = dir / "conflict.tar"
       File.open(tarball, "w") do |io|
         write_tar_header(io, "foo/", 0_i64, '5', 0o755)
@@ -343,7 +365,7 @@ describe Bootstrap::SysrootBuilder do
         io.write(Bytes.new(1024, 0))
       end
 
-      builder = StubBuilder.new(dir, base_rootfs_path: tarball)
+      builder = StubBuilder.new(base_rootfs_path: tarball)
       builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
       builder.skip_stage_sources = true
       rootfs = builder.prepare_rootfs(include_sources: false)
@@ -354,14 +376,14 @@ describe Bootstrap::SysrootBuilder do
   end
 
   it "can skip staging sources on request" do
-    with_tempdir do |dir|
+    with_temp_workdir do |dir|
       tar_dir = dir / "tarroot"
       FileUtils.mkdir_p(tar_dir)
       File.write(tar_dir / "etc.txt", "config")
       tarball = dir / "miniroot.tar"
       Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
 
-      builder = StubBuilder.new(dir)
+      builder = StubBuilder.new
       builder.override_packages = builder.packages
       builder.fake_tarball = tarball
       builder.prepare_rootfs(include_sources: false)
@@ -370,7 +392,7 @@ describe Bootstrap::SysrootBuilder do
   end
 
   it "stages sources into the workspace when enabled" do
-    with_tempdir do |dir|
+    with_temp_workdir do |dir|
       tar_dir = dir / "tarroot"
       FileUtils.mkdir_p(tar_dir)
       File.write(tar_dir / "etc.txt", "config")
@@ -378,7 +400,7 @@ describe Bootstrap::SysrootBuilder do
       Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
 
       pkg = Bootstrap::SysrootBuilder::PackageSpec.new("pkg", "1.0", URI.parse("https://example.com/pkg.tar"))
-      builder = StubBuilder.new(dir)
+      builder = StubBuilder.new
       builder.override_packages = [pkg]
       pkg_tar = dir / "pkg.tar"
       pkg_dir = dir / "pkg"
@@ -394,14 +416,14 @@ describe Bootstrap::SysrootBuilder do
   end
 
   it "generates a chroot tarball" do
-    with_tempdir do |dir|
+    with_temp_workdir do |dir|
       tar_dir = dir / "tarroot"
       FileUtils.mkdir_p(tar_dir)
       File.write(tar_dir / "etc.txt", "config")
       tarball = dir / "miniroot.tar"
       Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
 
-      builder = StubBuilder.new(dir)
+      builder = StubBuilder.new
       builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
       builder.skip_stage_sources = true
       builder.fake_tarball = tarball
@@ -412,32 +434,32 @@ describe Bootstrap::SysrootBuilder do
   end
 
   it "uses a default tarball location when output is omitted" do
-    with_tempdir do |dir|
+    with_temp_workdir do |dir|
       tar_dir = dir / "tarroot"
       FileUtils.mkdir_p(tar_dir)
       File.write(tar_dir / "etc.txt", "config")
       tarball = dir / "miniroot.tar"
       Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
 
-      builder = StubBuilder.new(dir)
+      builder = StubBuilder.new
       builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
       builder.skip_stage_sources = true
       builder.fake_tarball = tarball
       output = builder.generate_chroot_tarball
-      output.should eq dir / "sysroot.tar.gz"
+      output.expand.should eq Path["data/sysroot/sysroot.tar.gz"].expand
       File.exists?(output).should be_true
     end
   end
 
   it "can write a tarball for an existing prepared rootfs" do
-    with_tempdir do |dir|
+    with_temp_workdir do |dir|
       tar_dir = dir / "tarroot"
       FileUtils.mkdir_p(tar_dir)
       File.write(tar_dir / "etc.txt", "config")
       tarball = dir / "miniroot.tar"
       Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
 
-      builder = StubBuilder.new(dir)
+      builder = StubBuilder.new
       builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
       builder.skip_stage_sources = true
       builder.fake_tarball = tarball
@@ -450,14 +472,14 @@ describe Bootstrap::SysrootBuilder do
   end
 
   it "can prepare a chroot directory without a tarball" do
-    with_tempdir do |dir|
+    with_temp_workdir do |dir|
       tar_dir = dir / "tarroot"
       FileUtils.mkdir_p(tar_dir)
       File.write(tar_dir / "etc.txt", "config")
       tarball = dir / "miniroot.tar"
       Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
 
-      builder = StubBuilder.new(dir)
+      builder = StubBuilder.new
       builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
       builder.skip_stage_sources = true
       builder.fake_tarball = tarball
@@ -468,14 +490,14 @@ describe Bootstrap::SysrootBuilder do
   end
 
   it "prepares a rootfs with the coordinator staged" do
-    with_tempdir do |dir|
+    with_temp_workdir do |dir|
       tar_dir = dir / "tarroot"
       FileUtils.mkdir_p(tar_dir)
       File.write(tar_dir / "etc.txt", "config")
       tarball = dir / "miniroot.tar"
       Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
 
-      builder = StubBuilder.new(dir)
+      builder = StubBuilder.new
       source_tar = dir / "bootstrap.tar"
       source_dir = dir / "bootstrap-qcow2"
       FileUtils.mkdir_p(source_dir / "src")

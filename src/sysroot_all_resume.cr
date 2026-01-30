@@ -11,7 +11,6 @@ require "./sysroot_workspace"
 module Bootstrap
   # Determines the earliest resume stage for `bq2 --all --resume`.
   class SysrootAllResume < CLI
-    WORKSPACE_ROOTFS_RELATIVE = Path["workspace/rootfs"]
     # Ordered stage list for the --all workflow.
     STAGE_ORDER = [
       "download-sources",
@@ -58,34 +57,30 @@ module Bootstrap
       end
     end
 
-    getter workspace : SysrootWorkspace::Paths
-    getter builder : SysrootBuilder
+    getter workspace : SysrootWorkspace
+    getter build_state : SysrootBuildState
 
-    # Create a resume inspector for the provided *workspace* and *builder*.
-    def initialize(@workspace : SysrootWorkspace::Paths, @builder : SysrootBuilder)
+    # Create a resume inspector for the provided *workspace*.
+    def initialize(@workspace : SysrootWorkspace)
+      @build_state = SysrootBuildState.new(workspace: @workspace)
     end
 
     # Determine the earliest incomplete stage for `--all --resume`.
     def decide : Decision
-      missing_sources = builder.missing_source_archives
-      unless missing_sources.empty?
-        reason = "missing #{missing_sources.size} cached source archive(s)"
-        return Decision.new("download-sources", reason)
-      end
-
-      plan_exists = File.exists?(plan_path)
-      state_exists = File.exists?(state_path)
+      plan_exists = build_state.plan_exists?
+      state_exists = build_state.state_exists?
       if state_exists && !plan_exists
-        raise "Ambiguous resume state: state exists at #{state_path} but plan is missing at #{plan_path}"
+        raise "Ambiguous resume state: state exists at #{build_state.state_path} but plan is missing at #{build_state.plan_path_path}"
       end
 
       unless plan_exists
-        return Decision.new("plan-write", "missing build plan at #{plan_path}")
+        return Decision.new("plan-write", "missing build plan at #{build_state.plan_path_path}")
       end
 
+      plan_path = build_state.plan_path_path
       plan = BuildPlan.from_json(File.read(plan_path))
       if state_exists
-        state = SysrootBuildState.load(state_path.to_s)
+        state = SysrootBuildState.load(workspace, build_state.state_path)
         plan_digest = SysrootBuildState.digest_for?(plan_path.to_s)
         if plan_digest.nil? || state.plan_digest != plan_digest
           return Decision.new("sysroot-runner", "plan digest mismatch; ignoring state", plan_path: plan_path)
@@ -93,37 +88,15 @@ module Bootstrap
 
         next_phase, next_step = next_incomplete_step(plan, state)
         if next_phase.nil?
-          return Decision.new("rootfs-tarball", "build complete but rootfs tarball is missing", plan_path: plan_path, state_path: state_path) unless tarball_present?
-          return Decision.new("complete", "build complete and rootfs tarball present", plan_path: plan_path, state_path: state_path)
+          return Decision.new("rootfs-tarball", "build complete", plan_path: plan_path, state_path: build_state.state_path)
         end
 
         resume_phase = next_phase
         reason = "state present and plan digest matches"
-        return Decision.new("sysroot-runner", reason, resume_phase: resume_phase, resume_step: next_step, plan_path: plan_path, state_path: state_path)
+        return Decision.new("sysroot-runner", reason, resume_phase: resume_phase, resume_step: next_step, plan_path: plan_path, state_path: build_state.state_path)
       end
 
       Decision.new("sysroot-runner", "plan present but state is missing", plan_path: plan_path)
-    end
-
-    # Return true when the cached rootfs tarball exists in the sources directory.
-    def tarball_present? : Bool
-      File.exists?(output_tarball_path)
-    end
-
-    private def plan_path : Path
-      workspace.var_lib_dir / SysrootBuildState::PLAN_FILE
-    end
-
-    private def state_path : Path
-      workspace.var_lib_dir / SysrootBuildState::STATE_FILE
-    end
-
-    private def rootfs_tarball_path : Path
-      workspace.inner_workspace_path / builder.rootfs_tarball_name
-    end
-
-    private def output_tarball_path : Path
-      builder.sources_dir / builder.rootfs_tarball_name
     end
 
     # Find the next incomplete step in the build plan for the given *state*.
@@ -174,7 +147,7 @@ module Bootstrap
 
     # Execute the full --all flow (download, plan, runner, tarball).
     private def self.run_all(args : Array(String)) : Int32
-      workspace = SysrootBuilder::DEFAULT_HOST_WORKDIR
+      host_workdir = SysrootBuilder::DEFAULT_HOST_WORKDIR
       architecture = SysrootBuilder::DEFAULT_ARCH
       branch = SysrootBuilder::DEFAULT_BRANCH
       base_version = SysrootBuilder::DEFAULT_BASE_VERSION
@@ -189,7 +162,6 @@ module Bootstrap
       resume = false
 
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 --all [options]") do |p|
-        p.on("-w DIR", "--workspace=DIR", "Sysroot workspace directory (default: #{workspace})") { |val| workspace = Path[val] }
         p.on("-a ARCH", "--arch=ARCH", "Target architecture (default: #{architecture})") { |val| architecture = val }
         p.on("-b BRANCH", "--branch=BRANCH", "Source branch/release tag (default: #{branch})") { |val| branch = val }
         p.on("-v VERSION", "--base-version=VERSION", "Base rootfs version/tag (default: #{base_version})") { |val| base_version = val }
@@ -215,11 +187,10 @@ module Bootstrap
       return CLI.print_help(parser) if help
 
       puts "bq2 --all starting"
-      puts "workspace=#{workspace} arch=#{architecture} branch=#{branch} base_version=#{base_version} resume=#{resume}"
+      puts "host_workdir=#{host_workdir} arch=#{architecture} branch=#{branch} base_version=#{base_version} resume=#{resume}"
       puts "repo_root=#{repo_root}"
 
       builder = SysrootBuilder.new(
-        host_workdir: workspace,
         architecture: architecture,
         branch: branch,
         base_version: base_version,
@@ -260,22 +231,19 @@ module Bootstrap
       start_stage = "download-sources"
       resume_phase : String? = nil
       resume_step : String? = nil
-      resume_plan_path : Path? = nil
-      resume_state_path : Path? = nil
-      runner_plan_path : Path? = nil
-      runner_state_path : Path? = nil
       if resume
-        workspace_paths = SysrootWorkspace::Paths.new(builder.inner_rootfs_dir, builder.outer_rootfs_dir)
-        decision = SysrootAllResume.new(workspace_paths, builder).decide
+        workspace = builder.workspace
+        decision = SysrootAllResume.new(workspace).decide
+        missing_sources = builder.missing_source_archives
+        unless missing_sources.empty?
+          reason = "missing #{missing_sources.size} cached source archive(s)"
+          decision = Decision.new("download-sources", reason)
+        end
         puts decision.log_message
         return 0 if decision.stage == "complete"
         start_stage = decision.stage
         resume_phase = decision.resume_phase
         resume_step = decision.resume_step
-        resume_plan_path = decision.plan_path
-        resume_state_path = decision.state_path
-        runner_plan_path = map_path_for_runner(resume_plan_path, builder)
-        runner_state_path = map_path_for_runner(resume_state_path, builder)
       end
       puts "stage_order=#{stages.join(" -> ")} start_stage=#{start_stage}"
 
@@ -294,7 +262,7 @@ module Bootstrap
         when "sysroot-runner"
           time_stage(stage) do
             builder.stage_sources(skip_existing: true)
-            Log.info { "Restaged missing sources into #{builder.outer_rootfs_dir}/workspace" }
+            Log.info { "Restaged missing sources into #{builder.inner_rootfs_workspace_dir}" }
             AlpineSetup.write_resolv_conf(builder.outer_rootfs_dir)
             Log.info { "Starting runner exe=#{bq2_path} builder_rootfs=#{builder.outer_rootfs_dir.to_s} repo_root=#{repo_root} alpine=#{use_alpine_setup}" }
             status = run_sysroot_runner(
@@ -303,8 +271,6 @@ module Bootstrap
               repo_root,
               use_alpine_setup,
               "all",
-              plan_path: runner_plan_path,
-              state_path: runner_state_path,
             )
             unless status.success?
               STDERR.puts "sysroot-runner failed with exit code #{status.exit_code}"
@@ -322,8 +288,6 @@ module Bootstrap
                 repo_root,
                 false,
                 "finalize-rootfs",
-                plan_path: runner_plan_path,
-                state_path: runner_state_path,
               )
               unless status.success?
                 STDERR.puts "finalize-rootfs failed with exit code #{status.exit_code}"
@@ -346,14 +310,13 @@ module Bootstrap
 
     # Print the current resume decision and help output.
     private def self.run_default(args : Array(String)) : Int32
-      workspace = SysrootBuilder::DEFAULT_HOST_WORKDIR
-      builder = SysrootBuilder.new(host_workdir: workspace)
+      builder = SysrootBuilder.new
       begin
-        workspace_paths = SysrootWorkspace::Paths.new(builder.inner_rootfs_dir, builder.outer_rootfs_dir)
-        decision = SysrootAllResume.new(workspace_paths, builder).decide
+        workspace = builder.workspace
+        decision = SysrootAllResume.new(workspace).decide
         puts(decision.log_message)
         if decision.stage == "sysroot-runner" && (state_path = decision.state_path)
-          state = SysrootBuildState.load(state_path.to_s)
+          state = SysrootBuildState.load(workspace, state_path)
           if state.retrying_last_failure?(decision.resume_phase, decision.resume_step)
             puts "\nResume details: retrying last failed step."
             if (overrides = state.overrides_contents(state_path.to_s))
@@ -390,9 +353,7 @@ module Bootstrap
                                         builder : SysrootBuilder,
                                         repo_root : Path,
                                         use_alpine_setup : Bool,
-                                        phase : String,
-                                        plan_path : Path? = nil,
-                                        state_path : Path? = nil) : Process::Status
+                                        phase : String) : Process::Status
       bind_spec = "#{repo_root}:#{repo_root}"
       argv = [
         "sysroot-runner",
@@ -401,12 +362,6 @@ module Bootstrap
         "--bind",
         bind_spec,
       ]
-      if plan_path
-        argv.concat(["--plan", rootfs_relative_path(plan_path, builder.outer_rootfs_dir)])
-      end
-      if state_path
-        argv.concat(["--state-path", rootfs_relative_path(state_path, builder.outer_rootfs_dir)])
-      end
       argv << "--alpine-setup" if use_alpine_setup
       argv.concat(["--phase", phase])
       Process.run(
@@ -416,39 +371,6 @@ module Bootstrap
         output: STDOUT,
         error: STDERR,
       )
-    end
-
-    private def self.map_path_for_runner(path : Path?, builder : SysrootBuilder) : Path?
-      return nil unless path
-      absolute = path.expand
-      rootfs_dir = builder.outer_rootfs_dir.expand
-      workspace_rootfs = (rootfs_dir / WORKSPACE_ROOTFS_RELATIVE).expand
-      if absolute.to_s.starts_with?(workspace_rootfs.to_s)
-        relative = absolute.relative_to(workspace_rootfs)
-        return Path["/workspace/rootfs"] / relative
-      end
-      if absolute.to_s.starts_with?(rootfs_dir.to_s)
-        relative = absolute.relative_to(rootfs_dir)
-        return Path["/"] / relative
-      end
-      path
-    end
-
-    # Convert a host path into a sysroot-relative path when it lives under the rootfs.
-    #
-    # This ensures runner arguments point at the correct locations after entering the
-    # sysroot namespace.
-    private def self.rootfs_relative_path(path : Path, rootfs_dir : Path) : String
-      expanded_path = path.expand
-      expanded_rootfs = rootfs_dir.expand
-      path_str = expanded_path.to_s
-      rootfs_str = expanded_rootfs.to_s
-      if path_str.starts_with?(rootfs_str)
-        suffix = path_str[rootfs_str.size..]
-        return "/" if suffix.empty?
-        return suffix.starts_with?("/") ? suffix : "/#{suffix}"
-      end
-      path.to_s
     end
 
     # Log the duration of a stage for the --all workflow.

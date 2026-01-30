@@ -37,54 +37,69 @@ private def populate_sources(builder : Bootstrap::SysrootBuilder) : Nil
   end
 end
 
-private def write_state(path : Path, plan_path : Path, plan : Bootstrap::BuildPlan, completed_steps : Array(Tuple(String, String))) : Bootstrap::SysrootBuildState
-  state = Bootstrap::SysrootBuildState.new(plan_path: plan_path.to_s, overrides_path: nil, report_dir: nil)
+private def write_state(path : Path,
+                        workspace : Bootstrap::SysrootWorkspace,
+                        plan_path : Path,
+                        plan : Bootstrap::BuildPlan,
+                        completed_steps : Array(Tuple(String, String))) : Bootstrap::SysrootBuildState
+  state = Bootstrap::SysrootBuildState.new(workspace: workspace, plan_path: plan_path.to_s, overrides_path: nil, report_dir: nil)
   completed_steps.each do |(phase, step)|
     state.mark_success(phase, step)
   end
   state.plan_digest = Bootstrap::SysrootBuildState.digest_for?(plan_path.to_s)
   FileUtils.mkdir_p(path.parent)
-  state.save(path.to_s)
+  state.save(path)
   state
 end
 
-private def resume_for(builder : Bootstrap::SysrootBuilder) : Bootstrap::SysrootAllResume
-  workspace = Bootstrap::SysrootWorkspace::Paths.new(builder.inner_rootfs_dir, builder.outer_rootfs_dir)
-  Bootstrap::SysrootAllResume.new(workspace, builder)
+private def resume_for(workspace : Bootstrap::SysrootWorkspace) : Bootstrap::SysrootAllResume
+  Bootstrap::SysrootAllResume.new(workspace)
+end
+
+private def with_temp_workdir(&block : Path ->)
+  with_tempdir do |dir|
+    Dir.cd(dir) do
+      yield dir
+    end
+  end
 end
 
 describe Bootstrap::SysrootAllResume do
-  it "selects download-sources when the source cache is missing" do
-    with_tempdir do |dir|
-      builder = Bootstrap::SysrootBuilder.new(host_workdir: dir)
-      decision = resume_for(builder).decide
-      decision.stage.should eq("download-sources")
+  it "starts plan-write when the build plan is missing" do
+    with_temp_workdir do |_dir|
+      workspace = Bootstrap::SysrootWorkspace.from_host_workdir(Bootstrap::SysrootBuilder::DEFAULT_HOST_WORKDIR)
+      decision = resume_for(workspace).decide
+      decision.stage.should eq("plan-write")
     end
   end
 
   it "starts sysroot-runner when plan exists but state is missing" do
-    with_tempdir do |dir|
-      builder = Bootstrap::SysrootBuilder.new(host_workdir: dir)
+    with_temp_workdir do |_dir|
+      builder = Bootstrap::SysrootBuilder.new
       populate_sources(builder)
-      plan_path = builder.host_workdir / Bootstrap::SysrootBuildState::RELATIVE_VAR_LIB / Bootstrap::SysrootBuildState::PLAN_FILE
+      workspace = builder.workspace
+      build_state = Bootstrap::SysrootBuildState.new(workspace: workspace)
+      plan_path = build_state.plan_path_path
       write_plan(plan_path)
 
-      decision = resume_for(builder).decide
+      decision = resume_for(workspace).decide
       decision.stage.should eq("sysroot-runner")
       decision.reason.should contain("state is missing")
     end
   end
 
   it "resumes sysroot-runner when state matches the plan" do
-    with_tempdir do |dir|
-      builder = Bootstrap::SysrootBuilder.new(host_workdir: dir)
+    with_temp_workdir do |_dir|
+      builder = Bootstrap::SysrootBuilder.new
       populate_sources(builder)
-      plan_path = builder.host_workdir / Bootstrap::SysrootBuildState::RELATIVE_VAR_LIB / Bootstrap::SysrootBuildState::PLAN_FILE
+      workspace = builder.workspace
+      build_state = Bootstrap::SysrootBuildState.new(workspace: workspace)
+      plan_path = build_state.plan_path_path
       plan = write_plan(plan_path)
-      state_path = builder.host_workdir / Bootstrap::SysrootBuildState::RELATIVE_VAR_LIB / Bootstrap::SysrootBuildState::STATE_FILE
-      write_state(state_path, plan_path, plan, [{"phase-a", "step-a"}])
+      state_path = build_state.state_path
+      write_state(state_path, workspace, plan_path, plan, [{"phase-a", "step-a"}])
 
-      decision = resume_for(builder).decide
+      decision = resume_for(workspace).decide
       decision.stage.should eq("sysroot-runner")
       decision.resume_phase.should eq("phase-b")
       decision.resume_step.should eq("step-b")
@@ -92,31 +107,35 @@ describe Bootstrap::SysrootAllResume do
   end
 
   it "selects rootfs-tarball when the plan is complete but tarball is missing" do
-    with_tempdir do |dir|
-      builder = Bootstrap::SysrootBuilder.new(host_workdir: dir)
+    with_temp_workdir do |_dir|
+      builder = Bootstrap::SysrootBuilder.new
       populate_sources(builder)
-      plan_path = builder.host_workdir / Bootstrap::SysrootBuildState::RELATIVE_VAR_LIB / Bootstrap::SysrootBuildState::PLAN_FILE
+      workspace = builder.workspace
+      build_state = Bootstrap::SysrootBuildState.new(workspace: workspace)
+      plan_path = build_state.plan_path_path
       plan = write_plan(plan_path)
-      state_path = builder.host_workdir / Bootstrap::SysrootBuildState::RELATIVE_VAR_LIB / Bootstrap::SysrootBuildState::STATE_FILE
-      write_state(state_path, plan_path, plan, [{"phase-a", "step-a"}, {"phase-b", "step-b"}])
+      state_path = build_state.state_path
+      write_state(state_path, workspace, plan_path, plan, [{"phase-a", "step-a"}, {"phase-b", "step-b"}])
 
-      decision = resume_for(builder).decide
+      decision = resume_for(workspace).decide
       decision.stage.should eq("rootfs-tarball")
     end
   end
 
   it "ignores state when the plan digest does not match" do
-    with_tempdir do |dir|
-      builder = Bootstrap::SysrootBuilder.new(host_workdir: dir)
+    with_temp_workdir do |_dir|
+      builder = Bootstrap::SysrootBuilder.new
       populate_sources(builder)
-      plan_path = builder.host_workdir / Bootstrap::SysrootBuildState::RELATIVE_VAR_LIB / Bootstrap::SysrootBuildState::PLAN_FILE
+      workspace = builder.workspace
+      build_state = Bootstrap::SysrootBuildState.new(workspace: workspace)
+      plan_path = build_state.plan_path_path
       plan = write_plan(plan_path)
-      state_path = builder.host_workdir / Bootstrap::SysrootBuildState::RELATIVE_VAR_LIB / Bootstrap::SysrootBuildState::STATE_FILE
-      state = write_state(state_path, plan_path, plan, [{"phase-a", "step-a"}])
+      state_path = build_state.state_path
+      state = write_state(state_path, workspace, plan_path, plan, [{"phase-a", "step-a"}])
       state.plan_digest = "deadbeef"
-      state.save(state_path.to_s)
+      state.save(state_path)
 
-      decision = resume_for(builder).decide
+      decision = resume_for(workspace).decide
       decision.stage.should eq("sysroot-runner")
       decision.state_path.should be_nil
       decision.plan_path.should eq(plan_path)
@@ -124,16 +143,18 @@ describe Bootstrap::SysrootAllResume do
   end
 
   it "refuses to resume when state exists without a plan" do
-    with_tempdir do |dir|
-      builder = Bootstrap::SysrootBuilder.new(host_workdir: dir)
+    with_temp_workdir do |_dir|
+      builder = Bootstrap::SysrootBuilder.new
       populate_sources(builder)
-      state_path = builder.host_workdir / Bootstrap::SysrootBuildState::RELATIVE_VAR_LIB / Bootstrap::SysrootBuildState::STATE_FILE
-      plan_path = builder.host_workdir / Bootstrap::SysrootBuildState::RELATIVE_VAR_LIB / Bootstrap::SysrootBuildState::PLAN_FILE
-      write_state(state_path, plan_path, Bootstrap::BuildPlan.new([] of Bootstrap::BuildPhase), [] of Tuple(String, String))
+      workspace = builder.workspace
+      build_state = Bootstrap::SysrootBuildState.new(workspace: workspace)
+      state_path = build_state.state_path
+      plan_path = build_state.plan_path_path
+      write_state(state_path, workspace, plan_path, Bootstrap::BuildPlan.new([] of Bootstrap::BuildPhase), [] of Tuple(String, String))
       File.delete(plan_path) if File.exists?(plan_path)
 
       expect_raises(Exception, /plan is missing/) do
-        resume_for(builder).decide
+        resume_for(workspace).decide
       end
     end
   end

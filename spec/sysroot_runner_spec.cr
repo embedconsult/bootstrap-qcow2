@@ -377,27 +377,26 @@ describe Bootstrap::SysrootRunner do
     plan_path = plan_file.path
     plan_file.close
 
-    state_path : String? = nil
-    state_path = File.tempname("bq2-state").not_nil!
-    File.delete?(state_path)
+    state_path : Path? = nil
+    state_path = Path[File.tempname("bq2-state").not_nil!]
+    File.delete?(state_path.to_s)
+    workspace = Bootstrap::SysrootWorkspace.from_inner_rootfs(Path["/"])
     state = Bootstrap::SysrootBuildState.load_or_init(
-      state_path,
-      plan_path: plan_path,
-      overrides_path: nil,
-      report_dir: nil
+      workspace,
+      state_path
     )
     state.mark_success("one", "a")
     state.save(state_path)
 
     runner = RecordingRunner.new
-    Bootstrap::SysrootRunner.run_plan(plan_path, runner, report_dir: nil, state_path: state_path, overrides_path: nil)
+    Bootstrap::SysrootRunner.run_plan(plan_path, runner, report_dir: nil, state_path: state_path.to_s, overrides_path: nil)
     runner.calls.map { |call| call[:name] }.should eq ["b"]
 
-    updated = Bootstrap::SysrootBuildState.load(state_path)
+    updated = Bootstrap::SysrootBuildState.load(workspace, state_path)
     updated.completed?("one", "a").should be_true
     updated.completed?("one", "b").should be_true
   ensure
-    File.delete?(state_path) if state_path
+    File.delete?(state_path.to_s) if state_path
   end
 
   it "honors resume=false by running completed steps when a state file is present" do
@@ -421,22 +420,21 @@ describe Bootstrap::SysrootRunner do
     plan_path = plan_file.path
     plan_file.close
 
-    state_path : String? = nil
-    state_path = File.tempname("bq2-state").not_nil!
-    File.delete?(state_path)
+    state_path : Path? = nil
+    state_path = Path[File.tempname("bq2-state").not_nil!]
+    File.delete?(state_path.to_s)
+    workspace = Bootstrap::SysrootWorkspace.from_inner_rootfs(Path["/"])
     state = Bootstrap::SysrootBuildState.load_or_init(
-      state_path,
-      plan_path: plan_path,
-      overrides_path: nil,
-      report_dir: nil
+      workspace,
+      state_path
     )
     state.mark_success("one", "a")
     state.save(state_path)
 
     runner = RecordingRunner.new
-    Bootstrap::SysrootRunner.run_plan(plan_path, runner, report_dir: nil, state_path: state_path, resume: false, overrides_path: nil)
+    Bootstrap::SysrootRunner.run_plan(plan_path, runner, report_dir: nil, state_path: state_path.to_s, resume: false, overrides_path: nil)
     runner.calls.map { |call| call[:name] }.should eq ["a", "b"]
   ensure
-    File.delete?(state_path) if state_path
+    File.delete?(state_path.to_s) if state_path
   end
 end
