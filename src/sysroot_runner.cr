@@ -690,7 +690,23 @@ module Bootstrap
       if destdir = effective_phase.destdir
         prepare_destdir(destdir)
       end
-      run_steps(effective_phase, effective_phase.steps, runner, report_dir: report_dir, state: state, state_path: state_path, resume: resume)
+      effective_state_path = state_path
+      effective_report_dir = report_dir
+      if state
+        if state_path
+          effective_state_path = rewrite_path_for_rootfs_context(state_path, state)
+        end
+        if report_dir
+          effective_report_dir = rewrite_path_for_rootfs_context(report_dir, state)
+        end
+      end
+      run_steps(effective_phase,
+        effective_phase.steps,
+        runner,
+        report_dir: effective_report_dir,
+        state: state,
+        state_path: effective_state_path,
+        resume: resume)
       Log.info { "Completed phase #{effective_phase.name}" }
     end
 
@@ -736,6 +752,24 @@ module Bootstrap
       failure = state.progress.last_failure
       return false unless failure
       failure.phase == phase_name && failure.step == step_name
+    end
+
+    # Rewrite a host path into the active rootfs namespace when needed.
+    private def self.rewrite_path_for_rootfs_context(path : String, state : SysrootBuildState) : String
+      return path unless rootfs_marker_present? || outer_rootfs_marker_present?
+      workspace = state.workspace
+      return path unless workspace
+      host_path = Path[path].expand.to_s
+      rootfs_root =
+        if rootfs_marker_present?
+          workspace.inner_rootfs_path.to_s
+        else
+          workspace.outer_rootfs_path.to_s
+        end
+      return path unless host_path.starts_with?(rootfs_root)
+      suffix = host_path[rootfs_root.size..-1] || ""
+      suffix = suffix.lstrip('/')
+      "/#{suffix}"
     end
 
     private def self.filter_phases_by_state(phases : Array(BuildPhase), state : SysrootBuildState) : Array(BuildPhase)

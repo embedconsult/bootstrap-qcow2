@@ -297,6 +297,12 @@ module Bootstrap
     def resolve_rootfs_path(path : String, state_path : String?) : String
       return path unless path.starts_with?("/") && state_path
       rootfs_root = Path[state_path].expand.parent.parent.parent
+      outer_rootfs_prefix = SysrootWorkspace::ROOTFS_WORKSPACE_PATH / "rootfs"
+      if path.starts_with?(outer_rootfs_prefix.to_s)
+        suffix = path[outer_rootfs_prefix.to_s.size..-1] || ""
+        suffix = suffix.lstrip('/')
+        return (rootfs_root / suffix).to_s
+      end
       (rootfs_root / path.lchop("/")).to_s
     end
 
