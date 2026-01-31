@@ -118,6 +118,8 @@ module Bootstrap
 
     # Returns true when the inner rootfs marker is visible from the outer rootfs.
     def self.outer_rootfs_marker_present? : Bool
+      marker_override = ENV["BQ2_OUTER_ROOTFS_MARKER"]?
+      return true if marker_override && File.exists?(marker_override)
       File.exists?(OUTER_MARKER_PATH)
     end
 
@@ -133,6 +135,61 @@ module Bootstrap
       end
       return host_workdir.not_nil! / ROOTFS_WORKSPACE_DIR if host_workdir
       raise "Rootfs workspace path is not available for this workspace"
+    end
+
+    # Translate *path* from host workspace coordinates into the current rootfs
+    # namespace when running inside the outer or inner rootfs.
+    #
+    # Host absolute paths are left untouched unless they point at the inner
+    # rootfs tree (for example, the host's rootfs workspace). When running in
+    # a rootfs namespace, paths under the host's inner rootfs are rewritten to
+    # the inner rootfs mountpoint (/workspace/rootfs for the outer rootfs, or
+    # / for the inner rootfs).
+    def path_for_context(path : String) : String
+      return path unless host_workdir
+
+      inner_rootfs = inner_rootfs_path.to_s
+      return path unless path.starts_with?(inner_rootfs)
+
+      suffix = path[inner_rootfs.size..-1] || ""
+      suffix = suffix.lstrip('/')
+
+      if SysrootWorkspace.inner_rootfs_marker_present?
+        return suffix.empty? ? "/" : "/#{suffix}"
+      end
+
+      if SysrootWorkspace.outer_rootfs_marker_present?
+        return suffix.empty? ? INNER_ROOTFS_PATH_IN_OUTER.to_s : (INNER_ROOTFS_PATH_IN_OUTER / suffix).to_s
+      end
+
+      path
+    end
+
+    # Convert a path in the current namespace back into a rootfs-absolute path.
+    #
+    # This is useful for normalizing report paths so status tooling can resolve
+    # them consistently from the host.
+    def rootfs_path_for_context(path : String) : String
+      return path if SysrootWorkspace.inner_rootfs_marker_present?
+      return path unless host_workdir
+
+      inner_rootfs = inner_rootfs_path.to_s
+      if path.starts_with?(inner_rootfs)
+        suffix = path[inner_rootfs.size..-1] || ""
+        suffix = suffix.lstrip('/')
+        return suffix.empty? ? "/" : "/#{suffix}"
+      end
+
+      if SysrootWorkspace.outer_rootfs_marker_present?
+        outer_prefix = INNER_ROOTFS_PATH_IN_OUTER.to_s
+        if path.starts_with?(outer_prefix)
+          suffix = path[outer_prefix.size..-1] || ""
+          suffix = suffix.lstrip('/')
+          return suffix.empty? ? "/" : "/#{suffix}"
+        end
+      end
+
+      path
     end
 
     # Path to the .bq2-rootfs marker inside the inner rootfs.

@@ -252,6 +252,13 @@ module Bootstrap
       touch!
     end
 
+    # Resolve *path* into the current rootfs namespace when the workspace is
+    # anchored on the host.
+    def resolve_path_for_context(path : String) : String
+      return path unless (workspace = @workspace)
+      workspace.path_for_context(path)
+    end
+
     # Update `updated_at` to the current UTC time.
     def touch! : Nil
       self.updated_at = Time.utc.to_s
