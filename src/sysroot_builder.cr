@@ -1290,18 +1290,45 @@ module Bootstrap
       env
     end
 
+    private def package_source_manifest_lines(specs : Array(PackageSpec)) : Array(String)
+      specs.flat_map do |pkg|
+        pkg.all_urls.map_with_index do |uri, idx|
+          checksum_uri = idx.zero? ? pkg.checksum_url : nil
+          [
+            pkg.name,
+            pkg.version,
+            uri.to_s,
+            pkg.sha256 || "",
+            checksum_uri ? checksum_uri.to_s : "",
+          ].join("|")
+        end
+      end
+    end
+
+    private def package_source_manifest(specs : Array(PackageSpec)) : String
+      package_source_manifest_lines(specs).join("\n")
+    end
+
     private def host_setup_steps : Array(BuildStep)
       workdir = @host_workdir.to_s
+      packages_manifest = package_source_manifest(packages)
+      rootfs_manifest = package_source_manifest([base_rootfs_spec])
       [
         build_step(
           name: "download-sources",
           strategy: "download-sources",
           workdir: workdir,
+          env: {
+            "PACKAGE_SOURCES" => packages_manifest,
+          },
         ),
         build_step(
           name: "populate-seed",
           strategy: "populate-seed",
           workdir: workdir,
+          env: {
+            "ROOTFS_SOURCE" => rootfs_manifest,
+          },
         ),
         build_step(
           name: "extract-sources",
