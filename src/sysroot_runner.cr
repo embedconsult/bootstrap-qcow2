@@ -1136,14 +1136,12 @@ module Bootstrap
       0
     end
 
-    private def self.resolve_latest_report_path(state : SysrootBuildState, report_dir : String?, state_path : String?) : String?
+    private def self.resolve_latest_report_path(state : SysrootBuildState, _report_dir : String?, state_path : String?) : String?
       report_path = state.progress.last_failure.try(&.report_path)
-      if report_path
-        resolved = state.resolve_rootfs_path(report_path, state_path)
-        return resolved if File.exists?(resolved)
-      end
-      return nil unless report_dir
-      latest_report_path(report_dir)
+      return nil unless report_path
+      resolved = state.resolve_rootfs_path(report_path, state_path)
+      return resolved if File.exists?(resolved)
+      nil
     end
 
     private def self.latest_report_path(report_dir : String) : String?
