@@ -189,19 +189,16 @@ module Bootstrap
             FileUtils.mkdir_p(File.dirname(target))
             File.write(target, content)
           when "download-sources"
-            specs = package_specs_from_step(step)
             host_setup_builder(phase) do |builder|
-              builder.download_sources(specs)
+              builder.download_sources
             end
           when "extract-sources"
-            specs = package_specs_from_step(step)
             host_setup_builder(phase) do |builder|
-              builder.stage_sources_for(specs, skip_existing: true)
+              builder.stage_sources(skip_existing: true)
             end
           when "populate-seed"
-            rootfs_spec = rootfs_spec_from_step(step)
             host_setup_builder(phase) do |builder|
-              builder.populate_seed_rootfs(rootfs_spec)
+              builder.populate_seed_rootfs
             end
           when "alpine-setup"
             AlpineSetup.install_sysroot_runner_packages
@@ -337,18 +334,6 @@ module Bootstrap
         with_source_branch(phase.env) do
           yield builder
         end
-      end
-
-      private def package_specs_from_step(step : BuildStep) : Array(SysrootBuilder::PackageSpec)
-        payload = step.env["PACKAGES_JSON"]?
-        raise "download-sources requires PACKAGES_JSON in plan step env" unless payload
-        SysrootBuilder.package_specs_from_payload(payload)
-      end
-
-      private def rootfs_spec_from_step(step : BuildStep) : SysrootBuilder::PackageSpec
-        payload = step.env["ROOTFS_SPEC_JSON"]?
-        raise "populate-seed requires ROOTFS_SPEC_JSON in plan step env" unless payload
-        SysrootBuilder.package_spec_from_payload(payload)
       end
 
       private def build_host_setup_builder(phase : BuildPhase) : SysrootBuilder
