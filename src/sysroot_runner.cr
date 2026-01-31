@@ -588,7 +588,7 @@ module Bootstrap
           build_state.overrides_path_path.to_s
         end
       plan = apply_overrides(plan, effective_overrides_path) if effective_overrides_path
-      stage_report_dirs_for_destdirs(plan)
+      stage_report_dirs_for_destdirs(plan, workspace)
       effective_state_path =
         if state_path
           state_path
@@ -817,11 +817,20 @@ module Bootstrap
     # Ensure report directories exist for phases that stage into a destdir
     # rootfs. The build plan and overrides are treated as immutable and must
     # be staged by the builder or plan writer rather than by sysroot-runner.
-    private def self.stage_report_dirs_for_destdirs(plan : BuildPlan) : Nil
-      return unless SysrootWorkspace.outer_rootfs_marker_present?
+    private def self.stage_report_dirs_for_destdirs(plan : BuildPlan, workspace : SysrootWorkspace) : Nil
+      rootfs_workspace = SysrootWorkspace::ROOTFS_WORKSPACE_PATH.to_s
       plan.phases.each do |phase|
         next unless destdir = phase.destdir
-        report_stage = File.join(destdir, SysrootBuildState.rootfs_report_dir.lchop('/'))
+        destdir_path = Path[destdir]
+        if workspace.host_workdir
+          destdir_string = destdir_path.to_s
+          if destdir_string == rootfs_workspace || destdir_string.starts_with?(rootfs_workspace + "/")
+            suffix = destdir_string[rootfs_workspace.size..-1] || ""
+            suffix = suffix.lstrip('/')
+            destdir_path = workspace.rootfs_workspace_path / suffix
+          end
+        end
+        report_stage = destdir_path / SysrootBuildState.rootfs_report_dir.lchop('/')
         FileUtils.mkdir_p(report_stage)
       end
     rescue ex
