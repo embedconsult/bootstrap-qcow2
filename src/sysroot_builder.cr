@@ -108,6 +108,75 @@ module Bootstrap
       end
     end
 
+    # Serialize PackageSpec data for embedding in build plan steps.
+    private def package_specs_payload(specs : Array(PackageSpec)) : String
+      JSON.build do |json|
+        json.array do
+          specs.each do |pkg|
+            json.object do
+              json.field "name", pkg.name
+              json.field "version", pkg.version
+              json.field "url", pkg.url.to_s
+              json.field "sha256", pkg.sha256 if pkg.sha256
+              json.field "checksum_url", pkg.checksum_url.to_s if pkg.checksum_url
+              json.field "phases", pkg.phases if pkg.phases
+              json.field "configure_flags", pkg.configure_flags
+              json.field "build_directory", pkg.build_directory if pkg.build_directory
+              json.field "build_dir", pkg.build_dir if pkg.build_dir
+              json.field "strategy", pkg.strategy
+              json.field "patches", pkg.patches
+              json.field "extra_urls", pkg.extra_urls.map(&.to_s)
+            end
+          end
+        end
+      end
+    end
+
+    # Serialize a single PackageSpec for embedding in build plan steps.
+    private def package_spec_payload(spec : PackageSpec) : String
+      package_specs_payload([spec])
+    end
+
+    # Decode PackageSpec data from a build plan step.
+    def self.package_specs_from_payload(payload : String) : Array(PackageSpec)
+      JSON.parse(payload).as_a.map { |entry| package_spec_from_json(entry) }
+    end
+
+    # Decode a single PackageSpec from a build plan step.
+    def self.package_spec_from_payload(payload : String) : PackageSpec
+      package_specs_from_payload(payload).first
+    end
+
+    private def self.package_spec_from_json(entry : JSON::Any) : PackageSpec
+      obj = entry.as_h
+      name = obj["name"].as_s
+      version = obj["version"].as_s
+      url = URI.parse(obj["url"].as_s)
+      sha256 = obj["sha256"]?.try(&.as_s?)
+      checksum_url = obj["checksum_url"]?.try(&.as_s?).try { |val| URI.parse(val) }
+      phases = obj["phases"]?.try { |value| value.as_a.map(&.as_s) }
+      configure_flags = obj["configure_flags"]?.try { |value| value.as_a.map(&.as_s) } || [] of String
+      build_directory = obj["build_directory"]?.try(&.as_s?)
+      build_dir = obj["build_dir"]?.try(&.as_s?)
+      strategy = obj["strategy"]?.try(&.as_s?) || "autotools"
+      patches = obj["patches"]?.try { |value| value.as_a.map(&.as_s) } || [] of String
+      extra_urls = obj["extra_urls"]?.try { |value| value.as_a.map { |item| URI.parse(item.as_s) } } || [] of URI
+      PackageSpec.new(
+        name,
+        version,
+        url,
+        sha256: sha256,
+        checksum_url: checksum_url,
+        phases: phases,
+        configure_flags: configure_flags,
+        build_directory: build_directory,
+        build_dir: build_dir,
+        strategy: strategy,
+        patches: patches,
+        extra_urls: extra_urls,
+      )
+    end
+
     getter architecture : String
     getter branch : String
     getter host_workdir : Path
@@ -395,6 +464,11 @@ module Bootstrap
       packages.flat_map { |pkg| download_all(pkg) }
     end
 
+    # Download the provided package sources and return their cached paths.
+    def download_sources(specs : Array(PackageSpec)) : Array(Path)
+      specs.flat_map { |pkg| download_all(pkg) }
+    end
+
     # Download all archives for a package (main + extras), verify, and return paths.
     def download_all(pkg : PackageSpec) : Array(Path)
       pkg.all_urls.map_with_index do |uri, idx|
@@ -621,9 +695,14 @@ module Bootstrap
     # When *skip_existing* is true, source archives are only extracted when the
     # expected build directory does not already exist.
     def stage_sources(skip_existing : Bool, workspace_path : Path = inner_rootfs_workspace_dir) : Nil
+      stage_sources_for(packages, skip_existing: skip_existing, workspace_path: workspace_path)
+    end
+
+    # Extract downloaded sources for the provided specs into the workspace.
+    def stage_sources_for(specs : Array(PackageSpec), skip_existing : Bool, workspace_path : Path = inner_rootfs_workspace_dir) : Nil
       shard_projects = [] of Path
       shards_cache = workspace_path / SHARDS_CACHE_DIR
-      packages.each do |pkg|
+      specs.each do |pkg|
         archives = download_all(pkg)
         archives.each_with_index do |archive, idx|
           build_directory =
@@ -1292,21 +1371,32 @@ module Bootstrap
 
     private def host_setup_steps : Array(BuildStep)
       workdir = @host_workdir.to_s
+      packages_payload = package_specs_payload(packages)
+      rootfs_payload = package_spec_payload(base_rootfs_spec)
       [
         build_step(
           name: "download-sources",
           strategy: "download-sources",
           workdir: workdir,
+          env: {
+            "PACKAGES_JSON" => packages_payload,
+          },
         ),
         build_step(
           name: "populate-seed",
           strategy: "populate-seed",
           workdir: workdir,
+          env: {
+            "ROOTFS_SPEC_JSON" => rootfs_payload,
+          },
         ),
         build_step(
           name: "extract-sources",
           strategy: "extract-sources",
           workdir: workdir,
+          env: {
+            "PACKAGES_JSON" => packages_payload,
+          },
         ),
       ]
     end
