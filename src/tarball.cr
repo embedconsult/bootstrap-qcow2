@@ -13,10 +13,11 @@ module Bootstrap
                      preserve_ownership : Bool,
                      owner_uid : Int32?,
                      owner_gid : Int32?,
-                     force_system_tar : Bool = false) : Nil
+                     force_system_tar : Bool = false,
+                     guard_paths : Array(Path) = [] of Path) : Nil
       FileUtils.mkdir_p(destination)
-      return run_system_tar_extract(path, destination, preserve_ownership, owner_uid, owner_gid) if force_system_tar
-      Extractor.new(path, destination, preserve_ownership, owner_uid, owner_gid).run
+      return run_system_tar_extract(path, destination, preserve_ownership, owner_uid, owner_gid, guard_paths) if force_system_tar
+      Extractor.new(path, destination, preserve_ownership, owner_uid, owner_gid, guard_paths).run
     end
 
     # Write a gzipped tarball for *source*, falling back to system tar as needed.
@@ -35,7 +36,9 @@ module Bootstrap
                                             destination : Path,
                                             preserve_ownership : Bool,
                                             owner_uid : Int32?,
-                                            owner_gid : Int32?) : Nil
+                                            owner_gid : Int32?,
+                                            guard_paths : Array(Path)) : Nil
+      assert_guard_paths!(path, destination, guard_paths) unless guard_paths.empty?
       args = ["-xf", path.to_s, "-C", destination.to_s]
       if preserve_ownership
         args << "--same-owner"
@@ -47,10 +50,42 @@ module Bootstrap
       raise "Failed to extract #{path}" unless status.success?
     end
 
+    def self.assert_guard_paths!(archive : Path, destination : Path, guard_paths : Array(Path)) : Nil
+      guard_set = guard_paths.map(&.expand)
+      return if guard_set.empty?
+
+      output = IO::Memory.new
+      status = Process.run("tar", ["-tf", archive.to_s], output: output)
+      raise "Failed to inspect tarball #{archive}" unless status.success?
+
+      output.to_s.each_line do |entry|
+        entry = entry.strip
+        next if entry.empty?
+        entry = entry.sub(%r{^\.?/}, "")
+        target = (destination / entry).expand
+        if guarded_target?(target, guard_set)
+          raise "Refusing to extract #{archive}: entry #{entry} would overwrite #{target}"
+        end
+      end
+    end
+
+    private def self.guarded_target?(target : Path, guard_paths : Array(Path)) : Bool
+      target_str = target.to_s
+      guard_paths.any? do |guard|
+        guard_str = guard.to_s
+        target_str == guard_str || target_str.starts_with?(guard_str + "/")
+      end
+    end
+
     # Minimal tar extractor/writer implemented in Crystal to avoid shelling out.
     private struct Extractor
       # Create a tar extractor for a single archive.
-      def initialize(@archive : Path, @destination : Path, @preserve_ownership : Bool, @owner_uid : Int32?, @owner_gid : Int32?)
+      def initialize(@archive : Path,
+                     @destination : Path,
+                     @preserve_ownership : Bool,
+                     @owner_uid : Int32?,
+                     @owner_gid : Int32?,
+                     @guard_paths : Array(Path))
       end
 
       # Extract the archive contents into the destination.
@@ -58,7 +93,7 @@ module Bootstrap
         return if fallback_for_unhandled_compression?
         File.open(@archive) do |file|
           io = maybe_gzip(file)
-          TarReader.new(io, @destination, @preserve_ownership, @owner_uid, @owner_gid).extract_all
+          TarReader.new(io, @destination, @preserve_ownership, @owner_uid, @owner_gid, @guard_paths).extract_all
         end
       end
 
@@ -74,6 +109,7 @@ module Bootstrap
       # Use system tar for compression formats we do not decode in Crystal.
       private def fallback_for_unhandled_compression? : Bool
         if @archive.to_s.ends_with?(".tar.xz") || @archive.to_s.ends_with?(".tar.bz2")
+          Tarball.assert_guard_paths!(@archive, @destination, @guard_paths) unless @guard_paths.empty?
           Log.warn { "Running: tar -xf #{@archive} -C #{@destination}" }
           status = Process.run("tar", ["-xf", @archive.to_s, "-C", @destination.to_s])
           raise "Failed to extract #{@archive}" unless status.success?
@@ -116,7 +152,12 @@ module Bootstrap
       PAX_VALUE_LIMIT = 4096
 
       # Create a tar reader that writes entries into the destination.
-      def initialize(@io : IO, @destination : Path, @preserve_ownership : Bool, @owner_uid : Int32?, @owner_gid : Int32?)
+      def initialize(@io : IO,
+                     @destination : Path,
+                     @preserve_ownership : Bool,
+                     @owner_uid : Int32?,
+                     @owner_gid : Int32?,
+                     @guard_paths : Array(Path))
         @pax_global = {} of String => String
         @pax_next = {} of String => String
       end
@@ -173,6 +214,10 @@ module Bootstrap
             skip_bytes(size)
             skip_padding(size)
             next
+          end
+
+          if guarded_target?(target)
+            raise "Refusing to extract tar entry #{name}: would overwrite #{target}"
           end
 
           if has_symlink_ancestor?(target)
@@ -241,6 +286,14 @@ module Bootstrap
         # subsequent file creation would clobber the directory mtime.
         deferred_dir_times.reverse_each do |(path, entry_mtime)|
           apply_mtime(path, entry_mtime)
+        end
+      end
+
+      private def guarded_target?(target : Path) : Bool
+        target_str = target.to_s
+        @guard_paths.any? do |guard|
+          guard_str = guard.to_s
+          target_str == guard_str || target_str.starts_with?(guard_str + "/")
         end
       end
 
