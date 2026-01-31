@@ -579,7 +579,7 @@ module Bootstrap
     # Assemble a chroot-able rootfs:
     # * extracts the seed rootfs
     # * creates inner rootfs var/lib + workspace directories
-    # * stages source archives (including bootstrap-qcow2) into /workspace/rootfs/workspace
+    # * stages source archives (including bootstrap-qcow2) into <.bq2-rootfs>/workspace
     # Returns the rootfs path on success.
     # Invoked by `generate_chroot_tarball` and can also be used directly in callers.
     def prepare_rootfs(base_rootfs : PackageSpec = base_rootfs_spec, include_sources : Bool = true) : Path
@@ -894,11 +894,13 @@ module Bootstrap
     #   prefer /usr/bin, and rely on musl's /etc/ld-musl-<arch>.path for runtime lookup.
     def phase_specs : Array(PhaseSpec)
       sysroot_prefix = "/opt/sysroot"
-      inner_rootfs_path_in_outer = SysrootWorkspace::INNER_ROOTFS_PATH_IN_OUTER.to_s
-      outer_sources_workspace_value = SysrootWorkspace::INNER_WORKSPACE_PATH_IN_OUTER.to_s
+      outer_workspace = SysrootWorkspace.from_outer_rootfs(Path["/"])
+      inner_workspace = SysrootWorkspace.from_inner_rootfs(Path["/"])
+      outer_sources_workspace_value = outer_workspace.inner_workspace_path.to_s
+      inner_sources_workspace_value = inner_workspace.inner_workspace_path.to_s
       bootstrap_repo_dir = "#{outer_sources_workspace_value}/bootstrap-qcow2-#{bootstrap_source_version}"
-      rootfs_destdir = inner_rootfs_path_in_outer
-      rootfs_tarball = "#{SysrootWorkspace::ROOTFS_WORKSPACE_PATH}/bq2-rootfs-#{bootstrap_source_version}.tar.gz"
+      rootfs_destdir = outer_workspace.inner_rootfs_path.to_s
+      rootfs_tarball = "#{inner_sources_workspace_value}/bq2-rootfs-#{bootstrap_source_version}.tar.gz"
       sysroot_triple = sysroot_target_triple
       sysroot_env = sysroot_phase_env(sysroot_prefix)
       rootfs_env = rootfs_phase_env(sysroot_prefix)
@@ -1054,7 +1056,7 @@ module Bootstrap
         PhaseSpec.new(
           name: "system-from-sysroot",
           description: "Rebuild sysroot packages into /usr inside the new rootfs (prefix-free).",
-          workspace: SysrootWorkspace::ROOTFS_WORKSPACE_PATH.to_s,
+          workspace: inner_sources_workspace_value,
           environment: "rootfs-system",
           install_prefix: "/usr",
           destdir: nil,
@@ -1116,7 +1118,7 @@ module Bootstrap
         PhaseSpec.new(
           name: "tools-from-system",
           description: "Build additional developer tools inside the new rootfs.",
-          workspace: SysrootWorkspace::ROOTFS_WORKSPACE_PATH.to_s,
+          workspace: inner_sources_workspace_value,
           environment: "rootfs-system",
           install_prefix: "/usr",
           destdir: nil,
@@ -1139,7 +1141,7 @@ module Bootstrap
         PhaseSpec.new(
           name: "finalize-rootfs",
           description: "Strip the sysroot prefix and emit a prefix-free rootfs tarball.",
-          workspace: SysrootWorkspace::ROOTFS_WORKSPACE_PATH.to_s,
+          workspace: inner_sources_workspace_value,
           environment: "rootfs-finalize",
           install_prefix: "/usr",
           destdir: rootfs_destdir,
@@ -1795,17 +1797,12 @@ module Bootstrap
         end
       build_state = SysrootBuildState.new(workspace: workspace)
       output = build_state.plan_path_path.to_s
-      workspace_root =
-        if SysrootWorkspace.inner_rootfs_marker_present?
-          SysrootWorkspace::ROOTFS_WORKSPACE_PATH.to_s
-        else
-          SysrootWorkspace::INNER_WORKSPACE_PATH_IN_OUTER.to_s
-        end
+      workspace_root = Bootstrap::BuildPlanUtils::DEFAULT_WORKSPACE_ROOT
       force = false
       write_overrides = false
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-plan-write [options]") do |p|
         p.on("--output PATH", "Write the plan to PATH (default: #{output})") { |path| output = path }
-        p.on("--workspace-root PATH", "Rewrite plan workdirs rooted at #{SysrootWorkspace::ROOTFS_WORKSPACE_PATH} to PATH (default: #{workspace_root})") { |path| workspace_root = path }
+        p.on("--workspace-root PATH", "Rewrite plan workdirs rooted at #{Bootstrap::BuildPlanUtils::DEFAULT_WORKSPACE_ROOT} to PATH (default: #{workspace_root})") { |path| workspace_root = path }
         p.on("--force", "Overwrite an existing plan at the output path") { force = true }
         p.on("--override", "Write sysroot-build-overrides.json with differences from the existing plan") { write_overrides = true }
       end
