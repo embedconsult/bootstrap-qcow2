@@ -91,13 +91,13 @@ module Bootstrap
 
     # Detect the workspace for the current namespace, optionally anchored by *host_workdir*.
     def self.detect(host_workdir : Path? = DEFAULT_HOST_WORKDIR) : SysrootWorkspace
-      if File.exists?(INNER_MARKER_PATH)
-        return new(Path["/"], rootfs_workspace_path: nil, outer_rootfs_path: nil)
-      end
-
       if host_workdir
         candidate = from_host_workdir(host_workdir)
         return candidate if File.exists?(candidate.marker_path)
+      end
+
+      if File.exists?(INNER_MARKER_PATH)
+        return new(Path["/"], rootfs_workspace_path: nil, outer_rootfs_path: nil)
       end
 
       if File.exists?(OUTER_MARKER_PATH)
