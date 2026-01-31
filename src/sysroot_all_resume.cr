@@ -1,7 +1,6 @@
 require "file_utils"
 require "log"
 require "path"
-require "./alpine_setup"
 require "./build_plan"
 require "./cli"
 require "./sysroot_build_state"
@@ -13,10 +12,8 @@ module Bootstrap
   class SysrootAllResume < CLI
     # Ordered stage list for the --all workflow.
     STAGE_ORDER = [
-      "download-sources",
       "plan-write",
       "sysroot-runner",
-      "rootfs-tarball",
     ]
 
     # Result describing the stage to resume and its supporting details.
@@ -78,7 +75,7 @@ module Bootstrap
       end
 
       plan_path = build_state.plan_path_path
-      plan = BuildPlan.from_json(File.read(plan_path))
+      plan = BuildPlan.parse(File.read(plan_path))
       if state_exists
         state = SysrootBuildState.load(workspace, build_state.state_path)
         plan_digest = SysrootBuildState.digest_for?(plan_path.to_s)
@@ -88,7 +85,7 @@ module Bootstrap
 
         next_phase, next_step = next_incomplete_step(plan, state)
         if next_phase.nil?
-          return Decision.new("rootfs-tarball", "build complete", plan_path: plan_path, state_path: build_state.state_path)
+          return Decision.new("complete", "build complete", plan_path: plan_path, state_path: build_state.state_path)
         end
 
         resume_phase = next_phase
@@ -145,7 +142,7 @@ module Bootstrap
       end
     end
 
-    # Execute the full --all flow (download, plan, runner, tarball).
+    # Execute the full --all flow (plan write + runner).
     private def self.run_all(args : Array(String)) : Int32
       host_workdir = SysrootBuilder::DEFAULT_HOST_WORKDIR
       architecture = SysrootBuilder::DEFAULT_ARCH
@@ -223,24 +220,19 @@ module Bootstrap
 
       default_rootfs_path = builder.sources_dir / builder.rootfs_tarball_name
       rootfs_tarball = base_rootfs_path || (File.exists?(default_rootfs_path) ? default_rootfs_path : nil)
-      use_bq2_rootfs = rootfs_tarball ? bq2_rootfs_tarball?(rootfs_tarball) : false
-      use_alpine_setup = rootfs_tarball.nil? || !use_bq2_rootfs
-      puts "base_rootfs=#{rootfs_tarball || "(download)"} use_alpine_setup=#{use_alpine_setup}"
+      puts "base_rootfs=#{rootfs_tarball || "(download)"}"
 
       stages = SysrootAllResume::STAGE_ORDER
-      start_stage = "download-sources"
+      start_stage = "plan-write"
       resume_phase : String? = nil
       resume_step : String? = nil
       if resume
         workspace = builder.workspace
         decision = SysrootAllResume.new(workspace).decide
-        missing_sources = builder.missing_source_archives
-        unless missing_sources.empty?
-          reason = "missing #{missing_sources.size} cached source archive(s)"
-          decision = Decision.new("download-sources", reason)
-        end
         puts decision.log_message
-        return 0 if decision.stage == "complete"
+        if decision.stage == "complete"
+          return copy_rootfs_tarball(builder) ? 0 : 1
+        end
         start_stage = decision.stage
         resume_phase = decision.resume_phase
         resume_step = decision.resume_step
@@ -252,8 +244,6 @@ module Bootstrap
 
       stages[start_index..].each do |stage|
         case stage
-        when "download-sources"
-          time_stage(stage) { builder.download_sources }
         when "plan-write"
           time_stage(stage) do
             chroot_path = builder.generate_chroot(include_sources: true)
@@ -261,15 +251,9 @@ module Bootstrap
           end
         when "sysroot-runner"
           time_stage(stage) do
-            builder.stage_sources(skip_existing: true)
-            Log.info { "Restaged missing sources into #{builder.inner_rootfs_workspace_dir}" }
-            AlpineSetup.write_resolv_conf(builder.outer_rootfs_dir)
-            Log.info { "Starting runner exe=#{bq2_path} builder_rootfs=#{builder.outer_rootfs_dir.to_s} repo_root=#{repo_root} alpine=#{use_alpine_setup}" }
+            Log.info { "Starting runner exe=#{bq2_path} repo_root=#{repo_root}" }
             status = run_sysroot_runner(
               bq2_path,
-              builder,
-              repo_root,
-              use_alpine_setup,
               "all",
             )
             unless status.success?
@@ -277,25 +261,6 @@ module Bootstrap
               return status.exit_code
             end
           end
-        when "rootfs-tarball"
-          time_stage(stage) do
-            if File.exists?(builder.inner_rootfs_workspace_dir / builder.rootfs_tarball_name)
-              Log.info { "Rootfs tarball already present; skipping finalize-rootfs" }
-            else
-              status = run_sysroot_runner(
-                bq2_path,
-                builder,
-                repo_root,
-                false,
-                "finalize-rootfs",
-              )
-              unless status.success?
-                STDERR.puts "finalize-rootfs failed with exit code #{status.exit_code}"
-                return status.exit_code
-              end
-            end
-          end
-          break
         end
       end
 
@@ -343,26 +308,12 @@ module Bootstrap
       CLI.run_help
     end
 
-    # Return true when *path* looks like a bootstrap-qcow2 rootfs tarball.
-    private def self.bq2_rootfs_tarball?(path : Path) : Bool
-      File.basename(path.to_s).starts_with?("bq2-rootfs")
-    end
-
     # Run a bq2 subcommand inside the sysroot namespace.
     private def self.run_sysroot_runner(bq2_path : Path,
-                                        builder : SysrootBuilder,
-                                        repo_root : Path,
-                                        use_alpine_setup : Bool,
                                         phase : String) : Process::Status
-      bind_spec = "#{repo_root}:#{repo_root}"
       argv = [
         "sysroot-runner",
-        "--rootfs",
-        builder.outer_rootfs_dir.to_s,
-        "--bind",
-        bind_spec,
       ]
-      argv << "--alpine-setup" if use_alpine_setup
       argv.concat(["--phase", phase])
       Process.run(
         bq2_path.to_s,

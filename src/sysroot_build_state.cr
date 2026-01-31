@@ -20,7 +20,6 @@ module Bootstrap
     OVERRIDES_FILE  = "sysroot-build-overrides.json"
     REPORT_DIR_NAME = "sysroot-build-reports"
 
-    DEFAULT_PATH      = "/var/lib/#{STATE_FILE}"
     DEFAULT_PLAN      = "/var/lib/#{PLAN_FILE}"
     DEFAULT_OVERRIDES = "/var/lib/#{OVERRIDES_FILE}"
     DEFAULT_REPORTS   = "/var/lib/#{REPORT_DIR_NAME}"
@@ -85,6 +84,36 @@ module Bootstrap
                    @invalidation_reason : String? = nil,
                    @progress : Progress = Progress.new,
                    @format_version : Int32 = FORMAT_VERSION)
+    end
+
+    # Default rootfs-relative plan path used when initializing new state.
+    def self.rootfs_plan_path : String
+      DEFAULT_PLAN
+    end
+
+    # Default rootfs-relative overrides path used when initializing new state.
+    def self.rootfs_overrides_path : String
+      DEFAULT_OVERRIDES
+    end
+
+    # Default rootfs-relative report directory used when initializing new state.
+    def self.rootfs_report_dir : String
+      DEFAULT_REPORTS
+    end
+
+    # Default rootfs-relative plan path for this instance.
+    def rootfs_plan_path : String
+      self.class.rootfs_plan_path
+    end
+
+    # Default rootfs-relative overrides path for this instance.
+    def rootfs_overrides_path : String
+      self.class.rootfs_overrides_path
+    end
+
+    # Default rootfs-relative report directory for this instance.
+    def rootfs_report_dir : String
+      self.class.rootfs_report_dir
     end
 
     # Return the inner rootfs var/lib directory for this workspace.
@@ -153,9 +182,9 @@ module Bootstrap
                           overrides_path : Path? = nil,
                           report_dir : Path? = nil) : SysrootBuildState
       path ||= workspace.var_lib_dir / STATE_FILE
-      plan_path_value = DEFAULT_PLAN
-      overrides_path_value = overrides_path ? overrides_path.not_nil!.to_s : DEFAULT_OVERRIDES
-      report_dir_value = report_dir ? report_dir.not_nil!.to_s : DEFAULT_REPORTS
+      plan_path_value = rootfs_plan_path
+      overrides_path_value = overrides_path ? overrides_path.not_nil!.to_s : rootfs_overrides_path
+      report_dir_value = report_dir ? report_dir.not_nil!.to_s : rootfs_report_dir
 
       state = load?(workspace, path) || new(
         workspace: workspace,
@@ -319,13 +348,13 @@ module Bootstrap
     end
 
     private def resolved_plan_path : String
-      return plan_path unless plan_path == DEFAULT_PLAN
+      return plan_path unless plan_path == rootfs_plan_path
       plan_path_path.to_s
     end
 
     private def resolved_overrides_path : String?
       return nil unless overrides_path
-      return overrides_path.not_nil! unless overrides_path == DEFAULT_OVERRIDES
+      return overrides_path.not_nil! unless overrides_path == rootfs_overrides_path
       overrides_path_path.to_s
     end
 
@@ -387,13 +416,13 @@ module Bootstrap
     private def normalize_rootfs_paths!(workspace : SysrootWorkspace) : Nil
       var_lib_prefix = workspace.var_lib_dir.to_s
       if plan_path.starts_with?(var_lib_prefix)
-        self.plan_path = DEFAULT_PLAN
+        self.plan_path = rootfs_plan_path
       end
       if overrides_path.nil? || overrides_path.not_nil!.starts_with?(var_lib_prefix)
-        self.overrides_path = DEFAULT_OVERRIDES
+        self.overrides_path = rootfs_overrides_path
       end
       if report_dir.nil? || report_dir.not_nil!.starts_with?(var_lib_prefix)
-        self.report_dir = DEFAULT_REPORTS
+        self.report_dir = rootfs_report_dir
       end
     end
   end

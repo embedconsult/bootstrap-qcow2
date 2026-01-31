@@ -5,14 +5,17 @@ module Bootstrap
   # Rootfs workspace helpers anchored on the .bq2-rootfs marker.
   #
   # Three stable references:
-  # - inner_rootfs_path: directory that contains .bq2-rootfs.
-  # - rootfs_workspace_path: directory two levels above .bq2-rootfs.
-  # - outer_rootfs_path: <host_workdir>/rootfs on the host (or / in the outer rootfs).
+  # - inner_rootfs_path: directory that contains .bq2-rootfs (host:
+  #   <host_workdir>/rootfs/workspace/rootfs).
+  # - rootfs_workspace_path: directory that contains the inner rootfs (host:
+  #   <host_workdir>/rootfs/workspace, outer rootfs: /workspace).
+  # - outer_rootfs_path: directory containing the rootfs workspace (host:
+  #   <host_workdir>/rootfs, outer rootfs: /).
   #
   # The outer rootfs lives at <host_workdir>/rootfs on the host, and at / when
   # running inside the outer rootfs namespace. The rootfs workspace lives at
   # <host_workdir>/rootfs/workspace on the host and at /workspace in the outer
-  # rootfs.
+  # rootfs namespace.
   class SysrootWorkspace
     ROOTFS_MARKER_NAME   = ".bq2-rootfs"
     DEFAULT_HOST_WORKDIR = Path["data/sysroot"]
@@ -44,6 +47,9 @@ module Bootstrap
     # Create a workspace rooted at *host_workdir*, ensuring marker + dirs exist.
     def self.create(host_workdir : Path) : SysrootWorkspace
       workspace = from_host_workdir(host_workdir)
+      FileUtils.mkdir_p(workspace.outer_rootfs_path)
+      FileUtils.mkdir_p(workspace.rootfs_workspace_path)
+      FileUtils.mkdir_p(workspace.inner_rootfs_path)
       FileUtils.mkdir_p(workspace.var_lib_dir)
       FileUtils.mkdir_p(workspace.inner_workspace_path)
       File.write(workspace.marker_path, "bq2-rootfs\n") unless File.exists?(workspace.marker_path)

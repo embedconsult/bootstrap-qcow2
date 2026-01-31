@@ -163,7 +163,7 @@ describe Bootstrap::SysrootBuilder do
   it "lists build phase names" do
     with_temp_workdir do |_dir|
       phases = Bootstrap::SysrootBuilder.new.phase_specs.map(&.name)
-      phases.should eq ["sysroot-from-alpine", "rootfs-from-sysroot", "system-from-sysroot", "tools-from-system", "finalize-rootfs"]
+      phases.should eq ["host-setup", "sysroot-from-alpine", "rootfs-from-sysroot", "system-from-sysroot", "tools-from-system", "finalize-rootfs"]
     end
   end
 
@@ -269,11 +269,11 @@ describe Bootstrap::SysrootBuilder do
       builder = StubBuilder.new
       builder.override_packages = [pkg, musl, busybox, linux_headers]
       plan = builder.build_plan
-      plan.phases.map(&.name).should eq ["sysroot-from-alpine", "rootfs-from-sysroot", "system-from-sysroot", "finalize-rootfs"]
-      sysroot_phase = plan.phases.first
+      plan.phases.map(&.name).should eq ["host-setup", "sysroot-from-alpine", "rootfs-from-sysroot", "system-from-sysroot", "finalize-rootfs"]
+      sysroot_phase = plan.phases.find(&.name.==("sysroot-from-alpine")).not_nil!
       sysroot_phase.install_prefix.should eq "/opt/sysroot"
       sysroot_phase.destdir.should be_nil
-      sysroot_phase.steps.size.should eq 3
+      sysroot_phase.steps.size.should eq 4
       sysroot_phase.steps.find(&.name.==("pkg")).not_nil!.configure_flags.should eq ["--foo"]
 
       rootfs_phase = plan.phases.find(&.name.==("rootfs-from-sysroot")).not_nil!
@@ -302,8 +302,8 @@ describe Bootstrap::SysrootBuilder do
       ]
       plan_path = builder.write_plan
       File.exists?(plan_path).should be_true
-      plan = Bootstrap::BuildPlan.from_json(File.read(plan_path))
-      plan.phases.map(&.name).should eq ["sysroot-from-alpine", "rootfs-from-sysroot", "system-from-sysroot", "finalize-rootfs"]
+      plan = Bootstrap::BuildPlan.parse(File.read(plan_path))
+      plan.phases.map(&.name).should eq ["host-setup", "sysroot-from-alpine", "rootfs-from-sysroot", "system-from-sysroot", "finalize-rootfs"]
     end
   end
 
@@ -415,59 +415,23 @@ describe Bootstrap::SysrootBuilder do
     end
   end
 
-  it "generates a chroot tarball" do
+  it "rejects generating a chroot tarball" do
     with_temp_workdir do |dir|
-      tar_dir = dir / "tarroot"
-      FileUtils.mkdir_p(tar_dir)
-      File.write(tar_dir / "etc.txt", "config")
-      tarball = dir / "miniroot.tar"
-      Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
-
       builder = StubBuilder.new
-      builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
-      builder.skip_stage_sources = true
-      builder.fake_tarball = tarball
       output = dir / "chroot.tar.gz"
-      builder.generate_chroot_tarball(output)
-      File.exists?(output).should be_true
+      expect_raises(Exception, /sysroot-builder no longer generates tarballs/) do
+        builder.generate_chroot_tarball(output)
+      end
     end
   end
 
-  it "uses a default tarball location when output is omitted" do
+  it "rejects writing a tarball for an existing rootfs" do
     with_temp_workdir do |dir|
-      tar_dir = dir / "tarroot"
-      FileUtils.mkdir_p(tar_dir)
-      File.write(tar_dir / "etc.txt", "config")
-      tarball = dir / "miniroot.tar"
-      Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
-
       builder = StubBuilder.new
-      builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
-      builder.skip_stage_sources = true
-      builder.fake_tarball = tarball
-      output = builder.generate_chroot_tarball
-      output.expand.should eq Path["data/sysroot/sysroot.tar.gz"].expand
-      File.exists?(output).should be_true
-    end
-  end
-
-  it "can write a tarball for an existing prepared rootfs" do
-    with_temp_workdir do |dir|
-      tar_dir = dir / "tarroot"
-      FileUtils.mkdir_p(tar_dir)
-      File.write(tar_dir / "etc.txt", "config")
-      tarball = dir / "miniroot.tar"
-      Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
-
-      builder = StubBuilder.new
-      builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
-      builder.skip_stage_sources = true
-      builder.fake_tarball = tarball
-      builder.generate_chroot(include_sources: false)
-
       output = dir / "existing-rootfs.tar.gz"
-      builder.write_chroot_tarball(output)
-      File.exists?(output).should be_true
+      expect_raises(Exception, /sysroot-builder no longer generates tarballs/) do
+        builder.write_chroot_tarball(output)
+      end
     end
   end
 

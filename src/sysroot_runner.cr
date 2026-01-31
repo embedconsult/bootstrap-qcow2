@@ -7,8 +7,10 @@ require "set"
 require "time"
 require "./build_plan"
 require "./build_plan_overrides"
+require "./alpine_setup"
 require "./cli"
 require "./process_runner"
+require "./sysroot_builder"
 require "./sysroot_namespace"
 require "./sysroot_build_state"
 require "./sysroot_workspace"
@@ -82,6 +84,18 @@ module Bootstrap
       workspace = SysrootWorkspace.detect
       Log.info { "Entering inner rootfs at #{workspace.inner_rootfs_path}" }
       SysrootNamespace.enter_rootfs(workspace.inner_rootfs_path.to_s)
+    end
+
+    # Enter the outer rootfs when running on the host.
+    def self.enter_outer_rootfs! : Nil
+      workspace = SysrootWorkspace.detect(SysrootWorkspace::DEFAULT_HOST_WORKDIR)
+      Log.info { "Entering outer rootfs at #{workspace.outer_rootfs_path}" }
+      SysrootNamespace.enter_rootfs(workspace.outer_rootfs_path.to_s)
+    end
+
+    # Returns true when running in the host context (not outer/inner rootfs).
+    def self.host_context? : Bool
+      !rootfs_marker_present? && !outer_rootfs_marker_present?
     end
 
     # Raised when a command fails during a SystemRunner invocation.
@@ -174,6 +188,20 @@ module Bootstrap
             target = destdir ? "#{destdir}#{install_prefix}" : install_prefix
             FileUtils.mkdir_p(File.dirname(target))
             File.write(target, content)
+          when "download-sources"
+            host_setup_builder(phase) do |builder|
+              builder.download_sources
+            end
+          when "extract-sources"
+            host_setup_builder(phase) do |builder|
+              builder.stage_sources(skip_existing: true)
+            end
+          when "populate-seed"
+            host_setup_builder(phase) do |builder|
+              builder.populate_seed_rootfs
+            end
+          when "alpine-setup"
+            AlpineSetup.install_sysroot_runner_packages
           when "prepare-rootfs"
             idx = 0
             wrote = false
@@ -299,6 +327,53 @@ module Bootstrap
       # Returns true when shards install should be performed during build steps.
       private def run_shards_install?(env : Hash(String, String)) : Bool
         truthy_env?(env["BQ2_FORCE_SHARDS_INSTALL"]?)
+      end
+
+      private def host_setup_builder(phase : BuildPhase, &block : SysrootBuilder ->) : Nil
+        builder = build_host_setup_builder(phase)
+        with_source_branch(phase.env) do
+          yield builder
+        end
+      end
+
+      private def build_host_setup_builder(phase : BuildPhase) : SysrootBuilder
+        arch = phase.env["BQ2_ARCH"]? || SysrootBuilder::DEFAULT_ARCH
+        branch = phase.env["BQ2_BRANCH"]? || SysrootBuilder::DEFAULT_BRANCH
+        base_version = phase.env["BQ2_BASE_VERSION"]? || SysrootBuilder::DEFAULT_BASE_VERSION
+        base_rootfs_path = phase.env["BQ2_BASE_ROOTFS_PATH"]?.try { |path| Path[path].expand }
+        use_system_tar_for_sources = truthy_env?(phase.env["BQ2_USE_SYSTEM_TAR_SOURCES"]?)
+        use_system_tar_for_rootfs = truthy_env?(phase.env["BQ2_USE_SYSTEM_TAR_ROOTFS"]?)
+        preserve_ownership_for_sources = truthy_env?(phase.env["BQ2_PRESERVE_OWNERSHIP_SOURCES"]?)
+        preserve_ownership_for_rootfs = truthy_env?(phase.env["BQ2_PRESERVE_OWNERSHIP_ROOTFS"]?)
+        owner_uid = phase.env["BQ2_OWNER_UID"]?.try(&.to_i?)
+        owner_gid = phase.env["BQ2_OWNER_GID"]?.try(&.to_i?)
+        SysrootBuilder.new(
+          architecture: arch,
+          branch: branch,
+          base_version: base_version,
+          base_rootfs_path: base_rootfs_path,
+          use_system_tar_for_sources: use_system_tar_for_sources,
+          use_system_tar_for_rootfs: use_system_tar_for_rootfs,
+          preserve_ownership_for_sources: preserve_ownership_for_sources,
+          preserve_ownership_for_rootfs: preserve_ownership_for_rootfs,
+          owner_uid: owner_uid,
+          owner_gid: owner_gid,
+        )
+      end
+
+      private def with_source_branch(env : Hash(String, String), &block : -> T) : T forall T
+        override = env["BQ2_SOURCE_BRANCH"]?
+        previous = ENV["BQ2_SOURCE_BRANCH"]?
+        if override
+          ENV["BQ2_SOURCE_BRANCH"] = override
+        end
+        yield
+      ensure
+        if previous
+          ENV["BQ2_SOURCE_BRANCH"] = previous
+        else
+          ENV.delete("BQ2_SOURCE_BRANCH")
+        end
       end
 
       # Many release tarballs include pre-generated autotools artifacts
@@ -571,10 +646,21 @@ module Bootstrap
                        resume : Bool = true,
                        allow_outside_rootfs : Bool = false)
       effective_phase = phase
-      if effective_phase.environment.starts_with?("rootfs-") && !rootfs_marker_present? && outer_rootfs_marker_present?
-        enter_inner_rootfs!
-      end
-      if effective_phase.environment.starts_with?("rootfs-")
+      if effective_phase.environment.starts_with?("host-")
+        if rootfs_marker_present? || outer_rootfs_marker_present?
+          raise "Refusing to run #{effective_phase.name} (env=#{effective_phase.environment}) outside the host"
+        end
+      elsif effective_phase.environment.in?({"alpine-seed", "sysroot-toolchain"})
+        if rootfs_marker_present?
+          raise "Refusing to run #{effective_phase.name} (env=#{effective_phase.environment}) inside the inner rootfs"
+        elsif !outer_rootfs_marker_present?
+          enter_outer_rootfs!
+        end
+      elsif effective_phase.environment.starts_with?("rootfs-")
+        if !rootfs_marker_present?
+          enter_outer_rootfs! unless outer_rootfs_marker_present?
+          enter_inner_rootfs! if outer_rootfs_marker_present?
+        end
         if rootfs_marker_present?
           effective_phase = apply_rootfs_env_override(effective_phase)
         elsif !allow_outside_rootfs
@@ -668,6 +754,10 @@ module Bootstrap
         rootfs_phase = plan.phases.find { |phase| phase.environment.starts_with?("rootfs-") }
         return rootfs_phase if rootfs_phase
       end
+      if outer_rootfs_marker_present?
+        non_host = plan.phases.find { |phase| !phase.environment.starts_with?("host-") }
+        return non_host if non_host
+      end
       plan.phases.first
     end
 
@@ -721,7 +811,7 @@ module Bootstrap
     private def self.stage_report_dirs_for_destdirs(plan : BuildPlan) : Nil
       plan.phases.each do |phase|
         next unless destdir = phase.destdir
-        report_stage = File.join(destdir, SysrootBuildState::DEFAULT_REPORTS.lchop('/'))
+        report_stage = File.join(destdir, SysrootBuildState.rootfs_report_dir.lchop('/'))
         FileUtils.mkdir_p(report_stage)
       end
     rescue ex
@@ -905,7 +995,6 @@ module Bootstrap
       end
       return CLI.print_help(parser) if help
 
-      rootfs_requested = !rootfs.nil?
       if rootfs
         rootfs_value = rootfs.not_nil!
         raise "Rootfs path does not exist: #{rootfs_value}" unless Dir.exists?(rootfs_value)
@@ -913,14 +1002,6 @@ module Bootstrap
         SysrootNamespace.enter_rootfs_with_setup(rootfs_value,
           extra_binds: extra_binds,
           run_alpine_setup: run_alpine_setup)
-      elsif !rootfs_marker_present? && !outer_rootfs_marker_present?
-        rootfs_value = DEFAULT_ROOTFS.to_s
-        if Dir.exists?(rootfs_value)
-          Log.info { "Entering outer rootfs at #{rootfs_value} (auto)" }
-          SysrootNamespace.enter_rootfs_with_setup(rootfs_value,
-            extra_binds: extra_binds,
-            run_alpine_setup: run_alpine_setup)
-        end
       end
 
       resolved = resolve_status_paths(nil, rootfs, nil)
@@ -983,7 +1064,7 @@ module Bootstrap
       puts(state.progress.current_phase || "(none)")
 
       if build_state.plan_exists?
-        plan = BuildPlan.from_json(File.read(build_state.plan_path_path))
+        plan = BuildPlan.parse(File.read(build_state.plan_path_path))
         next_phase = plan.phases.find do |phase|
           phase.steps.any? { |step| !state.completed?(phase.name, step.name) }
         end
