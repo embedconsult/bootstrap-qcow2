@@ -959,10 +959,14 @@ module Bootstrap
           destdir: nil,
           env: sysroot_env,
           pre_steps: [
-            build_step(
-              name: "alpine-setup",
-              strategy: "alpine-setup",
-              workdir: "/",
+            write_file_step(
+              "alpine-resolv-conf",
+              "/etc/resolv.conf",
+              rootfs_resolv_conf_content,
+            ),
+            apk_add_step(
+              "alpine-apk-add",
+              AlpineSetup::SYSROOT_RUNNER_PACKAGES,
             ),
           ],
           package_allowlist: nil,
@@ -1306,9 +1310,30 @@ module Bootstrap
       end
     end
 
+    private def package_extract_specs(specs : Array(PackageSpec)) : Array(ExtractSpec)
+      specs.flat_map do |pkg|
+        pkg.all_urls.map_with_index do |uri, idx|
+          filename = pkg.filename_for(uri)
+          build_directory =
+            if idx == 0
+              pkg.build_directory || strip_archive_extension(pkg.filename)
+            else
+              strip_archive_extension(File.basename(filename))
+            end
+          ExtractSpec.new(
+            name: pkg.name,
+            version: pkg.version,
+            filename: filename,
+            build_directory: build_directory,
+          )
+        end
+      end
+    end
+
     private def host_setup_steps : Array(BuildStep)
       workdir = @host_workdir.to_s
       package_sources = package_source_specs(packages)
+      extract_sources = package_extract_specs(packages)
       rootfs_sources = package_source_specs([base_rootfs_spec])
       [
         build_step(
@@ -1327,6 +1352,7 @@ module Bootstrap
           name: "extract-sources",
           strategy: "extract-sources",
           workdir: workdir,
+          extract_sources: extract_sources,
         ),
       ]
     end
@@ -1396,7 +1422,10 @@ module Bootstrap
                            patches : Array(String) = [] of String,
                            destdir : String? = nil,
                            build_dir : String? = nil,
-                           sources : Array(SourceSpec)? = nil) : BuildStep
+                           sources : Array(SourceSpec)? = nil,
+                           extract_sources : Array(ExtractSpec)? = nil,
+                           packages : Array(String)? = nil,
+                           content : String? = nil) : BuildStep
       BuildStep.new(
         name: name,
         strategy: strategy,
@@ -1408,6 +1437,9 @@ module Bootstrap
         env: env,
         build_dir: build_dir,
         sources: sources,
+        extract_sources: extract_sources,
+        packages: packages,
+        content: content,
       )
     end
 
@@ -1418,7 +1450,17 @@ module Bootstrap
         strategy: "write-file",
         workdir: "/",
         install_prefix: path,
-        env: {"CONTENT" => content},
+        content: content,
+      )
+    end
+
+    # Build an apk-add step with an explicit package list.
+    private def apk_add_step(name : String, packages : Array(String)) : BuildStep
+      build_step(
+        name: name,
+        strategy: "apk-add",
+        workdir: "/",
+        packages: packages,
       )
     end
 

@@ -187,7 +187,7 @@ describe Bootstrap::SysrootBuilder do
 
       finalize_phase = builder.phase_specs.find(&.name.==("finalize-rootfs")).not_nil!
       final_ld_step = finalize_phase.extra_steps.find(&.name.==("musl-ld-path-final")).not_nil!
-      final_ld_step.env["CONTENT"].should eq "/lib:/usr/lib\n"
+      final_ld_step.content.should eq "/lib:/usr/lib\n"
     end
   end
 
@@ -273,7 +273,7 @@ describe Bootstrap::SysrootBuilder do
       sysroot_phase = plan.phases.find(&.name.==("sysroot-from-alpine")).not_nil!
       sysroot_phase.install_prefix.should eq "/opt/sysroot"
       sysroot_phase.destdir.should be_nil
-      sysroot_phase.steps.size.should eq 4
+      sysroot_phase.steps.size.should eq 5
       sysroot_phase.steps.find(&.name.==("pkg")).not_nil!.configure_flags.should eq ["--foo"]
 
       rootfs_phase = plan.phases.find(&.name.==("rootfs-from-sysroot")).not_nil!

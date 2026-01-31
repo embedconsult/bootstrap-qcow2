@@ -183,11 +183,15 @@ module Bootstrap
             run_cmd(["cp", "-a", ".", install_root], env: env)
           when "write-file"
             raise "write-file requires step.install_prefix (file path)" unless step.install_prefix
-            content = step.env["CONTENT"]?
+            content = step.content || step.env["CONTENT"]?
             raise "write-file requires env CONTENT" unless content
             target = destdir ? "#{destdir}#{install_prefix}" : install_prefix
             FileUtils.mkdir_p(File.dirname(target))
             File.write(target, content)
+          when "apk-add"
+            packages = step.packages
+            raise "apk-add requires step.packages" unless packages
+            AlpineSetup.apk_add(packages)
           when "download-sources"
             host_setup_builder(phase) do |builder|
               builder.download_sources
@@ -637,8 +641,17 @@ module Bootstrap
       if runner.is_a?(SystemRunner) && report_dir && runner.report_dir.nil?
         effective_runner = runner.with_report_dir(report_dir)
       end
-      phases.each do |phase_plan|
+      phases.each_with_index do |phase_plan, idx|
+        if state
+          state.progress.current_phase = phase_plan.name
+          state.save(state_path ? Path[state_path] : nil)
+        end
         run_phase(phase_plan, effective_runner, report_dir: report_dir, state: state, state_path: state_path, resume: resume, allow_outside_rootfs: allow_outside_rootfs)
+        if state
+          next_phase = phases[idx + 1]?.try(&.name)
+          state.progress.current_phase = next_phase
+          state.save(state_path ? Path[state_path] : nil)
+        end
       end
     end
 
@@ -982,7 +995,7 @@ module Bootstrap
       extra_binds = [] of Tuple(Path, Path)
       run_alpine_setup = false
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-runner [options]") do |p|
-        p.on("--phase NAME", "Select build phase to run (default: first phase; use 'all' for every phase)") { |name| phase = name }
+        p.on("--phase NAME", "Select build phase to run (default: all phases)") { |name| phase = name }
         p.on("--package NAME", "Only run the named package(s); repeatable") { |name| packages << name }
         p.on("--overrides PATH", "Apply runtime overrides JSON (default: sysroot-build-overrides.json in the inner rootfs var/lib)") do |path|
           overrides_path = path
@@ -1009,6 +1022,8 @@ module Bootstrap
         end
       end
       return CLI.print_help(parser) if help
+
+      phase ||= "all"
 
       if rootfs
         rootfs_value = rootfs.not_nil!
@@ -1076,8 +1091,6 @@ module Bootstrap
       resolved = resolve_status_paths(workspace, rootfs, state_path)
       build_state = resolved.build_state
       state = SysrootBuildState.load(resolved.workspace, resolved.state_path)
-      puts(state.progress.current_phase || "(none)")
-
       if build_state.plan_exists?
         plan = BuildPlan.parse(File.read(build_state.plan_path_path))
         next_phase = plan.phases.find do |phase|
@@ -1091,6 +1104,7 @@ module Bootstrap
           puts("next_phase=(none)")
         end
       end
+      puts(state.progress.current_phase || "(none)")
 
       if (success = state.progress.last_success)
         puts("last_success=#{success.phase}/#{success.step}")

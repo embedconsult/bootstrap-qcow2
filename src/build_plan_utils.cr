@@ -27,6 +27,9 @@ module Bootstrap
             build_dir: step.build_dir ? rewrite_root(step.build_dir.not_nil!, from_root, to_root) : nil,
             clean_build: step.clean_build,
             sources: step.sources,
+            extract_sources: step.extract_sources,
+            packages: step.packages,
+            content: step.content,
           )
         end
 

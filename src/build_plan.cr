@@ -5,6 +5,22 @@ module Bootstrap
   #
   # The plan is authored in code (`SysrootBuilder`) and serialized into the chroot
   # so the runner (`SysrootRunner`) can replay it reproducibly.
+  struct ExtractSpec
+    include JSON::Serializable
+
+    getter name : String
+    getter version : String
+    getter filename : String
+    getter build_directory : String
+
+    # Describes how a source archive should be extracted.
+    def initialize(@name : String,
+                   @version : String,
+                   @filename : String,
+                   @build_directory : String)
+    end
+  end
+
   struct SourceSpec
     include JSON::Serializable
 
@@ -14,12 +30,14 @@ module Bootstrap
     getter sha256 : String?
     getter checksum_url : String?
     getter filename : String
+    getter build_directory : String?
 
     # Describes a single downloadable source archive.
     def initialize(@name : String,
                    @version : String,
                    @url : String,
                    @filename : String,
+                   @build_directory : String? = nil,
                    @sha256 : String? = nil,
                    @checksum_url : String? = nil)
     end
@@ -39,6 +57,9 @@ module Bootstrap
     getter env : Hash(String, String)
     getter clean_build : Bool
     getter sources : Array(SourceSpec)?
+    getter extract_sources : Array(ExtractSpec)?
+    getter packages : Array(String)?
+    getter content : String?
 
     # Creates a single step within a build phase.
     #
@@ -56,7 +77,10 @@ module Bootstrap
                    @env : Hash(String, String) = {} of String => String,
                    @build_dir : String? = nil,
                    @clean_build : Bool = false,
-                   @sources : Array(SourceSpec)? = nil)
+                   @sources : Array(SourceSpec)? = nil,
+                   @extract_sources : Array(ExtractSpec)? = nil,
+                   @packages : Array(String)? = nil,
+                   @content : String? = nil)
     end
   end
 

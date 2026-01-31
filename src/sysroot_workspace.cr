@@ -128,7 +128,11 @@ module Bootstrap
 
     # Return the rootfs workspace path when available for this workspace.
     def rootfs_workspace_path : Path
-      @rootfs_workspace_path || raise "Rootfs workspace path is not available for this workspace"
+      if path = @rootfs_workspace_path
+        return path
+      end
+      return host_workdir.not_nil! / ROOTFS_WORKSPACE_DIR if host_workdir
+      raise "Rootfs workspace path is not available for this workspace"
     end
 
     # Path to the .bq2-rootfs marker inside the inner rootfs.

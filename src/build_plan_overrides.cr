@@ -108,6 +108,9 @@ module Bootstrap
         build_dir: build_dir,
         clean_build: clean_build,
         sources: step.sources,
+        extract_sources: step.extract_sources,
+        packages: step.packages,
+        content: step.content,
       )
     end
 
@@ -194,6 +197,15 @@ module Bootstrap
     private def self.diff_step(phase_name : String, base_step : BuildStep, target_step : BuildStep) : StepOverride?
       if base_step.sources != target_step.sources
         raise "Target plan modifies source specs in phase #{phase_name} step #{base_step.name}; overrides cannot represent source changes"
+      end
+      if base_step.extract_sources != target_step.extract_sources
+        raise "Target plan modifies extract specs in phase #{phase_name} step #{base_step.name}; overrides cannot represent source changes"
+      end
+      if base_step.packages != target_step.packages
+        raise "Target plan modifies package specs in phase #{phase_name} step #{base_step.name}; overrides cannot represent package changes"
+      end
+      if base_step.content != target_step.content
+        raise "Target plan modifies content in phase #{phase_name} step #{base_step.name}; overrides cannot represent content changes"
       end
       workdir = base_step.workdir == target_step.workdir ? nil : target_step.workdir
       build_dir = diff_nullable_path("phase #{phase_name} step #{base_step.name} build_dir", base_step.build_dir, target_step.build_dir)
