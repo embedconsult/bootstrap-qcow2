@@ -1,132 +1,155 @@
-require "log"
+require "file_utils"
 require "path"
 
 module Bootstrap
-  # Shared defaults for sysroot workspace paths and rootfs marker detection.
+  # Rootfs workspace helpers anchored on the .bq2-rootfs marker.
   #
-  # Terminology alignment (see README "Usage" and AGENTS.md):
-  # - Host working directory: `data/sysroot` in the checkout.
-  # - Rootfs (outer): the seed/rootfs namespace running on the host.
-  # - Rootfs (inner): the generated rootfs mounted inside the outer rootfs.
-  # - Rootfs marker: `/.bq2-rootfs` inside the inner rootfs.
+  # Three stable references:
+  # - inner_rootfs_path: directory that contains .bq2-rootfs (host:
+  #   <host_workdir>/rootfs/workspace/rootfs).
+  # - rootfs_workspace_path: directory that contains the inner rootfs (host:
+  #   <host_workdir>/rootfs/workspace, outer rootfs: /workspace).
+  # - outer_rootfs_path: directory containing the rootfs workspace (host:
+  #   <host_workdir>/rootfs, outer rootfs: /).
   #
-  # What "workspace" means in each namespace:
-  # - Host working directory: `data/sysroot` is the root for builder artifacts
-  #   (cache, sources, and the seed rootfs). It is not the same as `/workspace`.
-  # - Outer rootfs: `/` is a bind mount of `data/sysroot/rootfs`. `/workspace`
-  #   is a subdirectory of that rootfs and corresponds to the host path
-  #   `data/sysroot/rootfs/workspace`.
-  # - Inner rootfs: `/workspace` is a bind mount of
-  #   `data/sysroot/rootfs/workspace/rootfs/workspace` from the host.
-  #
-  # Host path equivalents for the rootfs workspaces:
-  # - Outer rootfs workspace on host: data/sysroot/rootfs/workspace
-  # - Inner rootfs workspace on host: data/sysroot/rootfs/workspace/rootfs/workspace
-  #
-  # This module centralizes both:
-  # - Path constants for "where /workspace lives" in each context.
-  # - Detection of whether we are inside the inner rootfs (marker/env flag).
-  # - Mount/bind checks for /workspace when running in the outer rootfs.
-  #
-  # It is referenced by:
-  # - SysrootBuilder: host working directory defaults + plan roots for /workspace.
-  # - SysrootRunner: marker detection + namespace entry logic.
-  # - SysrootNamespace: default rootfs path + bind target selection.
-  module SysrootWorkspace
-    DEFAULT_WORKSPACE            = Path["data/sysroot"]
-    ROOTFS_WORKSPACE             = Path["/workspace"]
-    ROOTFS_MARKER_NAME           = ".bq2-rootfs"
-    ROOTFS_MARKER_PATH           = Path["/#{ROOTFS_MARKER_NAME}"]
-    WORKSPACE_ROOTFS             = ROOTFS_WORKSPACE / "rootfs"
-    WORKSPACE_ROOTFS_MARKER_PATH = WORKSPACE_ROOTFS / ROOTFS_MARKER_NAME
-    ROOTFS_ENV_FLAG              = "BQ2_ROOTFS"
+  # The outer rootfs lives at <host_workdir>/rootfs on the host, and at / when
+  # running inside the outer rootfs namespace. The rootfs workspace lives at
+  # <host_workdir>/rootfs/workspace on the host and at /workspace in the outer
+  # rootfs namespace.
+  class SysrootWorkspace
+    ROOTFS_MARKER_NAME   = ".bq2-rootfs"
+    DEFAULT_HOST_WORKDIR = Path["data/sysroot"]
 
-    # Returns true when a rootfs marker is present (env override or marker file).
-    def self.rootfs_marker_present? : Bool
-      return true if env_flag_enabled?(ROOTFS_ENV_FLAG)
-      File.exists?(ROOTFS_MARKER_PATH)
+    ROOTFS_WORKSPACE_PATH = Path["/workspace"]
+    OUTER_ROOTFS_DIR      = Path["rootfs"]
+    ROOTFS_WORKSPACE_DIR  = Path["rootfs/workspace"]
+    INNER_ROOTFS_DIR      = Path["rootfs/workspace/rootfs"]
+    INNER_WORKSPACE_DIR   = Path["rootfs/workspace/rootfs/workspace"]
+    INNER_VAR_LIB_DIR     = Path["rootfs/workspace/rootfs/var/lib"]
+    WORKSPACE_DIR         = INNER_WORKSPACE_DIR
+    LOG_DIR               = INNER_VAR_LIB_DIR
+
+    INNER_ROOTFS_PATH_IN_OUTER    = ROOTFS_WORKSPACE_PATH / "rootfs"
+    INNER_WORKSPACE_PATH_IN_OUTER = ROOTFS_WORKSPACE_PATH / "rootfs/workspace"
+
+    INNER_MARKER_PATH = Path["/#{ROOTFS_MARKER_NAME}"]
+    OUTER_MARKER_PATH = Path["/workspace/rootfs/#{ROOTFS_MARKER_NAME}"]
+
+    getter host_workdir : Path?
+    getter inner_rootfs_path : Path
+
+    def initialize(@inner_rootfs_path : Path,
+                   @rootfs_workspace_path : Path? = nil,
+                   @outer_rootfs_path : Path? = nil,
+                   @host_workdir : Path? = nil)
     end
 
-    # Returns true when an environment flag is set to a truthy value.
-    def self.env_flag_enabled?(name : String, default : Bool = false) : Bool
-      value = ENV[name]?
-      return default unless value
-      normalized = value.strip.downcase
-      return default if normalized.empty?
-      !(%w[0 false no].includes?(normalized))
+    # Create a workspace rooted at *host_workdir*, ensuring marker + dirs exist.
+    def self.create(host_workdir : Path) : SysrootWorkspace
+      workspace = from_host_workdir(host_workdir)
+      FileUtils.mkdir_p(workspace.outer_rootfs_path)
+      FileUtils.mkdir_p(workspace.rootfs_workspace_path)
+      FileUtils.mkdir_p(workspace.inner_rootfs_path)
+      FileUtils.mkdir_p(workspace.var_lib_dir)
+      FileUtils.mkdir_p(workspace.inner_workspace_path)
+      File.write(workspace.marker_path, "bq2-rootfs\n") unless File.exists?(workspace.marker_path)
+      workspace
     end
 
-    # Default workspace directory for sysroot operations.
-    def self.default_workspace : Path
-      return ROOTFS_WORKSPACE if rootfs_marker_present?
-      DEFAULT_WORKSPACE
+    # Build a workspace rooted at *host_workdir* without mutating the filesystem.
+    def self.from_host_workdir(host_workdir : Path) : SysrootWorkspace
+      inner_rootfs_path = host_workdir / INNER_ROOTFS_DIR
+      rootfs_workspace_path = host_workdir / ROOTFS_WORKSPACE_DIR
+      outer_rootfs_path = host_workdir / OUTER_ROOTFS_DIR
+      new(inner_rootfs_path, rootfs_workspace_path: rootfs_workspace_path, outer_rootfs_path: outer_rootfs_path, host_workdir: host_workdir)
     end
 
-    # Host path for the sysroot workspace root.
-    def self.host_workspace_root : Path
-      DEFAULT_WORKSPACE
-    end
-
-    # Host path for the outer rootfs directory (data/sysroot/rootfs).
-    def self.host_rootfs_dir(workspace : Path = host_workspace_root) : Path
-      workspace / "rootfs"
-    end
-
-    # Host path to the outer rootfs workspace (data/sysroot/rootfs/workspace).
-    def self.host_rootfs_workspace(workspace : Path = host_workspace_root) : Path
-      host_rootfs_dir(workspace) / "workspace"
-    end
-
-    # Host path to the inner rootfs directory (data/sysroot/rootfs/workspace/rootfs).
-    def self.host_inner_rootfs_dir(workspace : Path = host_workspace_root) : Path
-      host_rootfs_workspace(workspace) / "rootfs"
-    end
-
-    # Host path to the inner rootfs workspace (data/sysroot/rootfs/workspace/rootfs/workspace).
-    def self.host_inner_rootfs_workspace(workspace : Path = host_workspace_root) : Path
-      host_inner_rootfs_dir(workspace) / "workspace"
-    end
-
-    # Default rootfs directory derived from the workspace.
-    def self.default_rootfs : Path
-      default_workspace / "rootfs"
-    end
-
-    # Returns true when the workspace rootfs marker exists.
-    def self.workspace_rootfs_present? : Bool
-      File.exists?(WORKSPACE_ROOTFS_MARKER_PATH)
-    end
-
-    # Returns true when /workspace is mounted (bind or otherwise).
-    def self.workspace_mount_present? : Bool
-      mount_point?(ROOTFS_WORKSPACE)
-    end
-
-    # Returns true when /workspace is expected to be a bind mount.
-    def self.workspace_bind_required? : Bool
-      !rootfs_marker_present?
-    end
-
-    # Returns true when /workspace is expected to be mounted and is present.
-    def self.workspace_bind_ready? : Bool
-      return true unless workspace_bind_required?
-      workspace_mount_present?
-    end
-
-    # Returns true when the provided path is a mount point.
-    private def self.mount_point?(path : Path) : Bool
-      mountinfo = "/proc/self/mountinfo"
-      return false unless File.exists?(mountinfo)
-      File.each_line(mountinfo) do |line|
-        parts = line.split(" ", 6)
-        next unless parts.size >= 5
-        mount_point = parts[4]
-        return true if mount_point == path.to_s
+    # Build a workspace rooted at an outer rootfs directory.
+    def self.from_outer_rootfs(outer_rootfs_path : Path) : SysrootWorkspace
+      inner_rootfs_path = outer_rootfs_path / "workspace/rootfs"
+      rootfs_workspace_path = outer_rootfs_path / "workspace"
+      host_workdir = nil
+      if outer_rootfs_path.absolute? && outer_rootfs_path.to_s.ends_with?("/#{OUTER_ROOTFS_DIR}")
+        host_workdir = outer_rootfs_path.parent
       end
-      false
-    rescue ex
-      Log.warn { "Failed to read mountinfo: #{ex.message}" }
-      false
+      new(
+        inner_rootfs_path,
+        rootfs_workspace_path: rootfs_workspace_path,
+        outer_rootfs_path: outer_rootfs_path,
+        host_workdir: host_workdir
+      )
+    end
+
+    # Build a workspace rooted at an inner rootfs directory.
+    def self.from_inner_rootfs(inner_rootfs_path : Path) : SysrootWorkspace
+      host_workdir = nil
+      if inner_rootfs_path.absolute? && inner_rootfs_path.to_s.ends_with?("/#{INNER_ROOTFS_DIR}")
+        host_workdir = inner_rootfs_path.parent.parent.parent
+      end
+      new(inner_rootfs_path, host_workdir: host_workdir)
+    end
+
+    # Detect the workspace for the current namespace, optionally anchored by *host_workdir*.
+    def self.detect(host_workdir : Path? = DEFAULT_HOST_WORKDIR) : SysrootWorkspace
+      if host_workdir
+        candidate = from_host_workdir(host_workdir)
+        return candidate if File.exists?(candidate.marker_path)
+      end
+
+      if File.exists?(INNER_MARKER_PATH)
+        return new(Path["/"], rootfs_workspace_path: nil, outer_rootfs_path: nil)
+      end
+
+      if File.exists?(OUTER_MARKER_PATH)
+        return from_outer_rootfs(Path["/"])
+      end
+
+      return from_host_workdir(host_workdir) if host_workdir
+
+      raise "Missing inner rootfs marker at #{INNER_MARKER_PATH} or #{OUTER_MARKER_PATH}"
+    end
+
+    # Returns true when running inside the inner rootfs.
+    def self.inner_rootfs_marker_present? : Bool
+      marker_override = ENV["BQ2_ROOTFS_MARKER"]?
+      return true if marker_override && File.exists?(marker_override)
+      File.exists?(INNER_MARKER_PATH)
+    end
+
+    # Returns true when the inner rootfs marker is visible from the outer rootfs.
+    def self.outer_rootfs_marker_present? : Bool
+      File.exists?(OUTER_MARKER_PATH)
+    end
+
+    # Return the outer rootfs path when available for this workspace.
+    def outer_rootfs_path : Path
+      @outer_rootfs_path || raise "Outer rootfs path is not available for this workspace"
+    end
+
+    # Return the rootfs workspace path when available for this workspace.
+    def rootfs_workspace_path : Path
+      if path = @rootfs_workspace_path
+        return path
+      end
+      return host_workdir.not_nil! / ROOTFS_WORKSPACE_DIR if host_workdir
+      raise "Rootfs workspace path is not available for this workspace"
+    end
+
+    # Path to the .bq2-rootfs marker inside the inner rootfs.
+    def marker_path : Path
+      inner_rootfs_path / ROOTFS_MARKER_NAME
+    end
+
+    # Inner rootfs workspace path (where sources are staged).
+    def inner_workspace_path : Path
+      return host_workdir.not_nil! / WORKSPACE_DIR if host_workdir
+      inner_rootfs_path / "workspace"
+    end
+
+    # Inner rootfs var/lib directory that stores plans/state/overrides/reports.
+    def var_lib_dir : Path
+      return host_workdir.not_nil! / LOG_DIR if host_workdir
+      inner_rootfs_path / "var/lib"
     end
   end
 end

@@ -6,10 +6,11 @@ require "random/secure"
 require "set"
 require "time"
 require "./build_plan"
-require "./build_plan_reader"
 require "./build_plan_overrides"
+require "./alpine_setup"
 require "./cli"
 require "./process_runner"
+require "./sysroot_builder"
 require "./sysroot_namespace"
 require "./sysroot_build_state"
 require "./sysroot_workspace"
@@ -20,83 +21,81 @@ module Bootstrap
   # and specs. The main entrypoint registers the CLI class and dispatches into
   # the `run` helpers below.
   class SysrootRunner < CLI
-    DEFAULT_PLAN_PATH      = "/var/lib/sysroot-build-plan.json"
-    DEFAULT_OVERRIDES_PATH = "/var/lib/sysroot-build-overrides.json"
-    DEFAULT_REPORT_DIR     = "/var/lib/sysroot-build-reports"
-    DEFAULT_STATE_PATH     = SysrootBuildState::DEFAULT_PATH
+    DEFAULT_ROOTFS = SysrootWorkspace::DEFAULT_HOST_WORKDIR / SysrootWorkspace::OUTER_ROOTFS_DIR
 
-    # Returns true when a rootfs marker is present (env override or marker file).
+    # Returns true when running inside the inner rootfs.
     def self.rootfs_marker_present? : Bool
-      SysrootWorkspace.rootfs_marker_present?
+      SysrootWorkspace.inner_rootfs_marker_present?
     end
 
-    # Resolved paths used by sysroot-status and resume logic.
-    struct StatusPaths
-      getter rootfs_dir : String
-      getter state_path : String
-      getter plan_path : String
+    # Returns true when the inner rootfs marker is visible from the outer rootfs.
+    def self.outer_rootfs_marker_present? : Bool
+      SysrootWorkspace.outer_rootfs_marker_present?
+    end
 
-      def initialize(@rootfs_dir : String, @state_path : String, @plan_path : String)
+    # Resolved workspace paths used by sysroot-status and resume logic.
+    struct StatusPaths
+      getter workspace : SysrootWorkspace
+      getter build_state : SysrootBuildState
+      getter state_path : Path
+
+      def initialize(@workspace : SysrootWorkspace, @build_state : SysrootBuildState, state_path : Path? = nil)
+        @state_path = state_path || @build_state.state_path
       end
     end
 
-    # Resolve the rootfs, state, and plan paths using the same logic as sysroot-status.
-    def self.resolve_status_paths(workspace : String,
+    # Resolve the workspace and build state using the same logic as sysroot-status.
+    def self.resolve_status_paths(workspace : String?,
                                   rootfs : String?,
                                   state_path : String?) : StatusPaths
-      rootfs_dir = rootfs || default_rootfs_dir(workspace)
-      resolved_state_path = state_path || resolve_state_path(rootfs_dir, rootfs_explicit: !rootfs.nil?)
-      plan_path = File.join(rootfs_dir, "var/lib/sysroot-build-plan.json")
-      if resolved_state_path != state_path && File.exists?(resolved_state_path)
-        rootfs_root = rootfs_root_for_state(resolved_state_path)
-        plan_path = File.join(rootfs_root, "var/lib/sysroot-build-plan.json")
-        rootfs_dir = rootfs_root
+      if state_path
+        resolved_state = Path[state_path].expand
+        inner_rootfs = resolved_state.parent.parent.parent
+        workspace_instance = SysrootWorkspace.from_inner_rootfs(inner_rootfs)
+        build_state = SysrootBuildState.new(workspace: workspace_instance)
+        return StatusPaths.new(workspace_instance, build_state, resolved_state)
       end
-      StatusPaths.new(rootfs_dir, resolved_state_path, plan_path)
+
+      if workspace
+        workspace_instance = SysrootWorkspace.from_host_workdir(Path[workspace].expand)
+        build_state = SysrootBuildState.new(workspace: workspace_instance)
+        return StatusPaths.new(workspace_instance, build_state)
+      end
+
+      if rootfs
+        workspace_instance = SysrootWorkspace.from_outer_rootfs(Path[rootfs].expand)
+        build_state = SysrootBuildState.new(workspace: workspace_instance)
+        return StatusPaths.new(workspace_instance, build_state)
+      end
+
+      workspace_instance = SysrootWorkspace.detect
+      build_state = SysrootBuildState.new(workspace: workspace_instance)
+      StatusPaths.new(workspace_instance, build_state)
     end
 
-    # Return the default rootfs directory for the provided workspace.
-    private def self.default_rootfs_dir(workspace : String) : String
-      return "/" if rootfs_marker_present?
-      File.join(workspace, "rootfs")
+    private def self.workspace_for_plan(path : String) : SysrootWorkspace
+      plan_path = Path[path].expand
+      inner_rootfs = plan_path.parent.parent.parent
+      SysrootWorkspace.from_inner_rootfs(inner_rootfs)
     end
 
-    private def self.resolve_state_path(rootfs_dir : String, rootfs_explicit : Bool) : String
-      candidates = [] of String
-      if rootfs_marker_present?
-        candidates << "/"
-      else
-        candidates << rootfs_dir if rootfs_explicit
-        candidates << File.join(rootfs_dir, "workspace/rootfs")
-        candidates << rootfs_dir
-      end
-      candidates.uniq.each do |candidate|
-        candidate_state = File.join(candidate, "var/lib/sysroot-build-state.json")
-        return candidate_state if File.exists?(candidate_state)
-      end
-      if rootfs_marker_present? && File.exists?(SysrootBuildState::DEFAULT_PATH)
-        return SysrootBuildState::DEFAULT_PATH
-      end
-      File.join(rootfs_dir, "var/lib/sysroot-build-state.json")
+    # Enter the inner rootfs when running inside the outer rootfs.
+    def self.enter_inner_rootfs! : Nil
+      workspace = SysrootWorkspace.detect
+      Log.info { "Entering inner rootfs at #{workspace.inner_rootfs_path}" }
+      SysrootNamespace.enter_rootfs(workspace.inner_rootfs_path.to_s)
     end
 
-    private def self.rootfs_root_for_state(state_path : String) : String
-      File.dirname(File.dirname(File.dirname(state_path)))
+    # Enter the outer rootfs when running on the host.
+    def self.enter_outer_rootfs! : Nil
+      workspace = SysrootWorkspace.detect
+      Log.info { "Entering outer rootfs at #{workspace.outer_rootfs_path}" }
+      SysrootNamespace.enter_rootfs(workspace.outer_rootfs_path.to_s)
     end
 
-    # Enter the workspace rootfs when the marker is present.
-    def self.enter_workspace_rootfs! : Nil
-      return unless SysrootWorkspace.workspace_rootfs_present?
-      rootfs_path = SysrootWorkspace::WORKSPACE_ROOTFS.to_s
-      Log.info { "Entering workspace rootfs at #{rootfs_path}" }
-      extra_binds = [] of Tuple(Path, Path)
-      workspace_path = SysrootWorkspace::ROOTFS_WORKSPACE
-      if Dir.exists?(workspace_path)
-        extra_binds << {workspace_path, workspace_path}
-      elsif SysrootWorkspace.workspace_bind_required?
-        Log.warn { "Expected #{SysrootWorkspace::ROOTFS_WORKSPACE} bind mount is missing; namespace entry may fail" }
-      end
-      SysrootNamespace.enter_rootfs(rootfs_path, extra_binds: extra_binds)
+    # Returns true when running in the host context (not outer/inner rootfs).
+    def self.host_context? : Bool
+      !rootfs_marker_present? && !outer_rootfs_marker_present?
     end
 
     # Raised when a command fails during a SystemRunner invocation.
@@ -184,11 +183,29 @@ module Bootstrap
             run_cmd(["cp", "-a", ".", install_root], env: env)
           when "write-file"
             raise "write-file requires step.install_prefix (file path)" unless step.install_prefix
-            content = step.env["CONTENT"]?
+            content = step.content || step.env["CONTENT"]?
             raise "write-file requires env CONTENT" unless content
             target = destdir ? "#{destdir}#{install_prefix}" : install_prefix
             FileUtils.mkdir_p(File.dirname(target))
             File.write(target, content)
+          when "apk-add"
+            packages = step.packages
+            raise "apk-add requires step.packages" unless packages
+            AlpineSetup.apk_add(packages)
+          when "download-sources"
+            host_setup_builder(phase) do |builder|
+              builder.download_sources
+            end
+          when "extract-sources"
+            host_setup_builder(phase) do |builder|
+              builder.stage_sources(skip_existing: true)
+            end
+          when "populate-seed"
+            host_setup_builder(phase) do |builder|
+              builder.populate_seed_rootfs
+            end
+          when "alpine-setup"
+            AlpineSetup.install_sysroot_runner_packages
           when "prepare-rootfs"
             idx = 0
             wrote = false
@@ -314,6 +331,53 @@ module Bootstrap
       # Returns true when shards install should be performed during build steps.
       private def run_shards_install?(env : Hash(String, String)) : Bool
         truthy_env?(env["BQ2_FORCE_SHARDS_INSTALL"]?)
+      end
+
+      private def host_setup_builder(phase : BuildPhase, &block : SysrootBuilder ->) : Nil
+        builder = build_host_setup_builder(phase)
+        with_source_branch(phase.env) do
+          yield builder
+        end
+      end
+
+      private def build_host_setup_builder(phase : BuildPhase) : SysrootBuilder
+        arch = phase.env["BQ2_ARCH"]? || SysrootBuilder::DEFAULT_ARCH
+        branch = phase.env["BQ2_BRANCH"]? || SysrootBuilder::DEFAULT_BRANCH
+        base_version = phase.env["BQ2_BASE_VERSION"]? || SysrootBuilder::DEFAULT_BASE_VERSION
+        base_rootfs_path = phase.env["BQ2_BASE_ROOTFS_PATH"]?.try { |path| Path[path].expand }
+        use_system_tar_for_sources = truthy_env?(phase.env["BQ2_USE_SYSTEM_TAR_SOURCES"]?)
+        use_system_tar_for_rootfs = truthy_env?(phase.env["BQ2_USE_SYSTEM_TAR_ROOTFS"]?)
+        preserve_ownership_for_sources = truthy_env?(phase.env["BQ2_PRESERVE_OWNERSHIP_SOURCES"]?)
+        preserve_ownership_for_rootfs = truthy_env?(phase.env["BQ2_PRESERVE_OWNERSHIP_ROOTFS"]?)
+        owner_uid = phase.env["BQ2_OWNER_UID"]?.try(&.to_i?)
+        owner_gid = phase.env["BQ2_OWNER_GID"]?.try(&.to_i?)
+        SysrootBuilder.new(
+          architecture: arch,
+          branch: branch,
+          base_version: base_version,
+          base_rootfs_path: base_rootfs_path,
+          use_system_tar_for_sources: use_system_tar_for_sources,
+          use_system_tar_for_rootfs: use_system_tar_for_rootfs,
+          preserve_ownership_for_sources: preserve_ownership_for_sources,
+          preserve_ownership_for_rootfs: preserve_ownership_for_rootfs,
+          owner_uid: owner_uid,
+          owner_gid: owner_gid,
+        )
+      end
+
+      private def with_source_branch(env : Hash(String, String), &block : -> T) : T forall T
+        override = env["BQ2_SOURCE_BRANCH"]?
+        previous = ENV["BQ2_SOURCE_BRANCH"]?
+        if override
+          ENV["BQ2_SOURCE_BRANCH"] = override
+        end
+        yield
+      ensure
+        if previous
+          ENV["BQ2_SOURCE_BRANCH"] = previous
+        else
+          ENV.delete("BQ2_SOURCE_BRANCH")
+        end
       end
 
       # Many release tarballs include pre-generated autotools artifacts
@@ -491,43 +555,60 @@ module Bootstrap
     # Use `allow_outside_rootfs` to replay rootfs phases without the marker
     # present (for example, when staging into a destdir from outside a chroot).
     #
-    # When running inside the sysroot (default plan path), the runner uses the
-    # state bookmark at `/var/lib/sysroot-build-state.json` to skip previously
-    # completed steps and to persist progress for fast, iterative retries.
-    def self.run_plan(path : String = DEFAULT_PLAN_PATH,
+    # When running inside the inner rootfs, the runner uses the state bookmark
+    # under `/var/lib` to skip previously completed steps and to persist progress
+    # for fast, iterative retries.
+    def self.run_plan(path : String? = nil,
                       runner = SystemRunner.new,
                       phase : String? = nil,
                       packages : Array(String)? = nil,
                       overrides_path : String? = nil,
                       use_default_overrides : Bool = true,
-                      report_dir : String? = DEFAULT_REPORT_DIR,
+                      report_dir : String? = nil,
                       dry_run : Bool = false,
                       state_path : String? = nil,
                       resume : Bool = true,
                       allow_outside_rootfs : Bool = false)
-      raise "Missing build plan #{path}" unless File.exists?(path)
-      Log.info { "Loading build plan from #{path}" }
-      plan = BuildPlanReader.load(path)
+      workspace =
+        if path
+          workspace_for_plan(path)
+        else
+          SysrootWorkspace.detect
+        end
+      build_state = SysrootBuildState.new(workspace: workspace)
+      plan_path = path || build_state.plan_path_path.to_s
+      raise "Missing build plan #{plan_path}" unless File.exists?(plan_path)
+      Log.info { "Loading build plan from #{plan_path}" }
+      plan = BuildPlan.load(plan_path)
+      effective_report_dir = report_dir || build_state.report_dir_path.to_s
       effective_overrides_path =
         if overrides_path
           overrides_path
         elsif use_default_overrides
-          default_overrides_path_for_plan(path)
+          build_state.overrides_path_path.to_s
         end
       plan = apply_overrides(plan, effective_overrides_path) if effective_overrides_path
-      stage_report_dirs_for_destdirs(plan)
-      effective_state_path = state_path || (resume && path == DEFAULT_PLAN_PATH ? DEFAULT_STATE_PATH : nil)
-      state = effective_state_path ? SysrootBuildState.load_or_init(effective_state_path, plan_path: path, overrides_path: effective_overrides_path, report_dir: report_dir) : nil
-      state.try(&.save(effective_state_path.not_nil!)) if effective_state_path
+      stage_report_dirs_for_destdirs(plan, workspace)
+      effective_state_path =
+        if state_path
+          state_path
+        elsif resume
+          build_state.state_path.to_s
+        end
+      state_path_obj = effective_state_path ? Path[effective_state_path] : nil
+      overrides_path_obj = effective_overrides_path ? Path[effective_overrides_path] : nil
+      report_dir_obj = effective_report_dir ? Path[effective_report_dir] : nil
+      state = state_path_obj ? SysrootBuildState.load_or_init(workspace, state_path_obj, overrides_path: overrides_path_obj, report_dir: report_dir_obj) : nil
+      state.try(&.save(state_path_obj.not_nil!)) if state_path_obj
       effective_runner = runner
-      if runner.is_a?(SystemRunner) && report_dir && runner.report_dir.nil?
-        effective_runner = runner.with_report_dir(report_dir)
+      if runner.is_a?(SystemRunner) && effective_report_dir && runner.report_dir.nil?
+        effective_runner = runner.with_report_dir(effective_report_dir)
       end
       run_plan(plan,
         effective_runner,
         phase: phase,
         packages: packages,
-        report_dir: report_dir,
+        report_dir: effective_report_dir,
         dry_run: dry_run,
         state: state,
         state_path: effective_state_path,
@@ -542,7 +623,7 @@ module Bootstrap
                       runner = SystemRunner.new,
                       phase : String? = nil,
                       packages : Array(String)? = nil,
-                      report_dir : String? = DEFAULT_REPORT_DIR,
+                      report_dir : String? = nil,
                       dry_run : Bool = false,
                       state : SysrootBuildState? = nil,
                       state_path : String? = nil,
@@ -560,28 +641,49 @@ module Bootstrap
       if runner.is_a?(SystemRunner) && report_dir && runner.report_dir.nil?
         effective_runner = runner.with_report_dir(report_dir)
       end
-      phases.each do |phase_plan|
+      phases.each_with_index do |phase_plan, idx|
+        if state
+          state.progress.current_phase = phase_plan.name
+          state.save(state_path ? Path[state_path] : nil)
+        end
         run_phase(phase_plan, effective_runner, report_dir: report_dir, state: state, state_path: state_path, resume: resume, allow_outside_rootfs: allow_outside_rootfs)
+        if state
+          next_phase = phases[idx + 1]?.try(&.name)
+          state.progress.current_phase = next_phase
+          state.save(state_path ? Path[state_path] : nil)
+        end
       end
     end
 
     # Run a single phase from the plan.
     def self.run_phase(phase : BuildPhase,
                        runner = SystemRunner.new,
-                       report_dir : String? = DEFAULT_REPORT_DIR,
+                       report_dir : String? = nil,
                        state : SysrootBuildState? = nil,
                        state_path : String? = nil,
                        resume : Bool = true,
                        allow_outside_rootfs : Bool = false)
       effective_phase = phase
-      if phase.environment.starts_with?("rootfs-") && !rootfs_marker_present? && SysrootWorkspace.workspace_rootfs_present?
-        effective_phase = apply_rootfs_env_override(phase)
-      end
-      if !allow_outside_rootfs && effective_phase.environment.starts_with?("rootfs-") && !rootfs_marker_present?
-        enter_workspace_rootfs! if SysrootWorkspace.workspace_rootfs_present?
-      end
-      if !allow_outside_rootfs && effective_phase.environment.starts_with?("rootfs-") && !rootfs_marker_present?
-        raise "Refusing to run #{effective_phase.name} (env=#{effective_phase.environment}) outside the produced rootfs (missing #{SysrootWorkspace::ROOTFS_MARKER_PATH})"
+      if effective_phase.environment.starts_with?("host-")
+        if rootfs_marker_present? || outer_rootfs_marker_present?
+          raise "Refusing to run #{effective_phase.name} (env=#{effective_phase.environment}) outside the host"
+        end
+      elsif effective_phase.environment.in?({"alpine-seed", "sysroot-toolchain"})
+        if rootfs_marker_present?
+          raise "Refusing to run #{effective_phase.name} (env=#{effective_phase.environment}) inside the inner rootfs"
+        elsif !outer_rootfs_marker_present?
+          enter_outer_rootfs!
+        end
+      elsif effective_phase.environment.starts_with?("rootfs-")
+        if !rootfs_marker_present?
+          enter_outer_rootfs! unless outer_rootfs_marker_present?
+          enter_inner_rootfs! if outer_rootfs_marker_present?
+        end
+        if rootfs_marker_present?
+          effective_phase = apply_rootfs_env_override(effective_phase)
+        elsif !allow_outside_rootfs
+          raise "Refusing to run #{effective_phase.name} (env=#{effective_phase.environment}) outside the produced rootfs (missing #{SysrootWorkspace::ROOTFS_MARKER_NAME})"
+        end
       end
       Log.info { "Executing phase #{effective_phase.name} (env=#{effective_phase.environment}, workspace=#{effective_phase.workspace})" }
       Log.info { "**** #{effective_phase.description} ****" }
@@ -596,7 +698,7 @@ module Bootstrap
     def self.run_steps(phase : BuildPhase,
                        steps : Array(BuildStep),
                        runner = SystemRunner.new,
-                       report_dir : String? = DEFAULT_REPORT_DIR,
+                       report_dir : String? = nil,
                        state : SysrootBuildState? = nil,
                        state_path : String? = nil,
                        resume : Bool = true)
@@ -616,13 +718,13 @@ module Bootstrap
           effective_runner.run(phase, step)
           if state
             state.mark_success(phase.name, step.name)
-            state.save(state_path.not_nil!) if state_path
+            state.save(state_path ? Path[state_path] : nil)
           end
         rescue ex
           report_path = report_dir ? write_failure_report(report_dir, phase, step, ex) : nil
           if state
             state.mark_failure(phase.name, step.name, ex.message, report_path)
-            state.save(state_path.not_nil!) if state_path
+            state.save(state_path ? Path[state_path] : nil)
           end
           raise ex
         end
@@ -670,6 +772,10 @@ module Bootstrap
         rootfs_phase = plan.phases.find { |phase| phase.environment.starts_with?("rootfs-") }
         return rootfs_phase if rootfs_phase
       end
+      if outer_rootfs_marker_present?
+        non_host = plan.phases.find { |phase| !phase.environment.starts_with?("host-") }
+        return non_host if non_host
+      end
       plan.phases.first
     end
 
@@ -705,9 +811,9 @@ module Bootstrap
     end
 
     private def self.rootfs_context_label : String
-      return "Alpine" unless rootfs_marker_present?
-      return "workspace-BQ2" if SysrootWorkspace.workspace_rootfs_present?
-      "seed-BQ2"
+      return "inner-BQ2" if rootfs_marker_present?
+      return "outer-Alpine" if outer_rootfs_marker_present?
+      "Alpine"
     end
 
     private def self.apply_overrides(plan : BuildPlan, path : String) : BuildPlan
@@ -720,10 +826,20 @@ module Bootstrap
     # Ensure report directories exist for phases that stage into a destdir
     # rootfs. The build plan and overrides are treated as immutable and must
     # be staged by the builder or plan writer rather than by sysroot-runner.
-    private def self.stage_report_dirs_for_destdirs(plan : BuildPlan) : Nil
+    private def self.stage_report_dirs_for_destdirs(plan : BuildPlan, workspace : SysrootWorkspace) : Nil
+      rootfs_workspace = SysrootWorkspace::ROOTFS_WORKSPACE_PATH.to_s
       plan.phases.each do |phase|
         next unless destdir = phase.destdir
-        report_stage = File.join(destdir, DEFAULT_REPORT_DIR.lchop('/'))
+        destdir_path = Path[destdir]
+        if workspace.host_workdir
+          destdir_string = destdir_path.to_s
+          if destdir_string == rootfs_workspace || destdir_string.starts_with?(rootfs_workspace + "/")
+            suffix = destdir_string[rootfs_workspace.size..-1] || ""
+            suffix = suffix.lstrip('/')
+            destdir_path = workspace.rootfs_workspace_path / suffix
+          end
+        end
+        report_stage = destdir_path / SysrootBuildState.rootfs_report_dir.lchop('/')
         FileUtils.mkdir_p(report_stage)
       end
     rescue ex
@@ -763,13 +879,6 @@ module Bootstrap
         steps = phase.steps.map(&.name).join(", ")
         "#{phase.name} (#{phase.steps.size} steps): #{steps}"
       end.join(" | ")
-    end
-
-    private def self.default_overrides_path_for_plan(plan_path : String) : String?
-      return DEFAULT_OVERRIDES_PATH if plan_path == DEFAULT_PLAN_PATH
-      overrides_candidate = File.join(File.dirname(plan_path), File.basename(DEFAULT_OVERRIDES_PATH))
-      return overrides_candidate if File.exists?(overrides_candidate)
-      nil
     end
 
     # Creates a minimal directory skeleton for `DESTDIR` installs. The intent is
@@ -873,14 +982,12 @@ module Bootstrap
 
     # Run build plan phases/steps inside the sysroot.
     private def self.run_runner(args : Array(String)) : Int32
-      plan_path = SysrootRunner::DEFAULT_PLAN_PATH
-      plan_explicit = false
       phase : String? = nil
       packages = [] of String
       overrides_path : String? = nil
       use_default_overrides = true
-      report_dir : String? = SysrootRunner::DEFAULT_REPORT_DIR
-      state_path : String? = nil
+      report_dir : String? = nil
+      report_explicit = false
       dry_run = false
       resume = true
       allow_outside_rootfs = false
@@ -888,13 +995,9 @@ module Bootstrap
       extra_binds = [] of Tuple(Path, Path)
       run_alpine_setup = false
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-runner [options]") do |p|
-        p.on("--plan PATH", "Read the build plan from PATH (default: #{SysrootRunner::DEFAULT_PLAN_PATH})") do |path|
-          plan_path = path
-          plan_explicit = true
-        end
-        p.on("--phase NAME", "Select build phase to run (default: first phase; use 'all' for every phase)") { |name| phase = name }
+        p.on("--phase NAME", "Select build phase to run (default: all phases)") { |name| phase = name }
         p.on("--package NAME", "Only run the named package(s); repeatable") { |name| packages << name }
-        p.on("--overrides PATH", "Apply runtime overrides JSON (default: #{SysrootRunner::DEFAULT_OVERRIDES_PATH} when using the default plan path)") do |path|
+        p.on("--overrides PATH", "Apply runtime overrides JSON (default: sysroot-build-overrides.json in the inner rootfs var/lib)") do |path|
           overrides_path = path
           use_default_overrides = false
         end
@@ -902,9 +1005,11 @@ module Bootstrap
           overrides_path = nil
           use_default_overrides = false
         end
-        p.on("--report-dir PATH", "Write failure reports to PATH (default: #{SysrootRunner::DEFAULT_REPORT_DIR})") { |path| report_dir = path }
+        p.on("--report-dir PATH", "Write failure reports to PATH (default: inner rootfs var/lib/sysroot-build-reports)") do |path|
+          report_dir = path
+          report_explicit = true
+        end
         p.on("--no-report", "Disable failure report writing") { report_dir = nil }
-        p.on("--state-path PATH", "Write runner state/bookmarks to PATH (default: #{SysrootRunner::DEFAULT_STATE_PATH} when using the default plan path)") { |path| state_path = path }
         p.on("--no-resume", "Disable resume/state tracking (useful when the default state path is not writable)") { resume = false }
         p.on("--allow-outside-rootfs", "Allow running rootfs-* phases outside the produced rootfs (requires destdir overrides)") { allow_outside_rootfs = true }
         p.on("--dry-run", "List selected phases/steps and exit") { dry_run = true }
@@ -918,19 +1023,26 @@ module Bootstrap
       end
       return CLI.print_help(parser) if help
 
-      rootfs_requested = !rootfs.nil?
+      phase ||= "all"
+
       if rootfs
         rootfs_value = rootfs.not_nil!
         raise "Rootfs path does not exist: #{rootfs_value}" unless Dir.exists?(rootfs_value)
+        Log.info { "Entering outer rootfs at #{rootfs_value} (explicit --rootfs)" }
         SysrootNamespace.enter_rootfs_with_setup(rootfs_value,
           extra_binds: extra_binds,
           run_alpine_setup: run_alpine_setup)
       end
 
-      if !rootfs_requested && plan_path == SysrootRunner::DEFAULT_PLAN_PATH && !plan_explicit
-        resolved = resolve_status_paths(SysrootWorkspace.default_workspace.to_s, nil, state_path)
-        plan_path = resolved.plan_path
-        state_path ||= resolved.state_path
+      resolved = resolve_status_paths(nil, rootfs, nil)
+      build_state = resolved.build_state
+      plan_path = build_state.plan_path_path.to_s
+      state_path = build_state.state_path.to_s
+      if report_dir.nil? && !report_explicit
+        report_dir = build_state.report_dir_path.to_s
+      end
+      if overrides_path.nil? && use_default_overrides
+        overrides_path = build_state.overrides_path_path.to_s
       end
 
       SysrootRunner.run_plan(
@@ -959,29 +1071,28 @@ module Bootstrap
 
     # Print the current build status and next phase/step.
     private def self.run_status(args : Array(String)) : Int32
-      workspace = SysrootWorkspace.default_workspace.to_s
+      workspace : String? = nil
       rootfs : String? = nil
       state_path : String? = nil
+      report_dir : String? = nil
+      show_latest_report = false
+      show_latest_log = false
 
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-status [options]") do |p|
-        p.on("-w DIR", "--workspace=DIR", "Sysroot workspace directory (default: #{workspace})") { |val| workspace = val }
-        p.on("--rootfs=PATH", "Prepared rootfs directory (default: <workspace>/rootfs)") do |val|
-          rootfs = val
-        end
+        p.on("-w DIR", "--workspace=DIR", "Host workspace directory (debug only)") { |val| workspace = val }
+        p.on("--rootfs=PATH", "Prepared rootfs directory (debug only)") { |val| rootfs = val }
         p.on("--state=PATH", "Explicit sysroot build state JSON path") { |val| state_path = val }
+        p.on("--report-dir=PATH", "Override sysroot build report directory") { |val| report_dir = val }
+        p.on("--latest-report", "Print the latest failure report JSON") { show_latest_report = true }
+        p.on("--latest-log", "Print the output log from the latest failure report") { show_latest_log = true }
       end
       return CLI.print_help(parser) if help
 
       resolved = resolve_status_paths(workspace, rootfs, state_path)
-      resolved_state_path = resolved.state_path
-      raise "Missing sysroot build state at #{resolved_state_path}" unless File.exists?(resolved_state_path)
-
-      state = SysrootBuildState.load(resolved_state_path)
-      puts(state.progress.current_phase || "(none)")
-
-      plan_path = resolved.plan_path
-      if File.exists?(plan_path)
-        plan = BuildPlan.from_json(File.read(plan_path))
+      build_state = resolved.build_state
+      state = SysrootBuildState.load(resolved.workspace, resolved.state_path)
+      if build_state.plan_exists?
+        plan = BuildPlan.parse(File.read(build_state.plan_path_path))
         next_phase = plan.phases.find do |phase|
           phase.steps.any? { |step| !state.completed?(phase.name, step.name) }
         end
@@ -993,6 +1104,7 @@ module Bootstrap
           puts("next_phase=(none)")
         end
       end
+      puts(state.progress.current_phase || "(none)")
 
       if (success = state.progress.last_success)
         puts("last_success=#{success.phase}/#{success.step}")
@@ -1000,7 +1112,57 @@ module Bootstrap
       if (failure = state.progress.last_failure)
         puts("last_failure=#{failure.phase}/#{failure.step}")
       end
+
+      if show_latest_report || show_latest_log
+        report_root = report_dir || build_state.report_dir_path.to_s
+        report_root_value = report_root.not_nil!
+        report_path = resolve_latest_report_path(state, report_root_value, resolved.state_path.to_s)
+        log_path = report_path ? output_log_for_report(report_path) || report_log_path(report_path) : nil
+        if report_path
+          puts("latest_report=#{report_path}")
+          puts(File.read(report_path)) if show_latest_report
+        else
+          puts("latest_report=(missing)")
+        end
+        if show_latest_log
+          if log_path
+            puts("latest_log=#{log_path}")
+            puts(File.read(log_path)) if File.exists?(log_path)
+          else
+            puts("latest_log=(missing)")
+          end
+        end
+      end
       0
+    end
+
+    private def self.resolve_latest_report_path(state : SysrootBuildState, _report_dir : String?, state_path : String?) : String?
+      report_path = state.progress.last_failure.try(&.report_path)
+      return nil unless report_path
+      resolved = state.resolve_rootfs_path(report_path, state_path)
+      return resolved if File.exists?(resolved)
+      nil
+    end
+
+    private def self.latest_report_path(report_dir : String) : String?
+      return nil unless Dir.exists?(report_dir)
+      files = Dir.glob(File.join(report_dir, "*.json"))
+      return nil if files.empty?
+      files.sort.last
+    end
+
+    private def self.report_log_path(report_path : String) : String?
+      return nil unless report_path.ends_with?(".json")
+      candidate = report_path.sub(/\.json$/, ".log")
+      File.exists?(candidate) ? candidate : nil
+    end
+
+    private def self.output_log_for_report(report_path : String) : String?
+      json = JSON.parse(File.read(report_path))
+      json["output_log"]?.try(&.as_s?)
+    rescue ex
+      Log.warn { "Failed to parse report #{report_path}: #{ex.message}" }
+      nil
     end
 
     private def self.slugify(value : String) : String

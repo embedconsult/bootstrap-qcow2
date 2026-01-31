@@ -2,41 +2,57 @@ require "./spec_helper"
 require "../src/build_plan"
 
 describe Bootstrap::BuildPlan do
-  it "round-trips JSON with phases and steps" do
-    step = Bootstrap::BuildStep.new(
-      name: "musl",
-      strategy: "autotools",
-      workdir: "/workspace/musl",
-      configure_flags: ["--foo"],
-      patches: ["fix.patch"],
-      install_prefix: "/usr",
-      destdir: "/workspace/rootfs",
-      env: {"CC" => "clang"} of String => String,
-      build_dir: "/workspace/musl-build",
-      clean_build: true,
-    )
+  it "rejects the legacy unphased plan format" do
+    json = <<-JSON
+    [
+      {
+        "name": "musl",
+        "strategy": "autotools",
+        "workdir": "/workspace/musl-1.2.5",
+        "configure_flags": ["--disable-shared"],
+        "patches": [],
+        "sysroot_prefix": "/opt/sysroot"
+      },
+      {
+        "name": "busybox",
+        "strategy": "busybox",
+        "workdir": "/workspace/busybox-1_36_1",
+        "configure_flags": [],
+        "patches": ["patches/busybox.patch"],
+        "sysroot_prefix": "/opt/sysroot"
+      }
+    ]
+    JSON
 
-    phase = Bootstrap::BuildPhase.new(
-      name: "rootfs-from-sysroot",
-      description: "test phase",
-      workspace: "/workspace",
-      environment: "sysroot-toolchain",
-      install_prefix: "/usr",
-      destdir: "/workspace/rootfs",
-      env: {"PATH" => "/opt/sysroot/bin:/usr/bin"} of String => String,
-      steps: [step],
-    )
+    expect_raises(Exception, /Legacy build plan format is not supported/) do
+      Bootstrap::BuildPlan.parse(json)
+    end
+  end
 
-    plan = Bootstrap::BuildPlan.new([phase])
-    parsed = Bootstrap::BuildPlan.from_json(plan.to_json)
+  it "parses the phased plan format" do
+    plan = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "phase-a",
+        description: "phase a",
+        workspace: "/workspace",
+        environment: "test",
+        install_prefix: "/opt/sysroot",
+        steps: [
+          Bootstrap::BuildStep.new(
+            name: "m4",
+            strategy: "autotools",
+            workdir: "/workspace/m4-1.4.19",
+            configure_flags: [] of String,
+            patches: [] of String,
+          ),
+        ],
+      ),
+    ])
 
-    parsed.format_version.should eq 1
+    parsed = Bootstrap::BuildPlan.parse(plan.to_json)
+    parsed.format_version.should eq 2
     parsed.phases.size.should eq 1
-    parsed.phases.first.name.should eq "rootfs-from-sysroot"
-    parsed.phases.first.destdir.should eq "/workspace/rootfs"
-    parsed.phases.first.steps.first.install_prefix.should eq "/usr"
-    parsed.phases.first.steps.first.env["CC"].should eq "clang"
-    parsed.phases.first.steps.first.build_dir.should eq "/workspace/musl-build"
-    parsed.phases.first.steps.first.clean_build.should eq true
+    parsed.phases.first.name.should eq "phase-a"
+    parsed.phases.first.steps.first.name.should eq "m4"
   end
 end
