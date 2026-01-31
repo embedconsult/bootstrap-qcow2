@@ -565,7 +565,16 @@ module Bootstrap
                       state_path : String? = nil,
                       resume : Bool = true,
                       allow_outside_rootfs : Bool = false)
-      workspace = path ? workspace_for_plan(path) : SysrootWorkspace.detect(SysrootWorkspace::DEFAULT_HOST_WORKDIR)
+      workspace =
+        if path
+          workspace_for_plan(path)
+        else
+          begin
+            SysrootWorkspace.detect
+          rescue
+            SysrootWorkspace.detect(SysrootWorkspace::DEFAULT_HOST_WORKDIR)
+          end
+        end
       build_state = SysrootBuildState.new(workspace: workspace)
       plan_path = path || build_state.plan_path_path.to_s
       raise "Missing build plan #{plan_path}" unless File.exists?(plan_path)
@@ -809,6 +818,7 @@ module Bootstrap
     # rootfs. The build plan and overrides are treated as immutable and must
     # be staged by the builder or plan writer rather than by sysroot-runner.
     private def self.stage_report_dirs_for_destdirs(plan : BuildPlan) : Nil
+      return unless SysrootWorkspace.outer_rootfs_marker_present?
       plan.phases.each do |phase|
         next unless destdir = phase.destdir
         report_stage = File.join(destdir, SysrootBuildState.rootfs_report_dir.lchop('/'))
