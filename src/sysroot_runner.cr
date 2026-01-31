@@ -570,9 +570,9 @@ module Bootstrap
           workspace_for_plan(path)
         else
           begin
-            SysrootWorkspace.detect
-          rescue
             SysrootWorkspace.detect(SysrootWorkspace::DEFAULT_HOST_WORKDIR)
+          rescue
+            SysrootWorkspace.detect
           end
         end
       build_state = SysrootBuildState.new(workspace: workspace)
