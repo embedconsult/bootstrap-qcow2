@@ -69,7 +69,7 @@ shards build
 	# Or run every phase in order:
 	./bin/bq2 sysroot-runner --phase all
 
-# Default (no args): show resume status + help (use --all --resume to continue a build)
+# Default (no args): show resume status + help (use sysroot --resume to continue a build)
 ./bin/bq2
 ```
 
@@ -89,10 +89,10 @@ namespace runner still has access to host files that are reachable from the sysr
 and it requires kernel support for unprivileged namespaces to work at all. If your kernel
 disables user namespaces, enable the setting explicitly.
 
-#### Resuming `--all` workflows (host)
+#### Resuming `sysroot` workflows (host)
 
-Use `./bin/bq2 --all --resume` from the host checkout to continue a partially completed
-build. The resume logic
+`bq2 sysroot` resumes by default. Use `./bin/bq2 sysroot --no-resume` to restart from
+scratch, or `./bin/bq2 sysroot --resume` to be explicit about resuming. The resume logic
 selects the earliest incomplete stage in the following order:
 
 1. `download-sources` (source cache missing)

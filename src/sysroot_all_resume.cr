@@ -9,11 +9,11 @@ require "./sysroot_builder"
 require "./sysroot_workspace"
 
 module Bootstrap
-  # Determines the earliest resume stage for `bq2 --all --resume`.
+  # Determines the earliest resume stage for `bq2 sysroot --resume`.
   class SysrootAllResume < CLI
     ROOTFS_MARKER_NAME        = ".bq2-rootfs"
     WORKSPACE_ROOTFS_RELATIVE = Path["workspace/rootfs"]
-    # Ordered stage list for the --all workflow.
+    # Ordered stage list for the sysroot workflow.
     STAGE_ORDER = [
       "download-sources",
       "plan-write",
@@ -80,7 +80,7 @@ module Bootstrap
       @state_path = Path[resolved.state_path]
     end
 
-    # Determine the earliest incomplete stage for `--all --resume`.
+    # Determine the earliest incomplete stage for `sysroot --resume`.
     def decide : Decision
       missing_sources = builder.missing_source_archives
       unless missing_sources.empty?
@@ -138,12 +138,12 @@ module Bootstrap
 
     # Return the default command name used by bq2.
     def self.command_line_override : String?
-      "default"
+      "sysroot"
     end
 
     # Return additional command aliases handled by this class.
     def self.aliases : Array(String)
-      ["--all"]
+      ["default"]
     end
 
     # Summarize the default command behavior for help output.
@@ -151,18 +151,18 @@ module Bootstrap
       "Show resume status for the sysroot build"
     end
 
-    # Describe the help output entries for the default and --all flows.
+    # Describe the help output entries for the default and sysroot flows.
     def self.help_entries : Array(Tuple(String, String))
       [
         {"default", "Show resume status and help output"},
-        {"--all", "Build the full rootfs and capture bq2-rootfs-#{Bootstrap::VERSION}.tar.gz"},
+        {"sysroot", "Build the full rootfs and capture bq2-rootfs-#{Bootstrap::VERSION}.tar.gz"},
       ]
     end
 
-    # Dispatch the default or --all CLI entrypoints.
+    # Dispatch the default or sysroot CLI entrypoints.
     def self.run(args : Array(String), command_name : String) : Int32
       case command_name
-      when "--all"
+      when "sysroot"
         run_all(args)
       when "default"
         run_default(args)
@@ -171,7 +171,7 @@ module Bootstrap
       end
     end
 
-    # Execute the full --all flow (download, plan, runner, tarball).
+    # Execute the full sysroot flow (download, plan, runner, tarball).
     private def self.run_all(args : Array(String)) : Int32
       workspace = SysrootWorkspace.default_workspace
       architecture = SysrootBuilder::DEFAULT_ARCH
@@ -185,9 +185,9 @@ module Bootstrap
       owner_uid = nil
       owner_gid = nil
       repo_root = Path["."].expand
-      resume = false
+      resume = true
 
-      parser, _remaining, help = CLI.parse(args, "Usage: bq2 --all [options]") do |p|
+      parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot [options]") do |p|
         p.on("-w DIR", "--workspace=DIR", "Sysroot workspace directory (default: #{workspace})") { |val| workspace = Path[val] }
         p.on("-a ARCH", "--arch=ARCH", "Target architecture (default: #{architecture})") { |val| architecture = val }
         p.on("-b BRANCH", "--branch=BRANCH", "Source branch/release tag (default: #{branch})") { |val| branch = val }
@@ -209,11 +209,12 @@ module Bootstrap
           owner_gid = val.to_i
         end
         p.on("--repo-root PATH", "Path to the bootstrap-qcow2 repo (default: #{repo_root})") { |val| repo_root = Path[val].expand }
-        p.on("--resume", "Resume the --all workflow from the earliest incomplete stage") { resume = true }
+        p.on("--resume", "Resume the sysroot workflow from the earliest incomplete stage") { resume = true }
+        p.on("--no-resume", "Restart the sysroot workflow from scratch") { resume = false }
       end
       return CLI.print_help(parser) if help
 
-      puts "bq2 --all starting"
+      puts "bq2 sysroot starting"
       puts "workspace=#{workspace} arch=#{architecture} branch=#{branch} base_version=#{base_version} resume=#{resume}"
       puts "repo_root=#{repo_root}"
 
@@ -245,7 +246,7 @@ module Bootstrap
 
       bq2_path = repo_root / "bin" / "bq2"
       unless File.exists?(bq2_path)
-        STDERR.puts "Expected #{bq2_path}; run shards build && ./bin/bq2 --install before invoking --all."
+        STDERR.puts "Expected #{bq2_path}; run shards build && ./bin/bq2 --install before invoking sysroot."
         return 1
       end
 
@@ -369,7 +370,7 @@ module Bootstrap
             end
           end
         end
-        puts "\nHint: run ./bin/bq2 --all --resume to continue from this stage."
+        puts "\nHint: run ./bin/bq2 sysroot --resume to continue from this stage."
       rescue error
         puts "\nResume decision unavailable: #{error.message}"
       end
@@ -448,7 +449,7 @@ module Bootstrap
       path.to_s
     end
 
-    # Log the duration of a stage for the --all workflow.
+    # Log the duration of a stage for the sysroot workflow.
     private def self.time_stage(stage : String, &block : -> T) : T? forall T
       Log.info { "Stage #{stage} starting" }
       result = nil.as(T?)
