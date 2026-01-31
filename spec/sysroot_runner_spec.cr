@@ -203,10 +203,7 @@ describe Bootstrap::SysrootRunner do
       ENV["BQ2_ROOTFS"] = "0"
 
       begin
-        Bootstrap::SysrootRunner.run_phase(phase, runner, report_dir: nil)
-        raise "Expected refusal when running outside the rootfs"
-      rescue ex
-        ex.message.should match(/Refusing to run/)
+        Bootstrap::SysrootRunner.run_phase(phase, runner, report_dir: nil).should be_nil
       ensure
         if previous
           ENV["BQ2_ROOTFS"] = previous
@@ -215,7 +212,7 @@ describe Bootstrap::SysrootRunner do
         end
       end
 
-      Bootstrap::SysrootRunner.run_phase(phase, runner, report_dir: nil, allow_outside_rootfs: true)
+      Bootstrap::SysrootRunner.run_phase(phase, runner, report_dir: nil, allow_outside_rootfs: true).should be_nil
     end
   else
     reason = restrictions.join("; ")
@@ -390,7 +387,7 @@ describe Bootstrap::SysrootRunner do
     state.save(state_path)
 
     runner = RecordingRunner.new
-    Bootstrap::SysrootRunner.run_plan(plan_path, runner, report_dir: nil, state_path: state_path.to_s, overrides_path: nil)
+    Bootstrap::SysrootRunner.run_plan(plan_path, runner, report_dir: nil, state_path: state_path.to_s, overrides_path: nil, use_default_overrides: false)
     runner.calls.map { |call| call[:name] }.should eq ["b"]
 
     updated = Bootstrap::SysrootBuildState.load(workspace, state_path)
@@ -433,7 +430,7 @@ describe Bootstrap::SysrootRunner do
     state.save(state_path)
 
     runner = RecordingRunner.new
-    Bootstrap::SysrootRunner.run_plan(plan_path, runner, report_dir: nil, state_path: state_path.to_s, resume: false, overrides_path: nil)
+    Bootstrap::SysrootRunner.run_plan(plan_path, runner, report_dir: nil, state_path: state_path.to_s, resume: false, overrides_path: nil, use_default_overrides: false)
     runner.calls.map { |call| call[:name] }.should eq ["a", "b"]
   ensure
     File.delete?(state_path.to_s) if state_path

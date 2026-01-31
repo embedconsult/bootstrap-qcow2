@@ -1873,7 +1873,10 @@ module Bootstrap
         "--phase",
         "finalize-rootfs",
       ]
-      argv.concat(["--overrides", overrides_path]) if overrides_path
+      if (path = overrides_path)
+        argv << "--overrides"
+        argv << path
+      end
       argv << "--no-overrides" if overrides_path.nil? && !use_default_overrides
       argv.concat(["--report-dir", report_dir.not_nil!]) if report_dir
       argv << "--no-report" if report_dir.nil?
