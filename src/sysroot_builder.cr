@@ -1787,10 +1787,20 @@ module Bootstrap
 
     # Writes a freshly generated build plan JSON.
     private def self.run_plan_write(args : Array(String)) : Int32
-      workspace = SysrootWorkspace.create(SysrootBuilder::DEFAULT_HOST_WORKDIR)
+      workspace =
+        begin
+          SysrootWorkspace.detect(SysrootWorkspace::DEFAULT_HOST_WORKDIR)
+        rescue
+          SysrootWorkspace.create(SysrootBuilder::DEFAULT_HOST_WORKDIR)
+        end
       build_state = SysrootBuildState.new(workspace: workspace)
       output = build_state.plan_path_path.to_s
-      workspace_root = Bootstrap::BuildPlanUtils::DEFAULT_WORKSPACE_ROOT
+      workspace_root =
+        if SysrootWorkspace.inner_rootfs_marker_present?
+          SysrootWorkspace::ROOTFS_WORKSPACE_PATH.to_s
+        else
+          SysrootWorkspace::INNER_WORKSPACE_PATH_IN_OUTER.to_s
+        end
       force = false
       write_overrides = false
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-plan-write [options]") do |p|

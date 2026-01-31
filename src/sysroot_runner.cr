@@ -794,7 +794,7 @@ module Bootstrap
 
     private def self.rootfs_context_label : String
       return "inner-BQ2" if rootfs_marker_present?
-      return "outer-BQ2" if outer_rootfs_marker_present?
+      return "outer-Alpine" if outer_rootfs_marker_present?
       "Alpine"
     end
 
