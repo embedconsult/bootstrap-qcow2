@@ -50,7 +50,7 @@ describe Bootstrap::BuildPlan do
     ])
 
     parsed = Bootstrap::BuildPlan.parse(plan.to_json)
-    parsed.format_version.should eq 1
+    parsed.format_version.should eq 2
     parsed.phases.size.should eq 1
     parsed.phases.first.name.should eq "phase-a"
     parsed.phases.first.steps.first.name.should eq "m4"

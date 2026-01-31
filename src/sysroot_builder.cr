@@ -1290,45 +1290,38 @@ module Bootstrap
       env
     end
 
-    private def package_source_manifest_lines(specs : Array(PackageSpec)) : Array(String)
+    private def package_source_specs(specs : Array(PackageSpec)) : Array(SourceSpec)
       specs.flat_map do |pkg|
         pkg.all_urls.map_with_index do |uri, idx|
           checksum_uri = idx.zero? ? pkg.checksum_url : nil
-          [
-            pkg.name,
-            pkg.version,
-            uri.to_s,
-            pkg.sha256 || "",
-            checksum_uri ? checksum_uri.to_s : "",
-          ].join("|")
+          SourceSpec.new(
+            name: pkg.name,
+            version: pkg.version,
+            url: uri.to_s,
+            filename: pkg.filename_for(uri),
+            sha256: pkg.sha256,
+            checksum_url: checksum_uri ? checksum_uri.to_s : nil,
+          )
         end
       end
     end
 
-    private def package_source_manifest(specs : Array(PackageSpec)) : String
-      package_source_manifest_lines(specs).join("\n")
-    end
-
     private def host_setup_steps : Array(BuildStep)
       workdir = @host_workdir.to_s
-      packages_manifest = package_source_manifest(packages)
-      rootfs_manifest = package_source_manifest([base_rootfs_spec])
+      package_sources = package_source_specs(packages)
+      rootfs_sources = package_source_specs([base_rootfs_spec])
       [
         build_step(
           name: "download-sources",
           strategy: "download-sources",
           workdir: workdir,
-          env: {
-            "PACKAGE_SOURCES" => packages_manifest,
-          },
+          sources: package_sources,
         ),
         build_step(
           name: "populate-seed",
           strategy: "populate-seed",
           workdir: workdir,
-          env: {
-            "ROOTFS_SOURCE" => rootfs_manifest,
-          },
+          sources: rootfs_sources,
         ),
         build_step(
           name: "extract-sources",
@@ -1402,7 +1395,8 @@ module Bootstrap
                            configure_flags : Array(String) = [] of String,
                            patches : Array(String) = [] of String,
                            destdir : String? = nil,
-                           build_dir : String? = nil) : BuildStep
+                           build_dir : String? = nil,
+                           sources : Array(SourceSpec)? = nil) : BuildStep
       BuildStep.new(
         name: name,
         strategy: strategy,
@@ -1413,6 +1407,7 @@ module Bootstrap
         destdir: destdir,
         env: env,
         build_dir: build_dir,
+        sources: sources,
       )
     end
 

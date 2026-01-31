@@ -5,6 +5,26 @@ module Bootstrap
   #
   # The plan is authored in code (`SysrootBuilder`) and serialized into the chroot
   # so the runner (`SysrootRunner`) can replay it reproducibly.
+  struct SourceSpec
+    include JSON::Serializable
+
+    getter name : String
+    getter version : String
+    getter url : String
+    getter sha256 : String?
+    getter checksum_url : String?
+    getter filename : String
+
+    # Describes a single downloadable source archive.
+    def initialize(@name : String,
+                   @version : String,
+                   @url : String,
+                   @filename : String,
+                   @sha256 : String? = nil,
+                   @checksum_url : String? = nil)
+    end
+  end
+
   struct BuildStep
     include JSON::Serializable
 
@@ -18,6 +38,7 @@ module Bootstrap
     getter destdir : String?
     getter env : Hash(String, String)
     getter clean_build : Bool
+    getter sources : Array(SourceSpec)?
 
     # Creates a single step within a build phase.
     #
@@ -34,7 +55,8 @@ module Bootstrap
                    @destdir : String? = nil,
                    @env : Hash(String, String) = {} of String => String,
                    @build_dir : String? = nil,
-                   @clean_build : Bool = false)
+                   @clean_build : Bool = false,
+                   @sources : Array(SourceSpec)? = nil)
     end
   end
 
@@ -70,12 +92,14 @@ module Bootstrap
   class BuildPlan
     include JSON::Serializable
 
+    CURRENT_FORMAT_VERSION = 2
+
     getter format_version : Int32
     getter phases : Array(BuildPhase)
 
     # Creates a build plan. `format_version` allows forward-compatible changes
     # to the on-disk JSON schema.
-    def initialize(@phases : Array(BuildPhase), @format_version : Int32 = 1)
+    def initialize(@phases : Array(BuildPhase), @format_version : Int32 = CURRENT_FORMAT_VERSION)
     end
 
     def_equals @format_version, @phases
@@ -89,7 +113,11 @@ module Bootstrap
       if stripped.starts_with?("[")
         raise "Legacy build plan format is not supported; regenerate the plan with sysroot-builder"
       end
-      BuildPlan.from_json(json)
+      plan = BuildPlan.from_json(json)
+      unless plan.format_version == CURRENT_FORMAT_VERSION
+        raise "Unsupported build plan format version #{plan.format_version} (expected #{CURRENT_FORMAT_VERSION})"
+      end
+      plan
     end
   end
 end
