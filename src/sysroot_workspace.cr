@@ -104,6 +104,8 @@ module Bootstrap
         return from_outer_rootfs(Path["/"])
       end
 
+      return from_host_workdir(host_workdir) if host_workdir
+
       raise "Missing inner rootfs marker at #{INNER_MARKER_PATH} or #{OUTER_MARKER_PATH}"
     end
 

@@ -228,7 +228,7 @@ module Bootstrap
       resume_phase : String? = nil
       resume_step : String? = nil
       if resume
-        workspace = builder.workspace
+        workspace = SysrootWorkspace.detect
         decision = SysrootAllResume.new(workspace).decide
         puts decision.log_message
         if decision.stage == "complete"
@@ -280,7 +280,7 @@ module Bootstrap
     private def self.run_default(args : Array(String)) : Int32
       builder = SysrootBuilder.new
       begin
-        workspace = builder.workspace
+        workspace = SysrootWorkspace.detect
         decision = SysrootAllResume.new(workspace).decide
         puts(decision.log_message)
         if decision.stage == "sysroot-runner" && (state_path = decision.state_path)
