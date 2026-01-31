@@ -599,7 +599,10 @@ module Bootstrap
       overrides_path_obj = effective_overrides_path ? Path[effective_overrides_path] : nil
       report_dir_obj = effective_report_dir ? Path[effective_report_dir] : nil
       state = state_path_obj ? SysrootBuildState.load_or_init(workspace, state_path_obj, overrides_path: overrides_path_obj, report_dir: report_dir_obj) : nil
-      state.try(&.save(state_path_obj.not_nil!)) if state_path_obj
+      if state && state_path_obj
+        resolved_state_path = Path[state.resolve_path_for_context(state_path_obj.to_s)]
+        state.save(resolved_state_path)
+      end
       effective_runner = runner
       if runner.is_a?(SystemRunner) && effective_report_dir && runner.report_dir.nil?
         effective_runner = runner.with_report_dir(effective_report_dir)
@@ -642,15 +645,17 @@ module Bootstrap
         effective_runner = runner.with_report_dir(report_dir)
       end
       phases.each_with_index do |phase_plan, idx|
-        if state
+        if state && state_path
           state.progress.current_phase = phase_plan.name
-          state.save(state_path ? Path[state_path] : nil)
+          resolved_state_path = Path[state.resolve_path_for_context(state_path)]
+          state.save(resolved_state_path)
         end
         run_phase(phase_plan, effective_runner, report_dir: report_dir, state: state, state_path: state_path, resume: resume, allow_outside_rootfs: allow_outside_rootfs)
-        if state
+        if state && state_path
           next_phase = phases[idx + 1]?.try(&.name)
           state.progress.current_phase = next_phase
-          state.save(state_path ? Path[state_path] : nil)
+          resolved_state_path = Path[state.resolve_path_for_context(state_path)]
+          state.save(resolved_state_path)
         end
       end
     end
@@ -716,15 +721,23 @@ module Bootstrap
             effective_runner = SystemRunner.new(clean_build_dirs: false)
           end
           effective_runner.run(phase, step)
-          if state
+          if state && state_path
             state.mark_success(phase.name, step.name)
-            state.save(state_path ? Path[state_path] : nil)
+            resolved_state_path = Path[state.resolve_path_for_context(state_path)]
+            state.save(resolved_state_path)
           end
         rescue ex
-          report_path = report_dir ? write_failure_report(report_dir, phase, step, ex) : nil
-          if state
+          resolved_report_dir = report_dir
+          resolved_report_dir = state.resolve_path_for_context(report_dir) if report_dir && state
+          report_path_context = resolved_report_dir ? write_failure_report(resolved_report_dir, phase, step, ex) : nil
+          if state && state_path
+            report_path = report_path_context
+            if report_path_context && (workspace = state.workspace)
+              report_path = workspace.rootfs_path_for_context(report_path_context)
+            end
             state.mark_failure(phase.name, step.name, ex.message, report_path)
-            state.save(state_path ? Path[state_path] : nil)
+            resolved_state_path = Path[state.resolve_path_for_context(state_path)]
+            state.save(resolved_state_path)
           end
           raise ex
         end

@@ -137,25 +137,36 @@ describe Bootstrap::SysrootRunner do
     runner.calls.first[:phase].should eq "two"
   end
 
-  it "defaults to the first phase when not running inside the rootfs" do
+  it "defaults to the first phase when not running inside the inner rootfs" do
     steps = [Bootstrap::BuildStep.new(name: "step", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
     plan = Bootstrap::BuildPlan.new([
       Bootstrap::BuildPhase.new(name: "one", description: "a", workspace: "/workspace", environment: "alpine-seed", install_prefix: "/opt/sysroot", steps: steps),
       Bootstrap::BuildPhase.new(name: "two", description: "b", workspace: "/workspace", environment: "rootfs-system", install_prefix: "/usr", steps: steps),
     ])
 
-    previous = ENV["BQ2_ROOTFS_MARKER"]?
-    ENV.delete("BQ2_ROOTFS_MARKER")
-    begin
-      runner = RecordingRunner.new
-      Bootstrap::SysrootRunner.run_plan(plan, runner)
-      runner.calls.size.should eq 1
-      runner.calls.first[:phase].should eq "one"
-    ensure
-      if previous
-        ENV["BQ2_ROOTFS_MARKER"] = previous
-      else
-        ENV.delete("BQ2_ROOTFS_MARKER")
+    with_tempdir do |dir|
+      marker_path = dir / ".bq2-rootfs"
+      File.write(marker_path, "bq2-rootfs\n")
+      previous_inner = ENV["BQ2_ROOTFS_MARKER"]?
+      previous_outer = ENV["BQ2_OUTER_ROOTFS_MARKER"]?
+      ENV.delete("BQ2_ROOTFS_MARKER")
+      ENV["BQ2_OUTER_ROOTFS_MARKER"] = marker_path.to_s
+      begin
+        runner = RecordingRunner.new
+        Bootstrap::SysrootRunner.run_plan(plan, runner)
+        runner.calls.size.should eq 1
+        runner.calls.first[:phase].should eq "one"
+      ensure
+        if previous_inner
+          ENV["BQ2_ROOTFS_MARKER"] = previous_inner
+        else
+          ENV.delete("BQ2_ROOTFS_MARKER")
+        end
+        if previous_outer
+          ENV["BQ2_OUTER_ROOTFS_MARKER"] = previous_outer
+        else
+          ENV.delete("BQ2_OUTER_ROOTFS_MARKER")
+        end
       end
     end
   end

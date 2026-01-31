@@ -1148,7 +1148,7 @@ module Bootstrap
           workspace: inner_sources_workspace_value,
           environment: "rootfs-finalize",
           install_prefix: "/usr",
-          destdir: rootfs_destdir,
+          destdir: nil,
           env: rootfs_phase_env(sysroot_prefix),
           package_allowlist: [] of String,
           extra_steps: [
