@@ -8,9 +8,9 @@ require "./sysroot_builder"
 require "./sysroot_workspace"
 
 module Bootstrap
-  # Determines the earliest resume stage for `bq2 --all --resume`.
+  # Determines the earliest resume stage for `bq2 sysroot --resume`.
   class SysrootAllResume < CLI
-    # Ordered stage list for the --all workflow.
+    # Ordered stage list for the sysroot workflow.
     STAGE_ORDER = [
       "plan-write",
       "sysroot-runner",
@@ -62,7 +62,7 @@ module Bootstrap
       @build_state = SysrootBuildState.new(workspace: @workspace)
     end
 
-    # Determine the earliest incomplete stage for `--all --resume`.
+    # Determine the earliest incomplete stage for `sysroot --resume`.
     def decide : Decision
       plan_exists = build_state.plan_exists?
       state_exists = build_state.state_exists?
@@ -109,12 +109,12 @@ module Bootstrap
 
     # Return the default command name used by bq2.
     def self.command_line_override : String?
-      "default"
+      "sysroot"
     end
 
     # Return additional command aliases handled by this class.
     def self.aliases : Array(String)
-      ["--all"]
+      ["default"]
     end
 
     # Summarize the default command behavior for help output.
@@ -122,18 +122,18 @@ module Bootstrap
       "Show resume status for the sysroot build"
     end
 
-    # Describe the help output entries for the default and --all flows.
+    # Describe the help output entries for the default and sysroot flows.
     def self.help_entries : Array(Tuple(String, String))
       [
         {"default", "Show resume status and help output"},
-        {"--all", "Build the full rootfs and capture bq2-rootfs-#{Bootstrap::VERSION}.tar.gz"},
+        {"sysroot", "Build the full rootfs and capture bq2-rootfs-#{Bootstrap::VERSION}.tar.gz"},
       ]
     end
 
-    # Dispatch the default or --all CLI entrypoints.
+    # Dispatch the default or sysroot CLI entrypoints.
     def self.run(args : Array(String), command_name : String) : Int32
       case command_name
-      when "--all"
+      when "sysroot"
         run_all(args)
       when "default"
         run_default(args)
@@ -142,7 +142,7 @@ module Bootstrap
       end
     end
 
-    # Execute the full --all flow (plan write + runner).
+    # Execute the full sysroot flow (plan write + runner).
     private def self.run_all(args : Array(String)) : Int32
       host_workdir = SysrootBuilder::DEFAULT_HOST_WORKDIR
       architecture = SysrootBuilder::DEFAULT_ARCH
@@ -156,9 +156,9 @@ module Bootstrap
       owner_uid = nil
       owner_gid = nil
       repo_root = Path["."].expand
-      resume = false
+      resume = true
 
-      parser, _remaining, help = CLI.parse(args, "Usage: bq2 --all [options]") do |p|
+      parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot [options]") do |p|
         p.on("-a ARCH", "--arch=ARCH", "Target architecture (default: #{architecture})") { |val| architecture = val }
         p.on("-b BRANCH", "--branch=BRANCH", "Source branch/release tag (default: #{branch})") { |val| branch = val }
         p.on("-v VERSION", "--base-version=VERSION", "Base rootfs version/tag (default: #{base_version})") { |val| base_version = val }
@@ -179,11 +179,12 @@ module Bootstrap
           owner_gid = val.to_i
         end
         p.on("--repo-root PATH", "Path to the bootstrap-qcow2 repo (default: #{repo_root})") { |val| repo_root = Path[val].expand }
-        p.on("--resume", "Resume the --all workflow from the earliest incomplete stage") { resume = true }
+        p.on("--resume", "Resume the sysroot workflow from the earliest incomplete stage") { resume = true }
+        p.on("--no-resume", "Restart the sysroot workflow from scratch") { resume = false }
       end
       return CLI.print_help(parser) if help
 
-      puts "bq2 --all starting"
+      puts "bq2 sysroot starting"
       puts "host_workdir=#{host_workdir} arch=#{architecture} branch=#{branch} base_version=#{base_version} resume=#{resume}"
       puts "repo_root=#{repo_root}"
 
@@ -214,7 +215,7 @@ module Bootstrap
 
       bq2_path = repo_root / "bin" / "bq2"
       unless File.exists?(bq2_path)
-        STDERR.puts "Expected #{bq2_path}; run shards build && ./bin/bq2 --install before invoking --all."
+        STDERR.puts "Expected #{bq2_path}; run shards build && ./bin/bq2 --install before invoking sysroot."
         return 1
       end
 
@@ -242,6 +243,7 @@ module Bootstrap
       start_index = stages.index(start_stage)
       raise "Unknown resume stage #{start_stage}" unless start_index
 
+      runner_no_resume = !resume
       stages[start_index..].each do |stage|
         case stage
         when "plan-write"
@@ -255,6 +257,7 @@ module Bootstrap
             status = run_sysroot_runner(
               bq2_path,
               "all",
+              no_resume: runner_no_resume,
             )
             unless status.success?
               STDERR.puts "sysroot-runner failed with exit code #{status.exit_code}"
@@ -300,7 +303,7 @@ module Bootstrap
             end
           end
         end
-        puts "\nHint: run ./bin/bq2 --all --resume to continue from this stage."
+        puts "\nHint: run ./bin/bq2 sysroot --resume to continue from this stage."
       rescue error
         puts "\nResume decision unavailable: #{error.message}"
       end
@@ -310,10 +313,12 @@ module Bootstrap
 
     # Run a bq2 subcommand inside the sysroot namespace.
     private def self.run_sysroot_runner(bq2_path : Path,
-                                        phase : String) : Process::Status
+                                        phase : String,
+                                        no_resume : Bool = false) : Process::Status
       argv = [
         "sysroot-runner",
       ]
+      argv << "--no-resume" if no_resume
       argv.concat(["--phase", phase])
       Process.run(
         bq2_path.to_s,
@@ -324,7 +329,7 @@ module Bootstrap
       )
     end
 
-    # Log the duration of a stage for the --all workflow.
+    # Log the duration of a stage for the sysroot workflow.
     private def self.time_stage(stage : String, &block : -> T) : T? forall T
       Log.info { "Stage #{stage} starting" }
       result = nil.as(T?)

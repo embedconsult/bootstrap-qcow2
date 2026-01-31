@@ -140,7 +140,7 @@ module Bootstrap
       rootfs_value = rootfs.not_nil!
       unless Dir.exists?(rootfs_value)
         STDERR.puts "Workspace rootfs missing at #{rootfs_value}."
-        STDERR.puts "Run ./bin/bq2 --all to generate it."
+        STDERR.puts "Run ./bin/bq2 sysroot to generate it."
         return 1
       end
       Log.info do
