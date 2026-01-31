@@ -1,0 +1,12 @@
+--- a/src/llvm/lib_llvm.cr
++++ b/src/llvm/lib_llvm.cr
+@@ -23,7 +23,9 @@
+ 
+     {% unless flag?(:win32) %}
+-      @[Link("stdc++")]
++      @[Link("c++")]
++      @[Link("c++abi")]
++      @[Link("unwind")]
+       lib LibLLVM
+       end
+     {% end %}

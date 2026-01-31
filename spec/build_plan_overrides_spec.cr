@@ -49,7 +49,7 @@ describe Bootstrap::BuildPlanOverrides do
           install_prefix: "/usr",
           env: {"CC" => "clang"} of String => String,
           steps: {
-            "pkg" => Bootstrap::StepOverride.new(workdir: "/w/pkg", configure_flags_add: ["--with-foo"]),
+            "pkg" => Bootstrap::StepOverride.new(workdir: "/w/pkg", build_dir: "/w/pkg-build", clean_build: true, configure_flags_add: ["--with-foo"]),
           },
         ),
       },
@@ -60,7 +60,87 @@ describe Bootstrap::BuildPlanOverrides do
     updated.phases.first.env["PATH"].should eq "/bin"
     updated.phases.first.env["CC"].should eq "clang"
     updated.phases.first.steps.first.workdir.should eq "/w/pkg"
+    updated.phases.first.steps.first.build_dir.should eq "/w/pkg-build"
+    updated.phases.first.steps.first.clean_build.should eq true
     updated.phases.first.steps.first.configure_flags.should eq ["--with-foo"]
+  end
+
+  it "replaces configure flags when overrides provide a full list" do
+    plan = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        workspace: "/workspace",
+        environment: "test",
+        install_prefix: "/opt/sysroot",
+        steps: [
+          Bootstrap::BuildStep.new(
+            name: "pkg",
+            strategy: "autotools",
+            workdir: "/tmp",
+            configure_flags: ["--one", "--two"],
+            patches: [] of String,
+          ),
+        ],
+      ),
+    ])
+
+    overrides = Bootstrap::BuildPlanOverrides.new(
+      phases: {
+        "one" => Bootstrap::PhaseOverride.new(
+          steps: {
+            "pkg" => Bootstrap::StepOverride.new(configure_flags: ["--two", "--three"]),
+          },
+        ),
+      },
+    )
+
+    updated = overrides.apply(plan)
+    updated.phases.first.steps.first.configure_flags.should eq ["--two", "--three"]
+  end
+
+  it "builds overrides that replace configure flags when the plan changes" do
+    base = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        workspace: "/workspace",
+        environment: "test",
+        install_prefix: "/opt/sysroot",
+        steps: [
+          Bootstrap::BuildStep.new(
+            name: "pkg",
+            strategy: "autotools",
+            workdir: "/tmp",
+            configure_flags: ["--one", "--two"],
+            patches: [] of String,
+          ),
+        ],
+      ),
+    ])
+
+    target = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        workspace: "/workspace",
+        environment: "test",
+        install_prefix: "/opt/sysroot",
+        steps: [
+          Bootstrap::BuildStep.new(
+            name: "pkg",
+            strategy: "autotools",
+            workdir: "/tmp",
+            configure_flags: ["--two", "--three"],
+            patches: [] of String,
+          ),
+        ],
+      ),
+    ])
+
+    overrides = Bootstrap::BuildPlanOverrides.from_diff(base, target)
+    updated = overrides.apply(base)
+    updated.phases.first.steps.first.configure_flags.should eq ["--two", "--three"]
   end
 
   it "raises when overrides reference an unknown phase" do

@@ -1,15 +1,19 @@
 # `Bootstrap::Qcow2` coordinates qcow2 image generation and dependency checks.
 #
-# The class is currently focused on orchestrating image creation via Docker and
-# external tooling, while the rest of the project migrates toward pure
-# Crystal-based tooling.
+# Rootfs/sysroot orchestration now runs through `SysrootNamespace` and the
+# Crystal CLI tooling. qcow2 image generation is still evolving; container-based
+# steps may be reintroduced for CI once user-namespace constraints are captured
+# and a Crystal-first flow is fully defined.
 require "log"
 
 module Bootstrap
   # Semantic version of the bootstrap-qcow2 tooling.
-  VERSION = "0.1.0"
+  VERSION = "0.2.2"
 
   # Basic qcow2 wrapper that validates tools and triggers image builds.
+  #
+  # The long-term plan is to orchestrate qcow2 assembly via Crystal-only
+  # tooling and the sysroot namespace workflow.
   class Qcow2
     # Create a new qcow2 helper for the provided filename.
     def initialize(@filename : String)
@@ -61,7 +65,8 @@ module Bootstrap
       # https://github.com/gregkh/linux/archive/refs/tags/v6.12.38.tar.gz --> linux.tar.gz
     end
 
-    # Build a qcow2 image using the Docker-based pipeline.
+    # Build a qcow2 image using the legacy Docker pipeline while the
+    # Crystal-first orchestration is still being built out.
     def genQcow2
       self.class.exec(command: "docker", args: ["build", "-f", "Dockerfile.uefi_rs", "-t", "jkridner/bootstrap-qcow2", "."])
       self.class.exec(command: "docker", args: ["rm", "temp-img"])

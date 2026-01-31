@@ -3,6 +3,14 @@
 ## Scope
 These instructions apply to the entire repository unless overridden by a nested `AGENTS.md`.
 
+## Terminology
+- Host repo: the Git checkout on the host (e.g. `/home/ubuntu/workspace/bootstrap-qcow2`).
+- Host sysroot workspace: `data/sysroot` under the host repo (the default workspace on the host).
+- Rootfs (outer): the current `/` when running inside the seed/rootfs namespace (initially Alpine-based, later the generated rootfs).
+- Rootfs workspace path: `data/sysroot/rootfs/workspace` on the host; inside the outer rootfs this appears at `/workspace`.
+- Rootfs (inner): the generated rootfs used for the prefix-free environment; on the host it is `data/sysroot/rootfs/workspace/rootfs`, and inside the outer rootfs it is `/workspace/rootfs`.
+- Rootfs marker: `/.bq2-rootfs` inside the inner rootfs (used to detect that we are in the inner rootfs).
+
 ## Project direction
 - Primary goal: build a reproducible QCOW2 disk image that boots via EFI across multiple architectures, with **aarch64** as the first-class target.
 - Boot flow expectations: EFI launches a Linux kernel with a built-in initramfs that contains every tool needed to rebuild the image from source.
@@ -20,11 +28,11 @@ These instructions apply to the entire repository unless overridden by a nested 
 - No synthetic device nodes: /dev/null, /dev/zero, /dev/random, /dev/urandom (and /dev/tty when present) must be bind-mountable and writable inside the user namespace; nodev must not block these binds. If running in a container, provide /dev as tmpfs with dev,nosuid,exec (e.g., Docker: `--tmpfs /dev:rw,exec,dev,nosuid` plus device passthrough or `--privileged --security-opt seccomp=unconfined` to drop nodev).
 - Single namespace strategy: we always bind host devices (no synthetic nodes, no tmpfs /dev fallback). If binds fail, preflight will pend specs and raise clear NamespaceErrors; fix the host/runtime rather than adding workarounds.
 - Ensure `/dev` inside the container is dev-enabled.
-- Codex-assisted iteration uses `bq2 codex-namespace`, which bind-mounts host `./codex/work` into `/work` by default; `/workspace` should come from the rootfs itself. For namespace setup we now follow the LFS kernfs pattern: bind-mount host `/dev` recursively, mount proc/sys inside the namespace, and keep a single path rather than synthesizing /dev.
 
 ## Contribution guidelines
 - Favor readable, declarative Crystal code; prefer small, focused modules over sprawling scripts.
 - Avoid adding new shell scripts or Bash-centric tooling. If orchestration is required, implement it as Crystal CLI utilities.
+- Prefer the single busybox-style executable (`bq2`) with subcommands and symlinks over additional standalone binaries.
 - Keep dependency additions rare and justified in commit/PR context; prefer vendoring source or Crystal shards that align with the LLVM/Clang toolchain.
 - When touching build steps, prefer deterministic, offline-friendly workflows that keep generated artifacts reproducible.
 
@@ -57,8 +65,7 @@ See `codex/skills/bootstrap-qcow2-build-plan-iteration/SKILL.md` for Codex-orien
      - Failure reports (append-only): `/var/lib/sysroot-build-reports/*.json` (host path: `data/sysroot/rootfs/var/lib/sysroot-build-reports/*.json`)
 4. Enter the rootfs:
    - Manual shell: `./bin/sysroot-namespace --rootfs data/sysroot/rootfs -- /bin/sh`
-   - Codex-assisted iteration: `./bin/bq2 codex-namespace` (binds host `./codex/work` into `/work` by default; saves/resumes the last Codex session via `/work/.codex-session-id`).
-   - Note: steps 1–4 are typically performed manually to launch the iteration environment; Codex iteration usually begins at step 5 or step 7 depending on the prompt.
+   - Note: steps 1–4 are typically performed manually to launch the iteration environment.
 5. Confirm you are inside the intended rootfs before iterating:
    - `test -f /var/lib/sysroot-build-state.json && cat /var/lib/sysroot-build-state.json`
    - `test -f /var/lib/sysroot-build-plan.json`
@@ -69,16 +76,22 @@ See `codex/skills/bootstrap-qcow2-build-plan-iteration/SKILL.md` for Codex-orien
 7. Iterate builds without touching the plan:
    - Update tooling: `shards build && ./bin/bq2 --install`
    - Re-run the plan runner: `./bin/bq2 sysroot-runner` (auto-resumes based on `/var/lib/sysroot-build-state.json`)
+   - To fully disable overrides (including the default `/var/lib/sysroot-build-overrides.json`), use: `./bin/bq2 sysroot-runner --no-overrides`
 8. Capture lessons-learned and back-annotate:
    - On failure, read the JSON report in `/var/lib/sysroot-build-reports`.
    - Encode fixes in `/var/lib/sysroot-build-overrides.json` and rerun.
    - After a full successful round, back-port the overrides into `SysrootBuilder.phase_specs` (or helpers) in the live repo, then delete the overrides and state files and retry from scratch for reproducibility.
 
+### Notes for reproducible replays
+
+- The generated plan may reference patch paths under `/workspace/bootstrap-qcow2-<branch>/patches/...`; that directory comes from the staged bootstrap-qcow2 source tarball extracted by `sysroot-builder`.
+- If you are iterating with a live repo in `/work/bootstrap-qcow2` but the staged `/workspace/bootstrap-qcow2-<branch>` tree is missing (e.g., older rootfs/workspace), prefer regenerating the workspace; as a temporary debug-only workaround you can bind or symlink the live repo into that expected `/workspace` path.
+
 ## PR/commit expectations
 - Commit messages should summarize the behavioral change and the architecture(s) affected.
 - PR summaries should call out: target architectures, EFI/boot impacts, new dependencies (if any), and how the change advances self-hosting or Crystal-only tooling.
 - Ensure PR summaries cover all changes made on the branch, not just the latest commit.
-- For GitHub PR automation, prefer using the in-repo helper `Bootstrap::CodexUtils.create_pull_request(repo, title, head, base, body, credentials_path = "../.git-credentials")`. It reads the x-access-token from `.git-credentials` and POSTs to the GitHub REST API; inject a custom HTTP sender when testing. Avoid external CLI dependencies.
+- For GitHub PR automation, prefer using the in-repo helper `Bootstrap::GitHubUtils.create_pull_request(repo, title, head, base, body, credentials_path = "../.git-credentials")`. It reads the x-access-token from `.git-credentials` and POSTs to the GitHub REST API; inject a custom HTTP sender when testing. Avoid external CLI dependencies.
 - See `codex/skills/bootstrap-qcow2-create-pr/SKILL.md` for a Codex-oriented workflow that uses `create_pull_request` without `gh`.
 - See `codex/skills/bootstrap-qcow2-check-pr-feedback/SKILL.md` for a manual workflow to fetch PR review comments + thread comments.
 - Preferred interface is the `bq2` CLI subcommands (`github-pr-create`, `github-pr-feedback`, `github-pr-comment`) so automation remains testable/reviewable.
@@ -154,3 +167,10 @@ All mounts disappear when the process exits.
 - No persistent mounts
 - No AppArmor mediation of this tool
 - Any dependency on host paths must be explicit and intentional
+
+## Skills
+### Available skills
+- bq2-iterate: Automate sysroot iteration when the user says "iterate" or "resume iteration"; detect rootfs context, run sysroot-runner in the background, apply overrides, and back-annotate fixes. (file: /work/bootstrap-qcow2/codex/skills/bq2-iterate/SKILL.md)
+- bootstrap-qcow2-build-plan-iteration: Iterate bootstrap-qcow2 sysroot/rootfs build plans inside the container using sysroot-runner overrides, state bookmarks, and failure reports, then back-annotate stable fixes into SysrootBuilder for reproducible clean builds. (file: /work/bootstrap-qcow2/codex/skills/bootstrap-qcow2-build-plan-iteration/SKILL.md)
+- bootstrap-qcow2-create-pr: Codex-oriented workflow to create GitHub PRs via Bootstrap::GitHubUtils.create_pull_request without gh. (file: /work/bootstrap-qcow2/codex/skills/bootstrap-qcow2-create-pr/SKILL.md)
+- bootstrap-qcow2-check-pr-feedback: Manual workflow to fetch PR review comments and thread comments. (file: /work/bootstrap-qcow2/codex/skills/bootstrap-qcow2-check-pr-feedback/SKILL.md)

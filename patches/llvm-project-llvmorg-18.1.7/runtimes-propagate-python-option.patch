@@ -1,0 +1,15 @@
+--- a/llvm/runtimes/CMakeLists.txt
++++ b/llvm/runtimes/CMakeLists.txt
+@@ -243,6 +243,7 @@
+                            CMAKE_ARGS -DCOMPILER_RT_BUILD_BUILTINS=Off
+                                       -DLLVM_INCLUDE_TESTS=${LLVM_INCLUDE_TESTS}
+                                       -DLLVM_DEFAULT_TARGET_TRIPLE=${LLVM_TARGET_TRIPLE}
++                                      -DLLVM_ENABLE_PYTHON=${LLVM_ENABLE_PYTHON}
+                                       -DLLVM_ENABLE_PROJECTS_USED=${LLVM_ENABLE_PROJECTS_USED}
+                                       -DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=${LLVM_ENABLE_PER_TARGET_RUNTIME_DIR}
+                                       -DLLVM_BUILD_TOOLS=${LLVM_BUILD_TOOLS}
+@@ -346,6 +347,7 @@
+   string(REPLACE ";" "|" LLVM_ENABLE_RUNTIMES_PASSTHROUGH "${LLVM_ENABLE_RUNTIMES}")
+   list(APPEND ${name}_extra_args -DLLVM_ENABLE_RUNTIMES=${LLVM_ENABLE_RUNTIMES_PASSTHROUGH})
+   list(APPEND ${name}_extra_args -DLLVM_USE_LINKER=${LLVM_USE_LINKER})
++  list(APPEND ${name}_extra_args -DLLVM_ENABLE_PYTHON=${LLVM_ENABLE_PYTHON})

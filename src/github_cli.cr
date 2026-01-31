@@ -2,12 +2,50 @@ require "json"
 require "option_parser"
 require "path"
 require "./cli"
-require "./codex_utils"
+require "./github_utils"
 
 module Bootstrap
-  # GitHub-oriented CLI helpers built on `Bootstrap::CodexUtils`.
-  module GitHubCLI
+  # GitHub-oriented CLI helpers built on `Bootstrap::GitHubUtils`.
+  class GitHubCLI < CLI
     DEFAULT_BASE = "master"
+
+    # Return the canonical command name for GitHub feedback.
+    def self.command_line_override : String?
+      "github-pr-feedback"
+    end
+
+    # Return command aliases for GitHub helpers.
+    def self.aliases : Array(String)
+      ["github-pr-comment", "github-pr-create"]
+    end
+
+    # Summarize the GitHub CLI helpers for help output.
+    def self.summary : String
+      "GitHub pull request helper"
+    end
+
+    # Describe help output entries for GitHub CLI commands.
+    def self.help_entries : Array(Tuple(String, String))
+      [
+        {"github-pr-feedback", "Fetch PR feedback as JSON"},
+        {"github-pr-comment", "Post a PR conversation comment"},
+        {"github-pr-create", "Create a GitHub pull request"},
+      ]
+    end
+
+    # Dispatch GitHub CLI subcommands by command name.
+    def self.run(args : Array(String), command_name : String) : Int32
+      case command_name
+      when "github-pr-feedback"
+        run_pr_feedback(args)
+      when "github-pr-comment"
+        run_pr_comment(args)
+      when "github-pr-create"
+        run_pr_create(args)
+      else
+        raise "Unknown GitHub CLI command #{command_name}"
+      end
+    end
 
     # Returns `owner/repo` when *url* is a GitHub remote URL.
     def self.repo_from_url?(url : String) : String?
@@ -57,7 +95,7 @@ module Bootstrap
       raise "--repo is required (could not infer it)" unless repo
       repo_name = repo.not_nil!
 
-      feedback = CodexUtils.fetch_pull_request_feedback(
+      feedback = GitHubUtils.fetch_pull_request_feedback(
         repo_name,
         pr_number.not_nil!,
         credentials_path: credentials_path,
@@ -101,7 +139,7 @@ module Bootstrap
       end
       raise "Missing comment body (use --body or --body-file)" unless body
 
-      url = CodexUtils.create_issue_comment(
+      url = GitHubUtils.create_issue_comment(
         repo_name,
         pr_number.not_nil!,
         body.not_nil!,
@@ -127,7 +165,7 @@ module Bootstrap
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 github-pr-create [options]") do |p|
         p.on("--repo REPO", "GitHub repo (owner/name). Defaults from repo/env when possible") { |val| repo = val }
         p.on("--title TITLE", "PR title") { |val| title = val }
-        p.on("--head BRANCH", "Head branch (e.g. codex/my-branch)") { |val| head = val }
+        p.on("--head BRANCH", "Head branch (e.g. feature/my-branch)") { |val| head = val }
         p.on("--base BRANCH", "Base branch (default: #{base})") { |val| base = val }
         p.on("--body TEXT", "PR body") { |val| body = val }
         p.on("--body-file PATH", "Read PR body from PATH") { |val| body_file = val }
@@ -145,7 +183,7 @@ module Bootstrap
       end
       body ||= ""
 
-      url = CodexUtils.create_pull_request(
+      url = GitHubUtils.create_pull_request(
         repo_name,
         title.not_nil!,
         head.not_nil!,

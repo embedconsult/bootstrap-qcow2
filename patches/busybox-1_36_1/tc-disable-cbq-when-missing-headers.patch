@@ -1,7 +1,7 @@
 diff --git a/networking/tc.c b/networking/tc.c
 --- a/networking/tc.c
 +++ b/networking/tc.c
-@@ -231,6 +231,10 @@ static int cbq_parse_opt(int argc, char **argv, struct nlmsghdr *n)
+@@ -233,6 +233,10 @@
  #endif
  static int cbq_print_opt(struct rtattr *opt)
  {
@@ -12,8 +12,11 @@ diff --git a/networking/tc.c b/networking/tc.c
  	struct rtattr *tb[TCA_CBQ_MAX+1];
  	struct tc_ratespec *r = NULL;
  	struct tc_cbq_lssopt *lss = NULL;
-@@ -322,3 +326,4 @@ static int cbq_print_opt(struct rtattr *opt)
+@@ -321,6 +325,7 @@
+ 	}
   done:
  	return 0;
 +#endif
  }
+ 
+ static FAST_FUNC int print_qdisc(

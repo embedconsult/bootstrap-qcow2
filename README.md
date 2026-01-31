@@ -24,7 +24,7 @@ During the interim, reliance on externally-authored and compiled tools (for exam
 ### Build the CLI and sysroot tarball
 
 ```bash
-shards build                         # builds bin/bq2 and subcommand symlinks
+shards build                         # builds bin/bq2 (run ./bin/bq2 --install for symlinks)
 ./bin/sysroot-builder --output sysroot.tar.gz
 ```
 
@@ -43,10 +43,11 @@ The rootfs output includes:
 
 ### Busybox-style CLI (`bq2`)
 
-The single executable (`bin/bq2`) dispatches subcommands by argv[0] or the first argument. Symlinks in `bin/` mirror the subcommands.
+The single executable (`bin/bq2`) dispatches subcommands by argv[0] or the first argument. Symlinks in `bin/` mirror the subcommands (create them with `./bin/bq2 --install`).
 
 ```bash
 shards build
+./bin/bq2 --install
 
 # Build the sysroot tarball
 ./bin/sysroot-builder --output sysroot.tar.gz
@@ -68,7 +69,7 @@ shards build
 	# Or run every phase in order:
 	./bin/bq2 sysroot-runner --phase all
 
-# Default (no args): build the sysroot, set up DNS, enter with /bin/sh
+# Default (no args): show resume status + help (use sysroot --resume to continue a build)
 ./bin/bq2
 ```
 
@@ -88,6 +89,22 @@ namespace runner still has access to host files that are reachable from the sysr
 and it requires kernel support for unprivileged namespaces to work at all. If your kernel
 disables user namespaces, enable the setting explicitly.
 
+#### Resuming `sysroot` workflows (host)
+
+`bq2 sysroot` resumes by default. Use `./bin/bq2 sysroot --no-resume` to restart from
+scratch, or `./bin/bq2 sysroot --resume` to be explicit about resuming. The resume logic
+selects the earliest incomplete stage in the following order:
+
+1. `plan-write` (workspace/plan missing)
+2. `sysroot-runner` (plan present, state missing or in-progress)
+
+The `host-setup` phase (download/extract/populate seed) runs inside `sysroot-runner`.
+
+If a state file exists but its plan digest does not match the current plan, the resume logic
+refuses to guess and requires a manual cleanup or rerun from scratch. Running `./bin/bq2`
+with no arguments now prints the resume decision before the help output; it provides more
+host-side context than `bin/sysroot-status`, which only inspects a state file.
+
 ## Development
 
 - Format Crystal code with `crystal tool format`.
@@ -98,7 +115,7 @@ disables user namespaces, enable the setting explicitly.
 
 ## Contributing
 
-1. Fork it (<https://github.com/your-github-user/bootstrap-qcow2/fork>)
+1. Fork it (<https://github.com/embedconsult/bootstrap-qcow2/fork>)
 2. Create your feature branch (`git checkout -b my-new-feature`)
 3. Commit your changes (`git commit -am 'Add some feature'`)
 4. Push to the branch (`git push origin my-new-feature`)
@@ -106,4 +123,4 @@ disables user namespaces, enable the setting explicitly.
 
 ## Contributors
 
-- [Jason Kridner](https://github.com/your-github-user) - creator and maintainer
+- [Jason Kridner](https://github.com/jadonk) - creator and maintainer

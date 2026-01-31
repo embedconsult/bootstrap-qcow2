@@ -1,0 +1,17 @@
+# Developer unconfined execution domain
+#
+# Purpose:
+#   Ensure all developer-built executables run unconfined,
+#   regardless of Ubuntu AppArmor defaults or future profiles.
+#
+# This file does NOT grant privileges.
+# It only prevents AppArmor mediation for binaries under these paths.
+#
+# Place ALL developer-built launchers and tools under one of these trees.
+
+# Per-user dev tools
+/home/*/workspace/** flags=(unconfined),
+/home/*/.local/** flags=(unconfined),
+
+# End of file
+

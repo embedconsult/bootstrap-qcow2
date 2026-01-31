@@ -1,15 +1,14 @@
 require "./spec_helper"
-require "../src/cli"
 
 describe Bootstrap::CLI do
   it "dispatches by subcommand argument when executable name is not mapped" do
-    command, args = Bootstrap::CLI.dispatch(["sysroot-builder", "--flag"], ["sysroot-builder", "other"])
+    command, args = Bootstrap::CLI.dispatch(["sysroot-builder", "--flag"])
     command.should eq "sysroot-builder"
     args.should eq ["--flag"]
   end
 
   it "falls back to default command when nothing matches" do
-    command, args = Bootstrap::CLI.dispatch([] of String, ["sysroot-builder"], "default")
+    command, args = Bootstrap::CLI.dispatch([] of String)
     command.should eq "default"
     args.should eq [] of String
   end
