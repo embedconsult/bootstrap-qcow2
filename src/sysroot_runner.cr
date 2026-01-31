@@ -68,7 +68,7 @@ module Bootstrap
         return StatusPaths.new(workspace_instance, build_state)
       end
 
-      workspace_instance = SysrootWorkspace.detect(SysrootWorkspace::DEFAULT_HOST_WORKDIR)
+      workspace_instance = SysrootWorkspace.detect
       build_state = SysrootBuildState.new(workspace: workspace_instance)
       StatusPaths.new(workspace_instance, build_state)
     end
@@ -88,7 +88,7 @@ module Bootstrap
 
     # Enter the outer rootfs when running on the host.
     def self.enter_outer_rootfs! : Nil
-      workspace = SysrootWorkspace.detect(SysrootWorkspace::DEFAULT_HOST_WORKDIR)
+      workspace = SysrootWorkspace.detect
       Log.info { "Entering outer rootfs at #{workspace.outer_rootfs_path}" }
       SysrootNamespace.enter_rootfs(workspace.outer_rootfs_path.to_s)
     end
@@ -569,11 +569,7 @@ module Bootstrap
         if path
           workspace_for_plan(path)
         else
-          begin
-            SysrootWorkspace.detect(SysrootWorkspace::DEFAULT_HOST_WORKDIR)
-          rescue
-            SysrootWorkspace.detect
-          end
+          SysrootWorkspace.detect
         end
       build_state = SysrootBuildState.new(workspace: workspace)
       plan_path = path || build_state.plan_path_path.to_s

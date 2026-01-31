@@ -1789,7 +1789,7 @@ module Bootstrap
     private def self.run_plan_write(args : Array(String)) : Int32
       workspace =
         begin
-          SysrootWorkspace.detect(SysrootWorkspace::DEFAULT_HOST_WORKDIR)
+          SysrootWorkspace.detect
         rescue
           SysrootWorkspace.create(SysrootBuilder::DEFAULT_HOST_WORKDIR)
         end
@@ -1852,7 +1852,7 @@ module Bootstrap
 
     # Run the finalize-rootfs phase to emit a prefix-free rootfs tarball.
     private def self.run_sysroot_tarball(args : Array(String)) : Int32
-      workspace = SysrootWorkspace.detect(SysrootWorkspace::DEFAULT_HOST_WORKDIR)
+      workspace = SysrootWorkspace.detect
       build_state = SysrootBuildState.new(workspace: workspace)
       plan_path = build_state.plan_path_path.to_s
       overrides_path : String? = nil

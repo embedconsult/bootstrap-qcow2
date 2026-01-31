@@ -68,27 +68,40 @@ module Bootstrap
     def self.from_outer_rootfs(outer_rootfs_path : Path) : SysrootWorkspace
       inner_rootfs_path = outer_rootfs_path / "workspace/rootfs"
       rootfs_workspace_path = outer_rootfs_path / "workspace"
-      new(inner_rootfs_path, rootfs_workspace_path: rootfs_workspace_path, outer_rootfs_path: outer_rootfs_path)
+      host_workdir = nil
+      if outer_rootfs_path.absolute? && outer_rootfs_path.to_s.ends_with?("/#{OUTER_ROOTFS_DIR}")
+        host_workdir = outer_rootfs_path.parent
+      end
+      new(
+        inner_rootfs_path,
+        rootfs_workspace_path: rootfs_workspace_path,
+        outer_rootfs_path: outer_rootfs_path,
+        host_workdir: host_workdir
+      )
     end
 
     # Build a workspace rooted at an inner rootfs directory.
     def self.from_inner_rootfs(inner_rootfs_path : Path) : SysrootWorkspace
-      new(inner_rootfs_path)
+      host_workdir = nil
+      if inner_rootfs_path.absolute? && inner_rootfs_path.to_s.ends_with?("/#{INNER_ROOTFS_DIR}")
+        host_workdir = inner_rootfs_path.parent.parent.parent
+      end
+      new(inner_rootfs_path, host_workdir: host_workdir)
     end
 
     # Detect the workspace for the current namespace, optionally anchored by *host_workdir*.
-    def self.detect(host_workdir : Path? = nil) : SysrootWorkspace
+    def self.detect(host_workdir : Path? = DEFAULT_HOST_WORKDIR) : SysrootWorkspace
+      if File.exists?(INNER_MARKER_PATH)
+        return new(Path["/"], rootfs_workspace_path: nil, outer_rootfs_path: nil)
+      end
+
       if host_workdir
         candidate = from_host_workdir(host_workdir)
         return candidate if File.exists?(candidate.marker_path)
       end
 
-      if File.exists?(INNER_MARKER_PATH)
-        return new(Path["/"], rootfs_workspace_path: nil, outer_rootfs_path: nil)
-      end
-
       if File.exists?(OUTER_MARKER_PATH)
-        return new(Path["/workspace/rootfs"], rootfs_workspace_path: Path["/workspace"], outer_rootfs_path: Path["/"])
+        return from_outer_rootfs(Path["/"])
       end
 
       raise "Missing inner rootfs marker at #{INNER_MARKER_PATH} or #{OUTER_MARKER_PATH}"
