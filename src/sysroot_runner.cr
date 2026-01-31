@@ -1103,23 +1103,20 @@ module Bootstrap
         report_root = report_dir || build_state.report_dir_path.to_s
         report_root_value = report_root.not_nil!
         report_path = resolve_latest_report_path(state, report_root_value, resolved.state_path.to_s)
+        log_path = report_path ? output_log_for_report(report_path) || report_log_path(report_path) : nil
         if report_path
           puts("latest_report=#{report_path}")
-          if show_latest_report
-            puts(File.read(report_path))
-          end
-          if show_latest_log
-            output_log = output_log_for_report(report_path)
-            log_path = output_log || latest_log_path(report_root_value)
-            if log_path
-              puts("latest_log=#{log_path}")
-              puts(File.read(log_path)) if File.exists?(log_path)
-            else
-              puts("latest_log=(missing)")
-            end
-          end
+          puts(File.read(report_path)) if show_latest_report
         else
           puts("latest_report=(missing)")
+        end
+        if show_latest_log
+          if log_path
+            puts("latest_log=#{log_path}")
+            puts(File.read(log_path)) if File.exists?(log_path)
+          else
+            puts("latest_log=(missing)")
+          end
         end
       end
       0
@@ -1142,11 +1139,10 @@ module Bootstrap
       files.sort.last
     end
 
-    private def self.latest_log_path(report_dir : String) : String?
-      return nil unless Dir.exists?(report_dir)
-      files = Dir.glob(File.join(report_dir, "*.log"))
-      return nil if files.empty?
-      files.sort.last
+    private def self.report_log_path(report_path : String) : String?
+      return nil unless report_path.ends_with?(".json")
+      candidate = report_path.sub(/\.json$/, ".log")
+      File.exists?(candidate) ? candidate : nil
     end
 
     private def self.output_log_for_report(report_path : String) : String?
