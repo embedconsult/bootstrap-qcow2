@@ -272,19 +272,20 @@ module Bootstrap
 
     # Summarize the sysroot runner CLI behavior for help output.
     def self.summary : String
-      "Replay build plan inside the sysroot"
+      "Executed build plan to build rootfs and build rootfs tarball"
     end
 
     # Return additional command aliases handled by the sysroot runner.
     def self.aliases : Array(String)
-      ["sysroot-status"]
+      ["sysroot-status", "sysroot-tarball"]
     end
 
     # Describe help output entries for sysroot runner commands.
     def self.help_entries : Array(Tuple(String, String))
       [
-        {"sysroot-runner", "Replay build plan inside the sysroot"},
+        {"sysroot-runner", "Execute build plan to build rootfs"},
         {"sysroot-status", "Print current sysroot build phase"},
+        {"sysroot-tarball", "Emit a prefix-free rootfs tarball"},
       ]
     end
 
@@ -295,6 +296,8 @@ module Bootstrap
         run_runner(args)
       when "sysroot-status"
         run_status(args)
+      when "sysroot-tarball"
+        run_tarball(args)
       else
         raise "Unknown sysroot runner command #{command_name}"
       end
@@ -307,7 +310,7 @@ module Bootstrap
       report = true
       resume = true
       dry_run = false
-      top_rootfs = SysrootWorkspace::DEFAULT_HOST_WORKDIR / Sysroot::Workspace::OUTER_ROOTFS_DIR
+      host_workdir : Path? = nil
       extra_binds = [] of Tuple(Path, Path)
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-runner [options]") do |p|
         p.on("--phase NAME", "Select first build phase to run (default: all)") { |name| start_phase = name }
@@ -315,7 +318,7 @@ module Bootstrap
         p.on("--no-report", "Disable failure report writing") { report = false }
         p.on("--no-resume", "Disable resume/state tracking (useful when the default state path is not writable)") { resume = false }
         p.on("--dry-run", "List selected phases/steps and exit") { dry_run = true }
-        p.on("--rootfs=PATH", "Starting path for looking for build plan (default: #{top_rootfs})") { |path| top_rootfs = Path[path] }
+        p.on("--workdir=PATH", "Starting path for looking for build plan (default: #{SysrootWorkspace::DEFAULT_HOST_WORKDIR})") { |path| host_workdir = Path[path] }
         p.on("--bind=SRC:DST", "Bind-mount SRC into DST inside the rootfs (repeatable)") do |val|
           extra_binds << parse_bind_spec(val)
         end
@@ -323,7 +326,7 @@ module Bootstrap
       return CLI.print_help(parser) if help
 
       begin
-        workspace = SysrootWorkspace.new(top_rootfs: top_rootfs, extra_binds: extra_binds)
+        workspace = SysrootWorkspace.new(host_workdir: host_workdir, extra_binds: extra_binds)
       rescue ex
         STDERR.puts "Please build out the workspace first with `bq2 sysroot-builder`: #{ex.message}"
         return -1
@@ -447,6 +450,18 @@ module Bootstrap
 
     private def self.slugify(value : String) : String
       value.gsub(/[^A-Za-z0-9]+/, "_").gsub(/^_+|_+$/, "").downcase
+    end
+
+    # Run the finalize-rootfs phase to emit a prefix-free rootfs tarball.
+    private def self.run_tarball(args : Array(String)) : Int32
+      workspace = SysrootWorkspace.new
+      parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-tarball [options]") do |p|
+      end
+      return CLI.print_help(parser) if help
+      step_runner = StepRunner.new
+      # TODO: Either load the existing build plan or generate a minimal plan with the "rootfs" strategy
+      # TODO: Call step_runner.run with the plan
+      0
     end
   end
 end

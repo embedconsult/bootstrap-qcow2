@@ -30,8 +30,8 @@ module Bootstrap
   #   rootfs workspace (/workspace inside the inner rootfs).
   #
   # Usage references:
-  # * CLI entrypoints: `bq2 sysroot-builder`, `bq2 sysroot-plan-write`,
-  #   and `bq2 sysroot-tarball` (see `self.run`, `help_entries`, and README).
+  # * CLI entrypoints: `bq2 sysroot-builder` and `bq2 sysroot-plan-write`,
+  #   (see `self.run`, `help_entries`, and README).
   # * Workspace layout: host workspace is data/sysroot. The inner workspace is
   #   /workspace inside the inner rootfs and /workspace/rootfs/workspace from the
   #   outer rootfs.
@@ -45,37 +45,39 @@ module Bootstrap
     {% else %}
       DEFAULT_ARCH = "aarch64"
     {% end %}
-    DEFAULT_HOST_WORKDIR  = SysrootWorkspace::DEFAULT_HOST_WORKDIR
-    DEFAULT_BRANCH        = "v3.23"
-    DEFAULT_BASE_VERSION  = "3.23.2"
-    DEFAULT_LLVM_VER      = "18.1.7"
-    DEFAULT_LIBRESSL      = "3.8.2"
-    DEFAULT_BUSYBOX       = "1.36.1"
-    DEFAULT_MUSL          = "1.2.5"
-    DEFAULT_CMAKE         = "3.29.6"
-    DEFAULT_SHARDS        = "0.18.0"
-    DEFAULT_NAMESERVER    = "8.8.8.8"
-    DEFAULT_M4            = "1.4.19"
-    DEFAULT_GNU_MAKE      = "4.4.1"
-    DEFAULT_ZLIB          = "1.3.1"
-    DEFAULT_LINUX         = "6.12.38"
-    DEFAULT_PCRE2         = "10.44"
-    DEFAULT_LIBATOMIC_OPS = "7.8.2"
-    DEFAULT_GMP           = "6.3.0"
-    DEFAULT_LIBICONV      = "1.17"
-    DEFAULT_LIBXML2       = "2.12.7"
-    DEFAULT_LIBYAML       = "0.2.5"
-    DEFAULT_LIBFFI        = "3.4.6"
-    DEFAULT_BDWGC         = "8.2.6"
-    # Source: https://www.sqlite.org/2024/sqlite-autoconf-3460000.tar.gz (SQLite 3.46.0).
-    DEFAULT_SQLITE  = "3460000"
-    DEFAULT_FOSSIL  = "2.25"
-    DEFAULT_GIT     = "2.45.2"
-    DEFAULT_CRYSTAL = "1.18.2"
-    # Cache directory name for prefetched shards dependencies.
-    SHARDS_CACHE_DIR = ".shards-cache"
+    DEFAULT_ROOTFS_SEED    = "Alpine"
+    DEFAULT_ROOTFS_BRANCH  = "v3.23"
+    DEFAULT_ROOTFS_VERSION = "3.23.2"
+    DEFAULT_LLVM_VER       = "18.1.7"
+    DEFAULT_LIBRESSL       = "3.8.2"
+    DEFAULT_BUSYBOX        = "1.36.1"
+    DEFAULT_MUSL           = "1.2.5"
+    DEFAULT_CMAKE          = "3.29.6"
+    DEFAULT_SHARDS         = "0.18.0"
+    DEFAULT_NAMESERVER     = "8.8.8.8"
+    DEFAULT_M4             = "1.4.19"
+    DEFAULT_GNU_MAKE       = "4.4.1"
+    DEFAULT_ZLIB           = "1.3.1"
+    DEFAULT_LINUX          = "6.12.38"
+    DEFAULT_PCRE2          = "10.44"
+    DEFAULT_LIBATOMIC_OPS  = "7.8.2"
+    DEFAULT_GMP            = "6.3.0"
+    DEFAULT_LIBICONV       = "1.17"
+    DEFAULT_LIBXML2        = "2.12.7"
+    DEFAULT_LIBYAML        = "0.2.5"
+    DEFAULT_LIBFFI         = "3.4.6"
+    DEFAULT_BDWGC          = "8.2.6"
+    DEFAULT_SQLITE         = "3460000" # Source: https://www.sqlite.org/2024/sqlite-autoconf-3460000.tar.gz (SQLite 3.46.0).
+    DEFAULT_FOSSIL         = "2.25"
+    DEFAULT_GIT            = "2.45.2"
+    DEFAULT_CRYSTAL        = "1.19.1"
+    SHARDS_CACHE_DIR       = ".shards-cache" # Cache directory name for prefetched shards dependencies.
     # Source: https://curl.se/ca/cacert.pem (Mozilla CA certificate bundle).
     CA_BUNDLE_PEM = {{ read_file("#{__DIR__}/../data/ca-bundle/ca-certificates.crt") }}
+
+    getter workspace : SysrootWorkspace
+    getter architecture : String
+    getter seed : String
 
     record PackageSpec,
       name : String,
@@ -108,28 +110,11 @@ module Bootstrap
       end
     end
 
-    getter architecture : String
-    getter branch : String
-    getter host_workdir : Path
-    getter workspace : SysrootWorkspace
-    getter cache_dir : Path
-    getter checksum_dir : Path
-    getter sources_dir : Path
-    getter outer_rootfs_dir : Path
-    getter inner_rootfs_dir : Path
-    getter inner_rootfs_workspace_dir : Path
-    getter sysroot_dir : Path
-    getter base_version : String
-    @resolved_base_version : String?
-
+    # PhaseSpec provides the base entries for a BuildPhase with additional elements that
+    # allow for generating multiple BuildPhase entries modified for the same PackageSpec
+    # used in different phases.
     record PhaseSpec,
-      name : String,
-      description : String,
-      workspace : String,
-      environment : String,
-      install_prefix : String,
-      destdir : String? = nil,
-      env : Hash(String, String) = {} of String => String,
+      phase : BuildPhase,
       package_allowlist : Array(String)? = nil,
       pre_steps : Array(BuildStep) = [] of BuildStep,
       extra_steps : Array(BuildStep) = [] of BuildStep,
@@ -137,30 +122,10 @@ module Bootstrap
       configure_overrides : Hash(String, Array(String)) = {} of String => Array(String),
       patch_overrides : Hash(String, Array(String)) = {} of String => Array(String)
 
-    # Create a sysroot builder rooted at the host workdir directory.
-    def initialize(@architecture : String = DEFAULT_ARCH,
-                   @branch : String = DEFAULT_BRANCH,
-                   @base_version : String = DEFAULT_BASE_VERSION,
-                   @base_rootfs_path : Path? = nil,
-                   @use_system_tar_for_sources : Bool = false,
-                   @use_system_tar_for_rootfs : Bool = false,
-                   @preserve_ownership_for_sources : Bool = false,
-                   @preserve_ownership_for_rootfs : Bool = false,
-                   @owner_uid : Int32? = nil,
-                   @owner_gid : Int32? = nil)
-      @host_workdir = DEFAULT_HOST_WORKDIR
-      @cache_dir = @host_workdir / "cache"
-      @checksum_dir = @cache_dir / "checksums"
-      @sources_dir = @host_workdir / "sources"
-      @workspace = SysrootWorkspace.from_host_workdir(@host_workdir)
-      @outer_rootfs_dir = @workspace.outer_rootfs_path
-      @inner_rootfs_dir = @workspace.inner_rootfs_path
-      @inner_rootfs_workspace_dir = @workspace.inner_workspace_path
-      @sysroot_dir = @host_workdir / "sysroot"
-
-      FileUtils.mkdir_p(@cache_dir)
-      FileUtils.mkdir_p(@checksum_dir)
-      FileUtils.mkdir_p(@sources_dir)
+    # Create a sysroot builder in workspace.
+    def initialize(@workspace : SysrootWorkspace = SysrootWorkspace.new,
+                   @architecture : String = DEFAULT_ARCH,
+                   @seed : String = DEFAULT_ROOTFS_SEED)
     end
 
     # Return the expected archive paths for all configured packages.
@@ -199,7 +164,7 @@ module Bootstrap
     # Each PackageSpec can carry optional configure flags or a custom build
     # directory name when upstream archives use non-standard layouts.
     def packages : Array(PackageSpec)
-      bootstrap_repo_dir = "#{SysrootWorkspace::INNER_WORKSPACE_PATH_IN_OUTER}/bootstrap-qcow2-#{bootstrap_source_version}"
+      bootstrap_repo_dir = "#{@workspace.workspace_path}/bootstrap-qcow2-#{bootstrap_source_version}"
       sysroot_triple = sysroot_target_triple
       [
         PackageSpec.new("m4", DEFAULT_M4, URI.parse("https://ftp.gnu.org/gnu/m4/m4-#{DEFAULT_M4}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
@@ -1719,20 +1684,19 @@ module Bootstrap
 
     # Summarize the sysroot builder CLI behavior for help output.
     def self.summary : String
-      "Build sysroot tarball or directory"
+      "Create sysroot workspace and build plan"
     end
 
     # Return command aliases handled by the sysroot builder CLI.
     def self.aliases : Array(String)
-      ["sysroot-plan-write", "sysroot-tarball"]
+      ["sysroot-plan-write"]
     end
 
     # Describe help output entries for the sysroot builder CLI.
     def self.help_entries : Array(Tuple(String, String))
       [
-        {"sysroot-builder", "Build sysroot tarball or directory"},
-        {"sysroot-plan-write", "Write a fresh build plan JSON"},
-        {"sysroot-tarball", "Emit a prefix-free rootfs tarball"},
+        {"sysroot-builder", "Create workspace and build plan"},
+        {"sysroot-plan-write", "Write a fresh build plan JSON file"},
       ]
     end
 
@@ -1743,8 +1707,6 @@ module Bootstrap
         run_builder(args)
       when "sysroot-plan-write"
         run_plan_write(args)
-      when "sysroot-tarball"
-        run_sysroot_tarball(args)
       else
         raise "Unknown sysroot builder command #{command_name}"
       end
@@ -1864,53 +1826,6 @@ module Bootstrap
       FileUtils.mkdir_p(File.dirname(output))
       File.write(output, plan.to_pretty_json)
       puts "Wrote build plan to #{output}"
-      0
-    end
-
-    # Run the finalize-rootfs phase to emit a prefix-free rootfs tarball.
-    private def self.run_sysroot_tarball(args : Array(String)) : Int32
-      workspace = SysrootWorkspace.detect
-      build_state = SysrootBuildState.new(workspace: workspace)
-      plan_path = build_state.plan_path_path.to_s
-      overrides_path : String? = nil
-      use_default_overrides = true
-      report_dir : String? = build_state.report_dir_path.to_s
-      resume = true
-      allow_outside_rootfs = false
-      parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-tarball [options]") do |p|
-        p.on("--overrides PATH", "Apply runtime overrides JSON (default: sysroot-build-overrides.json in the inner rootfs var/lib)") do |path|
-          overrides_path = path
-          use_default_overrides = false
-        end
-        p.on("--no-overrides", "Disable runtime overrides") do
-          overrides_path = nil
-          use_default_overrides = false
-        end
-        p.on("--report-dir PATH", "Write failure reports to PATH (default: #{report_dir})") { |path| report_dir = path }
-        p.on("--no-report", "Disable failure report writing") { report_dir = nil }
-        p.on("--no-resume", "Disable resume/state tracking (useful when the default state path is not writable)") { resume = false }
-        p.on("--allow-outside-rootfs", "Allow running rootfs-* phases outside the produced rootfs (requires destdir overrides)") { allow_outside_rootfs = true }
-      end
-      return CLI.print_help(parser) if help
-
-      exe = Process.executable_path
-      raise "Unable to locate bq2 executable for sysroot-runner" unless exe
-      argv = [
-        "sysroot-runner",
-        "--phase",
-        "finalize-rootfs",
-      ]
-      if (path = overrides_path)
-        argv << "--overrides"
-        argv << path
-      end
-      argv << "--no-overrides" if overrides_path.nil? && !use_default_overrides
-      argv.concat(["--report-dir", report_dir.not_nil!]) if report_dir
-      argv << "--no-report" if report_dir.nil?
-      argv << "--no-resume" unless resume
-      argv << "--allow-outside-rootfs" if allow_outside_rootfs
-      status = Process.run(exe, argv, input: STDIN, output: STDOUT, error: STDERR)
-      raise "sysroot-runner failed (exit=#{status.exit_code})" unless status.success?
       0
     end
   end

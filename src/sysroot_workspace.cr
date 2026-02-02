@@ -47,15 +47,16 @@ module Bootstrap
     @workspace_path : Path
     @log_path : Path
     @namespace : String
-    @extra_binds : Array(String)
+    @extra_binds : Array(Tuple(Path, Path))
 
-    def initialize(@host_workdir : Path? = nil, @extra_binds : Array(String) = [] of String)
-      if host_dir.not_nil?
+    def initialize(@host_workdir : Path? = nil, @extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path))
+      if @host_workdir.nil?
         @namespace = "host"
       else
-        found_marker = PROBE_PATHS_FOR_MARKER.find { |namespace, path| File.exists?(path) }
-        if found_marker.not_nil?
-          @namespace = found_marker[:namespace].not_nil!
+        found_marker = PROBE_PATHS_FOR_MARKER.find { |s| File.exists?(s[:path]) }
+        if found_marker.nil?
+          marker_match = found_marker.not_nil!
+          @namespace = marker_match[:namespace]
         else
           raise "Missing BQ2 rootfs marker at one of these paths: #{PROBE_PATHS_FOR_MARKER}"
         end
@@ -63,21 +64,21 @@ module Bootstrap
 
       case @namespace
       when "host"
-        @seed_rootfs_path = @host_workdir / Path["#{SEED_DIR_NAME}"]
-        @sysroot_path = @seed_rootfs_path / Path["#{SYSROOT_DIR_NAME}"]
+        @seed_rootfs_path = @host_workdir.not_nil! / Path["#{SEED_DIR_NAME}"]
+        @sysroot_path = @seed_rootfs_path.not_nil! / Path["#{SYSROOT_DIR_NAME}"]
         @bq2_rootfs_path = @seed_rootfs_path.not_nil! / Path["#{BQ2_DIR_NAME}"]
       when "seed"
         @seed_rootfs_path = Path["/"]
-        @sysroot_path = @seed_rootfs_path / Path["#{SYSROOT_DIR_NAME}"]
+        @sysroot_path = @seed_rootfs_path.not_nil! / Path["#{SYSROOT_DIR_NAME}"]
         @bq2_rootfs_path = @seed_rootfs_path.not_nil! / Path["#{BQ2_DIR_NAME}"]
       when "bq2"
         @seed_rootfs_path = nil
         @sysroot_path = nil
         @bq2_rootfs_path = Path["/"]
-        default
+      else
         raise "Invalid namespace: #{@namespace}"
       end
-      @marker_path = @bq2_rootfs_path.not_nil! / Path["#{ROOTFS_MARKER_NAME}"]
+      @marker_path = @bq2_rootfs_path / Path["#{ROOTFS_MARKER_NAME}"]
       @workspace_path = @bq2_rootfs_path / Path["#{WORKSPACE_DIR_NAME}"]
       @log_path = @bq2_rootfs_path / Path["#{LOG_DIR_NAME}"]
     end
