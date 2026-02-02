@@ -35,13 +35,18 @@ module Bootstrap
     # report: do we generate a build report
     def initialize(
       @workspace : SysrootWorkspace = SysrootWorkspace.new,
+      @start_phase : String = "all",
+      @packages : Array(String) = [] of String,
+      @report : Bool = true,
+      @resume : Bool = true,
+      @dry_run : Bool = true
     )
       @state = SysrootBuildState.new(workspace: workspace)
       @runner = StepRunner.new(workspace: workspace)
     end
 
     # Load a JSON build plan from disk and replay it using the provided runner.
-    def run_plan(dry_run : Bool = true)
+    def run_plan
       Log.info { "*** Running build plan #{@plan.desc} from state #{@state.desc} ***" }
       report_dir = @plan.report_dir
       Log.info { "Using report_dir: #{report_dir}" } if report_dir.not_nil?
@@ -49,7 +54,7 @@ module Bootstrap
       phases = apply_rootfs_env_overrides(phases) if rootfs_marker_present?
       phases = filter_phases_by_packages(phases, packages) if packages
       phases = filter_phases_by_state(phases, state) if resume && state
-      if dry_run
+      if @dry_run
         Log.info { describe_phases(phases) }
         return
       end
@@ -334,13 +339,13 @@ module Bootstrap
 
       runner = SysrootRunner.new(
         workspace: workspace,
-        start_phase: start_phase.not_nil!,
-        packages: packages.empty? ? nil : packages,
+        start_phase: start_phase,
+        packages: packages,
         report: report,
         resume: resume,
         dry_run: dry_run
       )
-      runner.run
+      runner.run_plan
     end
 
     private def self.parse_bind_spec(value : String) : Tuple(Path, Path)
@@ -354,63 +359,50 @@ module Bootstrap
 
     # Print the current build status and next phase/step.
     private def self.run_status(args : Array(String)) : Int32
-      top_rootfs = SysrootWorkspace::DEFAULT_HOST_WORKDIR / Sysroot::Workspace::OUTER_ROOTFS_DIR
+      host_workdir : Path? = nil
       show_latest_report = false
       show_latest_log = false
 
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-status [options]") do |p|
-        p.on("--rootfs=PATH", "Starting path for looking for build plan (default: #{top_rootfs})") { |path| top_rootfs = Path[path] }
+        p.on("--workdir=PATH", "Starting path for looking for build plan (default: #{SysrootWorkspace::DEFAULT_HOST_WORKDIR})") { |path| host_workdir = Path[path] }
         p.on("--latest-report", "Print the latest failure report JSON") { show_latest_report = true }
         p.on("--latest-log", "Print the output log from the latest failure report") { show_latest_log = true }
       end
       return CLI.print_help(parser) if help
 
       begin
-        workspace = SysrootWorkspace.new(top_rootfs: top_rootfs, extra_binds: extra_binds)
+        workspace = SysrootWorkspace.new(host_workdir: host_workdir, extra_binds: extra_binds)
       rescue ex
         STDERR.puts "No valid workspace found, build out the workspace first with `bq2 sysroot-builder`: #{ex.message}"
         return -1
       end
 
-      build_state = SysrootBuildState.load(workspace, resolved.state_path)
+      runner = SysrootRunner.new(workspace: workspace)
 
-      if build_state.plan_exists?
-        plan = BuildPlan.parse(File.read(build_state.plan_path_path))
-        next_phase = plan.phases.find do |phase|
-          phase.steps.any? { |step| !state.completed?(phase.name, step.name) }
-        end
-        if next_phase
-          next_step = next_phase.steps.find { |step| !state.completed?(next_phase.name, step.name) }
-          puts("next_phase=#{next_phase.name}")
-          puts("next_step=#{next_step.not_nil!.name}") if next_step
-        else
-          puts("next_phase=(none)")
-        end
+      if runner.state.next_phase
+        puts("next_phase=#{runner.state.next_phase.name}")
+        puts("next_step=#{runner.state.next_step.not_nil!.name}") if runner.state.next_step
+      else
+        puts("next_phase=(none)")
       end
-      puts(@state.progress.current_phase || "(none)")
-
-      if (success = @state.progress.last_success)
+      if (success = runner.state.progress.last_success)
         puts("last_success=#{success.phase}/#{success.step}")
       end
-      if (failure = @state.progress.last_failure)
+      if (failure = runner.state.progress.last_failure)
         puts("last_failure=#{failure.phase}/#{failure.step}")
       end
 
       if show_latest_report || show_latest_log
-        report_root = report_dir || build_state.report_dir_path.to_s
-        report_root_value = report_root.not_nil!
-        report_path = resolve_latest_report_path(state, report_root_value, resolved.state_path.to_s)
-        log_path = report_path ? output_log_for_report(report_path) || report_log_path(report_path) : nil
-        if report_path
-          puts("latest_report=#{report_path}")
-          puts(File.read(report_path)) if show_latest_report
+        if runner.state.report_path
+          puts("latest_report=#{runner.state.report_path}")
+          puts(File.read(runner.state.report_path)) if show_latest_report
         else
           puts("latest_report=(missing)")
         end
         if show_latest_log
-          if log_path
-            puts("latest_log=#{log_path}")
-            puts(File.read(log_path)) if File.exists?(log_path)
+          if runner.state.log_path
+            puts("latest_log=#{runner.state.log_path}")
+            puts(File.read(runner.state.log_path)) if File.exists?(runner.state.log_path)
           else
             puts("latest_log=(missing)")
           end
