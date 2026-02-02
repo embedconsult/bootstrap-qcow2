@@ -3,7 +3,6 @@ require "digest/sha256"
 require "file_utils"
 require "random/secure"
 require "time"
-
 require "./sysroot_workspace"
 
 module Bootstrap

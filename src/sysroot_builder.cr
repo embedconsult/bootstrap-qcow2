@@ -390,50 +390,6 @@ module Bootstrap
       ]
     end
 
-    # Download all configured package sources and return their cached paths.
-    def download_sources : Array(Path)
-      packages.flat_map { |pkg| download_all(pkg) }
-    end
-
-    # Download all archives for a package (main + extras), verify, and return paths.
-    def download_all(pkg : PackageSpec) : Array(Path)
-      pkg.all_urls.map_with_index do |uri, idx|
-        checksum_uri = idx.zero? ? pkg.checksum_url : URI.parse("#{uri}.sha256") rescue nil
-        logical = idx.zero? ? pkg : pkg_with_url(pkg, uri, checksum_uri)
-        download_and_verify(logical)
-      end
-    end
-
-    # Download a package tarball (if missing) into the source cache and verify
-    # its checksum before returning the cached path.
-    def download_and_verify(pkg : PackageSpec) : Path
-      target = sources_dir / pkg.filename
-      attempts = 3
-      attempts.times do |idx|
-        begin
-          if File.exists?(target)
-            if File.size(target) > 0 && verify(pkg, target)
-              return target
-            else
-              File.delete(target)
-            end
-          end
-
-          Log.debug { "Downloading #{pkg.name} #{pkg.version} from #{pkg.url}" }
-          download_with_redirects(pkg.url, target)
-          raise "Empty download for #{pkg.name}" if File.size(target) == 0
-          verify(pkg, target)
-          return target
-        rescue error
-          File.delete(target) if File.exists?(target)
-          raise error if idx == attempts - 1
-          Log.warn { "Retrying #{pkg.name} after error: #{error.message}" }
-          sleep 2.seconds
-        end
-      end
-      target
-    end
-
     # Clone a PackageSpec with a different URL and checksum URL.
     private def pkg_with_url(pkg : PackageSpec, url : URI, checksum_url : URI?) : PackageSpec
       PackageSpec.new(
