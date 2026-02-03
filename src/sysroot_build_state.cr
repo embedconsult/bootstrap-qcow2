@@ -57,23 +57,32 @@ module Bootstrap
     # Runner progress tracked per phase/package.
     getter progress : Progress = Progress.new
 
-    def initialize(@workspace : SysrootWorkspace? = nil,
-                   @rootfs_id : String = Random::Secure.hex(8),
-                   @created_at : String = Time.utc.to_s,
-                   @updated_at : String? = nil,
-                   @plan_digest : String? = nil,
-                   @overrides_digest : String? = nil,
-                   @invalidated_at : String? = nil,
-                   @invalidation_reason : String? = nil,
-                   @progress : Progress = Progress.new,
-                   @format_version : Int32 = FORMAT_VERSION,
+    def self.new(workspace : SysrootWorkspace? = nil,
+                   rootfs_id : String = Random::Secure.hex(8),
+                   created_at : String = Time.utc.to_s,
+                   updated_at : String? = nil,
+                   plan_digest : String? = nil,
+                   overrides_digest : String? = nil,
+                   invalidated_at : String? = nil,
+                   invalidation_reason : String? = nil,
+                   progress : Progress = Progress.new,
+                   format_version : Int32 = FORMAT_VERSION,
                    raise_on_invalid_state : Bool = false)
-      ensure_state_file
-      self.from_json(File.open(state_path))
-      raise "State file does not reconcile with plan: #{@invalidation_reason}" if reconcile_inputs && raise_on_invalid_state
-      @workspace ||= SysrootWorkspace.new
-      touch
-      save
+      state = BuildState.alloc
+      workspace ||= SysrootWorkspace.new
+      new_workspace = workspace.not_nil!
+      new_state_path = new_workspace.log_path / STATE_FILE
+      if File.exists?(new_state_path)
+        # TODO: Move reconcile_inputs to here
+        #raise "State file does not reconcile with plan: #{@invalidation_reason}" if reconcile_inputs && raise_on_invalid_state
+        state = self.class.from_json(File.open(new_state_path))
+      else
+        touch
+        FileUtils.mkdir_p(new_state_path.parent)
+        File.write(new_state_path, state.to_pretty_json)
+      end
+      state.workspace = new_workspace
+      state
     end
 
     # Current rootfs-relative plan path
@@ -111,9 +120,7 @@ module Bootstrap
     end
 
     # Ensure a state file exists on disk, creating an empty one when needed.
-    def ensure_state_file : Nil
-      return if File.exists?(state_path)
-      save
+    def self.ensure_state_file(workspace : SysrootWorkspace) : Nil
     end
 
     # Return the SHA256 hex digest for *path*, or nil when the file is missing.
@@ -175,7 +182,7 @@ module Bootstrap
     #
     # When the plan or overrides inputs change, this clears completed steps so
     # the runner does not incorrectly skip work based on stale state.
-    def reconcile_inputs : Bool
+    def self.reconcile_inputs(BuildState state) : Bool
       previous_plan = plan_digest
       previous_overrides = overrides_digest
       current_plan = self.class.digest_for?(plan_path)
