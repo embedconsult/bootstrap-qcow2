@@ -41,23 +41,23 @@ module Bootstrap
     PROBE_PATHS_FOR_MARKER = [
       {namespace: Namespace::Host, path: Path["#{DEFAULT_HOST_WORKDIR}/#{SEED_DIR_NAME}/#{BQ2_DIR_NAME}/#{ROOTFS_MARKER_NAME}"]},
       {namespace: Namespace::Seed, path: Path["/#{BQ2_DIR_NAME}/#{ROOTFS_MARKER_NAME}"]},
-      {namepsace: Namespace::BQ2, path: Path["/#{ROOTFS_MARKER_NAME}"]},
+      {namespace: Namespace::BQ2, path: Path["/#{ROOTFS_MARKER_NAME}"]},
     ]
 
-    @host_workdir : Path?
-    @seed_rootfs_path : Path?
-    @sysroot_path : Path?
-    @bq2_rootfs_path : Path
-    @marker_path : Path
-    @workspace_path : Path
-    @log_path : Path
+    getter host_workdir : Path?
+    getter seed_rootfs_path : Path?
+    getter sysroot_path : Path?
+    getter bq2_rootfs_path : Path
+    getter marker_path : Path
+    getter workspace_path : Path
+    getter log_path : Path
     @namespace : Namespace
     @extra_binds : Array(Tuple(Path, Path))
 
     def initialize(@host_workdir : Path? = nil, @extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path))
       if @host_workdir.nil?
         found_marker = PROBE_PATHS_FOR_MARKER.find { |s| File.exists?(s[:path]) }
-        raise "Missing BQ2 rootfs marker at one of these paths: #{PROBE_PATHS_FOR_MARKER}" if found_maker.nil?
+        raise "Missing BQ2 rootfs marker at one of these paths: #{PROBE_PATHS_FOR_MARKER}" if found_marker.nil?
         marker_match = found_marker.not_nil!
         @namespace = marker_match[:namespace]
         if @namespace == Namespace::Host
@@ -67,47 +67,39 @@ module Bootstrap
         @namespace = Namespace::Host
       end
 
-      raise "Invalid namespace: #{@namespace}" unless @namespace.in[]
+      raise "Invalid namespace: #{@namespace}" unless [Namespace::Host, Namespace::Seed, Namespace::BQ2].includes?(@namespace)
 
-      @seed_rootfs_path = seed_rootfs_from(@namespace, @host_workdir)
-      @sysroot_path = sysroot_from(@namespace, @host_workdir)
-      @bq2_rootfs_path = bq2_rootfs_from(@namespace, @host_workdir)
+      @seed_rootfs_path = self.class.seed_rootfs_from(@namespace, @host_workdir)
+      @sysroot_path = self.class.sysroot_from(@namespace, @host_workdir)
+      @bq2_rootfs_path = self.class.bq2_rootfs_from(@namespace, @host_workdir)
       @marker_path = @bq2_rootfs_path / Path["#{ROOTFS_MARKER_NAME}"]
       @workspace_path = @bq2_rootfs_path / Path["#{WORKSPACE_DIR_NAME}"]
       @log_path = @bq2_rootfs_path / Path["#{LOG_DIR_NAME}"]
     end
 
-    def self.seed_rootfs_from(namespace : Namespace, host_workdir : String? = nil)
-      case @namespace
+    def self.seed_rootfs_from(namespace : Namespace, host_workdir : Path? = nil)
+      case namespace
       in .host?
         host_workdir.not_nil! / Path["#{SEED_DIR_NAME}"]
       in .seed?
         Path["/"]
-      in .bq?
-        nil
-      end
-    end
-
-    def self.sysroot_from(namespace : Namespace, host_workdir : String? = nil)
-      case @namespace
-      in .host?
-        seed_rootfs_from(namespace, host_workdir) / Path["#{SYSROOT_DIR_NAME}"]
-      in .seed?
-        seed_rootfs_from(namespace, host_workdir) / Path["#{SYSROOT_DIR_NAME}"]
       in .bq2?
         nil
       end
     end
 
-    def self.bq2_rootfs_from(namespace : Namespace, host_workdir : String? = nil)
-      case @namespace
-      in .host?
-        seed_rootfs_from(namespace, host_workdir) / Path["#{BQ2_DIR_NAME}"]
-      in .seed?
-        seed_rootfs_from(namespace, host_workdir) / Path["#{BQ2_DIR_NAME}"]
-      in .bq?
-        Path["/"]
-      end
+    def self.sysroot_from(namespace : Namespace, host_workdir : Path? = nil)
+      seed_rootfs_path = seed_rootfs_from(namespace, host_workdir)
+      return nil if seed_rootfs_path.nil?
+      prefix = seed_rootfs_path.not_nil!
+      prefix / Path["#{SYSROOT_DIR_NAME}"]
+    end
+
+    def self.bq2_rootfs_from(namespace : Namespace, host_workdir : Path? = nil)
+      seed_rootfs_path = seed_rootfs_from(namespace, host_workdir)
+      return Path["/"] if seed_rootfs_path.nil?
+      prefix = seed_rootfs_path.not_nil!
+      prefix / Path["#{BQ2_DIR_NAME}"]
     end
 
     # Create a workspace rooted at *host_workdir*, ensuring marker + dirs exist.
