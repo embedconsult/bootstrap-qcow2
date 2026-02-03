@@ -39,16 +39,16 @@ module Bootstrap
       @packages : Array(String) = [] of String,
       @report : Bool = true,
       @resume : Bool = true,
-      @dry_run : Bool = true
+      @dry_run : Bool = true,
     )
       @state = SysrootBuildState.new(workspace: workspace)
       @runner = StepRunner.new(workspace: workspace)
     end
 
-    # Load a JSON build plan from disk and replay it using the provided runner.
+    # Execute build plan
     def run_plan
-      Log.info { "*** Running build plan #{@plan.desc} from state #{@state.desc} ***" }
-      report_dir = @plan.report_dir
+      Log.info { "*** Running build plan #{@state.plan.desc} from state #{@state.desc} ***" }
+      report_dir = @state.report_dir
       Log.info { "Using report_dir: #{report_dir}" } if report_dir.not_nil?
       phases = @state.selected_phases
       phases = apply_rootfs_env_overrides(phases) if rootfs_marker_present?

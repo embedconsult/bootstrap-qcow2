@@ -18,11 +18,7 @@ module Bootstrap
     STATE_FILE      = "sysroot-build-state.json"
     OVERRIDES_FILE  = "sysroot-build-overrides.json"
     REPORT_DIR_NAME = "sysroot-build-reports"
-
-    DEFAULT_PLAN      = "/var/lib/#{PLAN_FILE}"
-    DEFAULT_OVERRIDES = "/var/lib/#{OVERRIDES_FILE}"
-    DEFAULT_REPORTS   = "/var/lib/#{REPORT_DIR_NAME}"
-    FORMAT_VERSION    = 1
+    FORMAT_VERSION  = 1
 
     # Schema version for forward-compatible upgrades.
     getter format_version : Int32 = FORMAT_VERSION
@@ -74,8 +70,6 @@ module Bootstrap
                    @rootfs_id : String = Random::Secure.hex(8),
                    @created_at : String = Time.utc.to_s,
                    @updated_at : String? = nil,
-                   @plan_path : String = DEFAULT_PLAN,
-                   @overrides_path : String? = DEFAULT_OVERRIDES,
                    @plan_digest : String? = nil,
                    @overrides_digest : String? = nil,
                    @report_dir : String? = DEFAULT_REPORTS,
