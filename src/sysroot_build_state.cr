@@ -67,9 +67,9 @@ module Bootstrap
                    @invalidation_reason : String? = nil,
                    @progress : Progress = Progress.new,
                    @format_version : Int32 = FORMAT_VERSION,
-		   raise_on_invalid_state : Bool = false)
+                   raise_on_invalid_state : Bool = false)
       ensure_state_file
-      self.class.from_json(File.open(state_path))
+      self.from_json(File.open(state_path))
       raise "State file does not reconcile with plan: #{@invalidation_reason}" if reconcile_inputs && raise_on_invalid_state
       @workspace ||= SysrootWorkspace.new
       touch

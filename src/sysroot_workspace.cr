@@ -26,13 +26,13 @@ module Bootstrap
   # To simplify coordination of path changes from namespace changes, this class should be used to instead of
   # SysrootNamespace directly.
   class SysrootWorkspace
-    ROOTFS_MARKER_NAME     = ".bq2-rootfs"
-    DEFAULT_HOST_WORKDIR   = "data/sysroot"
-    SEED_DIR_NAME          = "seed-rootfs"
-    BQ2_DIR_NAME           = "bq2-rootfs"
-    LOG_DIR_NAME           = "var/lib"
-    WORKSPACE_DIR_NAME     = "workspace"
-    SYSROOT_DIR_NAME       = "opt/sysroot"
+    ROOTFS_MARKER_NAME   = ".bq2-rootfs"
+    DEFAULT_HOST_WORKDIR = "data/sysroot"
+    SEED_DIR_NAME        = "seed-rootfs"
+    BQ2_DIR_NAME         = "bq2-rootfs"
+    LOG_DIR_NAME         = "var/lib"
+    WORKSPACE_DIR_NAME   = "workspace"
+    SYSROOT_DIR_NAME     = "opt/sysroot"
     enum Namespace
       Host
       Seed
@@ -61,8 +61,8 @@ module Bootstrap
         marker_match = found_marker.not_nil!
         @namespace = marker_match[:namespace]
         if @namespace == Namespace::Host
-	  @host_workdir = Path["#{DEFAULT_HOST_WORKDIR}"]
-	end
+          @host_workdir = Path["#{DEFAULT_HOST_WORKDIR}"]
+        end
       else
         @namespace = Namespace::Host
       end

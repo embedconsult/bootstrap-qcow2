@@ -256,8 +256,8 @@ module Bootstrap
     end
 
     # Download all configured package sources and return their cached paths.
-    def download_sources : Array(Path)
-      packages.flat_map { |pkg| download_all(pkg) }
+    def download_sources(step : BuildStep) : Array(Path)
+      step.sources.flat_map { |pkg| download_all(pkg) }
       pkg.all_urls.map_with_index do |uri, idx|
         checksum_uri = idx.zero? ? pkg.checksum_url : URI.parse("#{uri}.sha256") rescue nil
         logical = idx.zero? ? pkg : pkg_with_url(pkg, uri, checksum_uri)
