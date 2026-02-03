@@ -33,10 +33,15 @@ module Bootstrap
     LOG_DIR_NAME           = "var/lib"
     WORKSPACE_DIR_NAME     = "workspace"
     SYSROOT_DIR_NAME       = "opt/sysroot"
+    enum Namespace
+      Host
+      Seed
+      BQ2
+    end
     PROBE_PATHS_FOR_MARKER = [
-      {namespace: "host", path: Path["#{DEFAULT_HOST_WORKDIR}/#{SEED_DIR_NAME}/#{BQ2_DIR_NAME}/#{ROOTFS_MARKER_NAME}"]},
-      {namespace: "seed", path: Path["/#{BQ2_DIR_NAME}/#{ROOTFS_MARKER_NAME}"]},
-      {namepsace: "bq2", path: Path["/#{ROOTFS_MARKER_NAME}"]},
+      {namespace: Namespace::Host, path: Path["#{DEFAULT_HOST_WORKDIR}/#{SEED_DIR_NAME}/#{BQ2_DIR_NAME}/#{ROOTFS_MARKER_NAME}"]},
+      {namespace: Namespace::Seed, path: Path["/#{BQ2_DIR_NAME}/#{ROOTFS_MARKER_NAME}"]},
+      {namepsace: Namespace::BQ2, path: Path["/#{ROOTFS_MARKER_NAME}"]},
     ]
 
     @host_workdir : Path?
@@ -46,20 +51,20 @@ module Bootstrap
     @marker_path : Path
     @workspace_path : Path
     @log_path : Path
-    @namespace : String
+    @namespace : Namespace
     @extra_binds : Array(Tuple(Path, Path))
 
     def initialize(@host_workdir : Path? = nil, @extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path))
       if @host_workdir.nil?
-        @namespace = "host"
-      else
         found_marker = PROBE_PATHS_FOR_MARKER.find { |s| File.exists?(s[:path]) }
-        if found_marker.nil?
-          marker_match = found_marker.not_nil!
-          @namespace = marker_match[:namespace]
-        else
-          raise "Missing BQ2 rootfs marker at one of these paths: #{PROBE_PATHS_FOR_MARKER}"
-        end
+        raise "Missing BQ2 rootfs marker at one of these paths: #{PROBE_PATHS_FOR_MARKER}" if found_maker.nil?
+        marker_match = found_marker.not_nil!
+        @namespace = marker_match[:namespace]
+        if @namespace == Namespace::Host
+	  @host_workdir = Path["#{DEFAULT_HOST_WORKDIR}"]
+	end
+      else
+        @namespace = Namespace::Host
       end
 
       case @namespace
@@ -82,6 +87,8 @@ module Bootstrap
       @workspace_path = @bq2_rootfs_path / Path["#{WORKSPACE_DIR_NAME}"]
       @log_path = @bq2_rootfs_path / Path["#{LOG_DIR_NAME}"]
     end
+
+    def self.seed_rootfs_from(
 
     # Create a workspace rooted at *host_workdir*, ensuring marker + dirs exist.
     def self.create(host_workdir : Path = Path["#{DEFAULT_HOST_WORKDIR}"], extra_binds : Array(String) = [] of String) : SysrootWorkspace

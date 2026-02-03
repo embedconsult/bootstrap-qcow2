@@ -24,7 +24,7 @@ module Bootstrap
     getter format_version : Int32 = FORMAT_VERSION
 
     @[JSON::Field(ignore: true)]
-    property workspace : SysrootWorkspace?
+    property workspace : SysrootWorkspace
 
     # Identifier for the prepared rootfs. This changes whenever the rootfs is
     # regenerated from scratch.
