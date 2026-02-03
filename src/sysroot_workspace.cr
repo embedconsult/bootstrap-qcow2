@@ -67,28 +67,48 @@ module Bootstrap
         @namespace = Namespace::Host
       end
 
-      case @namespace
-      when "host"
-        @seed_rootfs_path = @host_workdir.not_nil! / Path["#{SEED_DIR_NAME}"]
-        @sysroot_path = @seed_rootfs_path.not_nil! / Path["#{SYSROOT_DIR_NAME}"]
-        @bq2_rootfs_path = @seed_rootfs_path.not_nil! / Path["#{BQ2_DIR_NAME}"]
-      when "seed"
-        @seed_rootfs_path = Path["/"]
-        @sysroot_path = @seed_rootfs_path.not_nil! / Path["#{SYSROOT_DIR_NAME}"]
-        @bq2_rootfs_path = @seed_rootfs_path.not_nil! / Path["#{BQ2_DIR_NAME}"]
-      when "bq2"
-        @seed_rootfs_path = nil
-        @sysroot_path = nil
-        @bq2_rootfs_path = Path["/"]
-      else
-        raise "Invalid namespace: #{@namespace}"
-      end
+      raise "Invalid namespace: #{@namespace}" unless @namespace.in[]
+
+      @seed_rootfs_path = seed_rootfs_from(@namespace, @host_workdir)
+      @sysroot_path = sysroot_from(@namespace, @host_workdir)
+      @bq2_rootfs_path = bq2_rootfs_from(@namespace, @host_workdir)
       @marker_path = @bq2_rootfs_path / Path["#{ROOTFS_MARKER_NAME}"]
       @workspace_path = @bq2_rootfs_path / Path["#{WORKSPACE_DIR_NAME}"]
       @log_path = @bq2_rootfs_path / Path["#{LOG_DIR_NAME}"]
     end
 
-    def self.seed_rootfs_from(
+    def self.seed_rootfs_from(namespace : Namespace, host_workdir : String? = nil)
+      case @namespace
+      in .host?
+        host_workdir.not_nil! / Path["#{SEED_DIR_NAME}"]
+      in .seed?
+        Path["/"]
+      in .bq?
+        nil
+      end
+    end
+
+    def self.sysroot_from(namespace : Namespace, host_workdir : String? = nil)
+      case @namespace
+      in .host?
+        seed_rootfs_from(namespace, host_workdir) / Path["#{SYSROOT_DIR_NAME}"]
+      in .seed?
+        seed_rootfs_from(namespace, host_workdir) / Path["#{SYSROOT_DIR_NAME}"]
+      in .bq2?
+        nil
+      end
+    end
+
+    def self.bq2_rootfs_from(namespace : Namespace, host_workdir : String? = nil)
+      case @namespace
+      in .host?
+        seed_rootfs_from(namespace, host_workdir) / Path["#{BQ2_DIR_NAME}"]
+      in .seed?
+        seed_rootfs_from(namespace, host_workdir) / Path["#{BQ2_DIR_NAME}"]
+      in .bq?
+        Path["/"]
+      end
+    end
 
     # Create a workspace rooted at *host_workdir*, ensuring marker + dirs exist.
     def self.create(host_workdir : Path = Path["#{DEFAULT_HOST_WORKDIR}"], extra_binds : Array(String) = [] of String) : SysrootWorkspace
