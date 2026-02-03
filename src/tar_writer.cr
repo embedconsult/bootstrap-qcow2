@@ -55,7 +55,7 @@ module Bootstrap
     # Write every entry in the source tree to the tar stream.
     def write_all
       @sources.each do |source|
-        walk(sources) do |entry, stat|
+        walk(source) do |entry, stat|
           relative = Path.new(entry).relative_to(@base_path).to_s
           if stat.directory?
             write_entry(relative, 0_i64, stat, TYPE_DIRECTORY)
