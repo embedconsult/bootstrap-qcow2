@@ -47,9 +47,9 @@ module Bootstrap
 
     # Execute build plan
     def run_plan
-      Log.info { "*** Running build plan #{@state.plan.desc} from state #{@state.desc} ***" }
+      Log.info { "*** Running build plan #{@state.plan_path} from state #{@state.state_path} ***" }
       report_dir = @state.report_dir
-      Log.info { "Using report_dir: #{report_dir}" } if report_dir.not_nil?
+      Log.info { "Using report_dir: #{report_dir}" } unless report_dir.nil?
       phases = @state.selected_phases
       phases = apply_rootfs_env_overrides(phases) if rootfs_marker_present?
       phases = filter_phases_by_packages(phases, packages) if packages

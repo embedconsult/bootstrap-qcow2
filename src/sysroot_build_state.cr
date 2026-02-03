@@ -24,7 +24,7 @@ module Bootstrap
     getter format_version : Int32 = FORMAT_VERSION
 
     @[JSON::Field(ignore: true)]
-    property workspace : SysrootWorkspace
+    @workspace : SysrootWorkspace?
 
     # Identifier for the prepared rootfs. This changes whenever the rootfs is
     # regenerated from scratch.
@@ -35,12 +35,6 @@ module Bootstrap
 
     # Timestamp for the most recent update (UTC, ISO8601).
     property updated_at : String?
-
-    # Absolute path to the serialized build plan inside the rootfs.
-    property plan_path : String
-
-    # Absolute path to the runtime overrides JSON inside the rootfs, when used.
-    property overrides_path : String?
 
     # SHA256 digest (hex) of the build plan file used to produce this state.
     #
@@ -53,9 +47,6 @@ module Bootstrap
     # When this digest changes, the runner should treat overrides as different
     # and should avoid skipping completed steps from a prior run.
     property overrides_digest : String?
-
-    # Absolute path to the failure report directory inside the rootfs, when enabled.
-    property report_dir : String?
 
     # Timestamp (UTC, ISO8601) for the most recent state invalidation.
     property invalidated_at : String?
@@ -72,71 +63,46 @@ module Bootstrap
                    @updated_at : String? = nil,
                    @plan_digest : String? = nil,
                    @overrides_digest : String? = nil,
-                   @report_dir : String? = DEFAULT_REPORTS,
                    @invalidated_at : String? = nil,
                    @invalidation_reason : String? = nil,
                    @progress : Progress = Progress.new,
-                   @format_version : Int32 = FORMAT_VERSION)
+                   @format_version : Int32 = FORMAT_VERSION,
+		   raise_on_invalid_state : Bool = false)
+      ensure_state_file
+      self.class.from_json(File.open(state_path))
+      raise "State file does not reconcile with plan: #{@invalidation_reason}" if reconcile_inputs && raise_on_invalid_state
+      @workspace ||= SysrootWorkspace.new
+      touch
+      save
     end
 
-    # Default rootfs-relative plan path used when initializing new state.
-    def self.rootfs_plan_path : String
-      DEFAULT_PLAN
+    # Current rootfs-relative plan path
+    def plan_path : Path
+      w = @workspace.nil? ? SysrootWorkspace.new : @workspace.not_nil!
+      w.log_path / PLAN_FILE
     end
 
-    # Default rootfs-relative overrides path used when initializing new state.
-    def self.rootfs_overrides_path : String
-      DEFAULT_OVERRIDES
-    end
-
-    # Default rootfs-relative report directory used when initializing new state.
-    def self.rootfs_report_dir : String
-      DEFAULT_REPORTS
-    end
-
-    # Default rootfs-relative plan path for this instance.
-    def rootfs_plan_path : String
-      self.class.rootfs_plan_path
-    end
-
-    # Default rootfs-relative overrides path for this instance.
-    def rootfs_overrides_path : String
-      self.class.rootfs_overrides_path
-    end
-
-    # Default rootfs-relative report directory for this instance.
-    def rootfs_report_dir : String
-      self.class.rootfs_report_dir
-    end
-
-    # Return the inner rootfs var/lib directory for this workspace.
-    def log_dir : Path
-      workspace_or_raise.var_lib_dir
-    end
-
-    # Return the rootfs-absolute state path for this workspace.
+    # Current rootfs-relative state path
     def state_path : Path
-      log_dir / STATE_FILE
+      w = @workspace.nil? ? SysrootWorkspace.new : @workspace.not_nil!
+      w.log_path / STATE_FILE
     end
 
-    # Return the rootfs-absolute plan path for this workspace.
-    def plan_path_path : Path
-      log_dir / PLAN_FILE
+    # Current rootfs-relative overrides path
+    private def overrides_path : Path
+      w = @workspace.nil? ? SysrootWorkspace.new : @workspace.not_nil!
+      w.log_path / OVERRIDES_FILE
     end
 
-    # Return the rootfs-absolute overrides path for this workspace.
-    def overrides_path_path : Path
-      log_dir / OVERRIDES_FILE
-    end
-
-    # Return the rootfs-absolute report directory for this workspace.
-    def report_dir_path : Path
-      log_dir / REPORT_DIR_NAME
+    # Current rootfs-relative report directory
+    def report_dir : Path
+      w = @workspace.nil? ? SysrootWorkspace.new : @workspace.not_nil!
+      w.log_path / REPORT_DIR_NAME
     end
 
     # Returns true when the build plan file exists for this workspace.
     def plan_exists? : Bool
-      File.exists?(plan_path_path)
+      File.exists?(path_path)
     end
 
     # Returns true when the build state file exists for this workspace.
@@ -147,55 +113,11 @@ module Bootstrap
     # Ensure a state file exists on disk, creating an empty one when needed.
     def ensure_state_file : Nil
       return if File.exists?(state_path)
-      save(state_path)
-    end
-
-    # Load state from *path*, returning nil when the file does not exist.
-    def self.load?(workspace : SysrootWorkspace, path : Path? = nil) : SysrootBuildState?
-      path ||= workspace.var_lib_dir / STATE_FILE
-      return nil unless File.exists?(path)
-      state = from_json(File.read(path))
-      state.attach_workspace!(workspace)
-      state
-    end
-
-    # Load state from *path*, raising when the file does not exist.
-    def self.load(workspace : SysrootWorkspace, path : Path? = nil) : SysrootBuildState
-      path ||= workspace.var_lib_dir / STATE_FILE
-      raise "Missing sysroot build state #{path}" unless File.exists?(path)
-      state = from_json(File.read(path))
-      state.attach_workspace!(workspace)
-      state
-    end
-
-    # Load state from *path* if present; otherwise initialize a new state file.
-    # Always updates the metadata fields to reflect the current runner config.
-    def self.load_or_init(workspace : SysrootWorkspace,
-                          path : Path? = nil,
-                          overrides_path : Path? = nil,
-                          report_dir : Path? = nil) : SysrootBuildState
-      path ||= workspace.var_lib_dir / STATE_FILE
-      plan_path_value = rootfs_plan_path
-      overrides_path_value = overrides_path ? overrides_path.not_nil!.to_s : rootfs_overrides_path
-      report_dir_value = report_dir ? report_dir.not_nil!.to_s : rootfs_report_dir
-
-      state = load?(workspace, path) || new(
-        workspace: workspace,
-        plan_path: plan_path_value,
-        overrides_path: overrides_path_value,
-        report_dir: report_dir_value
-      )
-      state.workspace = workspace
-      state.plan_path = plan_path_value
-      state.overrides_path = overrides_path_value
-      state.report_dir = report_dir_value
-      state.reconcile_inputs!
-      state.touch!
-      state
+      save
     end
 
     # Return the SHA256 hex digest for *path*, or nil when the file is missing.
-    def self.digest_for?(path : String) : String?
+    def self.digest_for?(path : Path) : String?
       return nil unless File.exists?(path)
       digest = Digest::SHA256.new
       File.open(path) do |file|
@@ -208,10 +130,9 @@ module Bootstrap
     end
 
     # Persist the state JSON to disk.
-    def save(path : Path? = nil) : Nil
-      path ||= state_path
-      FileUtils.mkdir_p(path.parent)
-      File.write(path, to_pretty_json)
+    def save
+      FileUtils.mkdir_p(state_path.parent)
+      File.write(state_path, to_pretty_json)
     end
 
     # Returns true when the given *step_name* has already completed successfully
@@ -223,13 +144,13 @@ module Bootstrap
     # Record that *step_name* finished successfully within *phase_name*.
     def mark_success(phase_name : String, step_name : String) : Nil
       progress.current_phase = phase_name
-      steps = (progress.completed_steps[phase_name]? || [] of String)
+      steps = (@progress.completed_steps[phase_name]? || [] of String)
       unless steps.includes?(step_name)
         steps << step_name
-        progress.completed_steps[phase_name] = steps
+        @progress.completed_steps[phase_name] = steps
       end
-      progress.last_success = StepRef.new(phase: phase_name, step: step_name, occurred_at: Time.utc.to_s)
-      touch!
+      @progress.last_success = StepRef.new(phase: phase_name, step: step_name, occurred_at: Time.utc.to_s)
+      touch
     end
 
     # Record that *step_name* failed within *phase_name*.
@@ -242,40 +163,41 @@ module Bootstrap
         error: error,
         report_path: report_path
       )
-      touch!
+      touch
     end
 
     # Update `updated_at` to the current UTC time.
-    def touch! : Nil
-      self.updated_at = Time.utc.to_s
+    def touch : Nil
+      @updated_at = Time.utc.to_s
     end
 
     # Ensure stored digests match the current plan/overrides files.
     #
     # When the plan or overrides inputs change, this clears completed steps so
     # the runner does not incorrectly skip work based on stale state.
-    def reconcile_inputs! : Nil
+    def reconcile_inputs : Bool
       previous_plan = plan_digest
       previous_overrides = overrides_digest
-      current_plan = self.class.digest_for?(resolved_plan_path)
-      current_overrides = resolved_overrides_path.try { |path| self.class.digest_for?(path) }
+      current_plan = self.class.digest_for?(plan_path)
+      current_overrides = self.class.digest_for?(overrides_path)
 
-      self.plan_digest = current_plan
-      self.overrides_digest = current_overrides
+      @plan_digest = current_plan
+      @overrides_digest = current_overrides
 
-      return if progress.completed_steps.empty?
+      return true if progress.completed_steps.empty?
 
       changed = false
       changed ||= previous_plan != current_plan
       changed ||= previous_overrides != current_overrides
-      return unless changed
+      return true unless changed
 
       progress.completed_steps.clear
       progress.current_phase = nil
       progress.last_success = nil
       progress.last_failure = nil
-      self.invalidated_at = Time.utc.to_s
-      self.invalidation_reason = "Build plan/overrides changed; cleared completed steps"
+      @invalidated_at = Time.utc.to_s
+      @invalidation_reason = "Build plan/overrides changed; cleared completed steps"
+      false
     end
 
     # Return true when the resume step matches the most recent failure.
@@ -340,11 +262,6 @@ module Bootstrap
       File.read(path)
     end
 
-    private def resolved_plan_path : String
-      return plan_path unless plan_path == rootfs_plan_path
-      plan_path_path.to_s
-    end
-
     private def resolved_overrides_path : String?
       return nil unless overrides_path
       return overrides_path.not_nil! unless overrides_path == rootfs_overrides_path
@@ -394,28 +311,6 @@ module Bootstrap
                      @completed_steps : Hash(String, Array(String)) = {} of String => Array(String),
                      @last_success : StepRef? = nil,
                      @last_failure : FailureRef? = nil)
-      end
-    end
-
-    private def workspace_or_raise : SysrootWorkspace
-      workspace || raise "SysrootWorkspace is required to resolve build state paths"
-    end
-
-    protected def attach_workspace!(workspace : SysrootWorkspace) : Nil
-      self.workspace = workspace
-      normalize_rootfs_paths!(workspace)
-    end
-
-    private def normalize_rootfs_paths!(workspace : SysrootWorkspace) : Nil
-      var_lib_prefix = workspace.var_lib_dir.to_s
-      if plan_path.starts_with?(var_lib_prefix)
-        self.plan_path = rootfs_plan_path
-      end
-      if overrides_path.nil? || overrides_path.not_nil!.starts_with?(var_lib_prefix)
-        self.overrides_path = rootfs_overrides_path
-      end
-      if report_dir.nil? || report_dir.not_nil!.starts_with?(var_lib_prefix)
-        self.report_dir = rootfs_report_dir
       end
     end
   end
