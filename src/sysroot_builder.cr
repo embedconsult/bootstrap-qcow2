@@ -54,7 +54,6 @@ module Bootstrap
     DEFAULT_MUSL           = "1.2.5"
     DEFAULT_CMAKE          = "3.29.6"
     DEFAULT_SHARDS         = "0.18.0"
-    DEFAULT_NAMESERVER     = "8.8.8.8"
     DEFAULT_M4             = "1.4.19"
     DEFAULT_GNU_MAKE       = "4.4.1"
     DEFAULT_ZLIB           = "1.3.1"
@@ -74,6 +73,7 @@ module Bootstrap
     SHARDS_CACHE_DIR       = ".shards-cache" # Cache directory name for prefetched shards dependencies.
     # Source: https://curl.se/ca/cacert.pem (Mozilla CA certificate bundle).
     CA_BUNDLE_PEM = {{ read_file("#{__DIR__}/../data/ca-bundle/ca-certificates.crt") }}
+    DEFAULT_NAMESERVER     = "8.8.8.8"
 
     getter workspace : SysrootWorkspace
     getter architecture : String
@@ -128,36 +128,19 @@ module Bootstrap
                    @seed : String = DEFAULT_ROOTFS_SEED)
     end
 
-    # Return the expected archive paths for all configured packages.
-    def expected_source_archives : Array(Path)
-      packages.flat_map do |pkg|
-        pkg.all_urls.map { |uri| sources_dir / pkg.filename_for(uri) }
-      end
-    end
-
-    # Return the expected archive paths that are missing from the source cache.
-    def missing_source_archives : Array(Path)
-      expected_source_archives.reject do |path|
-        File.exists?(path) && File.size(path) > 0
-      end
-    end
-
-    # Returns true when the workspace contains a prepared rootfs with a
-    # serialized build plan. Iteration state is created by `SysrootRunner` and
-    # is not part of a clean sysroot build output.
-    def rootfs_ready? : Bool
-      SysrootBuildState.new(workspace: @workspace).plan_exists?
-    end
-
     # Build a PackageSpec pointing at the base rootfs tarball for the configured
     # architecture/branch/version. The checksum URL is derived from the upstream
     # naming convention when available.
-    def base_rootfs_spec : PackageSpec
-      version_tag = resolved_base_version
-      file = "alpine-minirootfs-#{version_tag}-#{@architecture}.tar.gz"
-      url = URI.parse("https://dl-cdn.alpinelinux.org/alpine/#{@branch}/releases/#{@architecture}/#{file}")
-      checksum_url = URI.parse("#{url}.sha256") rescue nil
-      PackageSpec.new("bootstrap-rootfs", version_tag, url, nil, checksum_url)
+    def seed_rootfs_spec : PackageSpec
+      if @seed == "Alpine"
+        version_tag = resolved_base_version
+        file = "alpine-minirootfs-#{version_tag}-#{@architecture}.tar.gz"
+        url = URI.parse("https://dl-cdn.alpinelinux.org/alpine/#{@branch}/releases/#{@architecture}/#{file}")
+        checksum_url = URI.parse("#{url}.sha256") rescue nil
+        PackageSpec.new("bootstrap-rootfs", version_tag, url, nil, checksum_url)
+      else
+        raise "Not currently defined seed: #{@seed}"
+      end
     end
 
     # Declarative list of upstream sources that should populate the sysroot.
@@ -1175,11 +1158,11 @@ module Bootstrap
     private def sysroot_target_triple : String
       case @architecture
       when "aarch64", "arm64"
-        "aarch64-alpine-linux-musl"
+        "aarch64-bq2-linux-musl"
       when "x86_64", "amd64"
-        "x86_64-alpine-linux-musl"
+        "x86_64-bq2-linux-musl"
       else
-        "#{@architecture}-alpine-linux-musl"
+        "#{@architecture}-bq2-linux-musl"
       end
     end
 
@@ -1199,20 +1182,12 @@ module Bootstrap
     end
 
     private def host_setup_env : Hash(String, String)
-      env = {
+      {
         "BQ2_ARCH"          => @architecture,
         "BQ2_BRANCH"        => @branch,
         "BQ2_BASE_VERSION"  => @base_version,
         "BQ2_SOURCE_BRANCH" => bootstrap_source_version,
       }
-      env["BQ2_BASE_ROOTFS_PATH"] = @base_rootfs_path.not_nil!.to_s if @base_rootfs_path
-      env["BQ2_USE_SYSTEM_TAR_SOURCES"] = @use_system_tar_for_sources ? "1" : "0"
-      env["BQ2_USE_SYSTEM_TAR_ROOTFS"] = @use_system_tar_for_rootfs ? "1" : "0"
-      env["BQ2_PRESERVE_OWNERSHIP_SOURCES"] = @preserve_ownership_for_sources ? "1" : "0"
-      env["BQ2_PRESERVE_OWNERSHIP_ROOTFS"] = @preserve_ownership_for_rootfs ? "1" : "0"
-      env["BQ2_OWNER_UID"] = @owner_uid.to_s if @owner_uid
-      env["BQ2_OWNER_GID"] = @owner_gid.to_s if @owner_gid
-      env
     end
 
     private def package_source_specs(specs : Array(PackageSpec)) : Array(SourceSpec)

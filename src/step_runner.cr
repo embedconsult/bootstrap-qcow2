@@ -31,16 +31,12 @@ module Bootstrap
   # * ProcessRunner for invoking and logging external executables
   # * AlpineSetup for Alpine seed rootfs configuration
   class StepRunner
-    getter clean_build_dirs : Bool
+    property clean_build_dirs : Bool
     getter workspace : SysrootWorkspace?
     @command_log_prefix : String?
 
     def initialize(@clean_build_dirs : Bool = true, @workspace : SysrootWorkspace? = nil)
       @command_log_prefix = nil
-    end
-
-    def with_workspace(workspace : SysrootWorkspace?) : StepRunner
-      StepRunner.new(clean_build_dirs: @clean_build_dirs, workspace: workspace)
     end
 
     # Run a build step using the selected strategy.

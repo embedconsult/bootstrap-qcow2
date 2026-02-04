@@ -172,12 +172,12 @@ module Bootstrap
     # Returns true when the given *step_name* has already completed successfully
     # within *phase_name*.
     def completed?(phase_name : String, step_name : String) : Bool
-      progress.completed_steps[phase_name]?.try(&.includes?(step_name)) || false
+      @progress.completed_steps[phase_name]?.try(&.includes?(step_name)) || false
     end
 
     # Record that *step_name* finished successfully within *phase_name*.
     def mark_success(phase_name : String, step_name : String) : Nil
-      progress.current_phase = phase_name
+      @progress.current_phase = phase_name
       steps = (@progress.completed_steps[phase_name]? || [] of String)
       unless steps.includes?(step_name)
         steps << step_name
@@ -185,6 +185,7 @@ module Bootstrap
       end
       @progress.last_success = StepRef.new(phase: phase_name, step: step_name, occurred_at: Time.utc.to_s)
       touch
+      save
     end
 
     # Record that *step_name* failed within *phase_name*.
@@ -198,6 +199,7 @@ module Bootstrap
         report_path: report_path
       )
       touch
+      save
     end
 
     # Update `updated_at` to the current UTC time.

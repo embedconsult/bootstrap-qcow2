@@ -29,7 +29,7 @@ module Bootstrap
   class SysrootRunner < CLI
     @workspace : SysrootWorkspace
     @state : SysrootBuildState
-    @runner : StepRunner
+    @step_runner : StepRunner
 
     # workspace: holds the current working environment
     # report: do we generate a build report
@@ -40,19 +40,20 @@ module Bootstrap
       @report : Bool = true,
       @resume : Bool = true,
       @dry_run : Bool = true,
+      @clean_build_dirs : Bool = true
     )
-      @state = SysrootBuildState.new(workspace: workspace)
-      @runner = StepRunner.new(workspace: workspace)
+      @state = SysrootBuildState.new(workspace: @workspace)
+      @step_runner = StepRunner.new(clean_build_dirs: @clean_build_dirs, workspace: @workspace)
     end
 
-    # Execute build plan
+    # Execute the build plan
     def run_plan
       Log.info { "*** Running build plan #{@state.plan_path} from state #{@state.state_path} ***" }
       report_dir = @state.report_dir
       Log.info { "Using report_dir: #{report_dir}" } unless report_dir.nil?
       phases = @state.selected_phases
       phases = apply_rootfs_env_overrides(phases) if rootfs_marker_present?
-      phases = filter_phases_by_packages(phases, packages) if packages
+      phases = filter_phases_by_packages(phases, @packages) if packages
       phases = filter_phases_by_state(phases, state) if resume && state
       if @dry_run
         Log.info { describe_phases(phases) }
@@ -121,15 +122,15 @@ module Bootstrap
       Log.info { "All build steps completed" }
     end
 
-    private def self.retrying_step?(phase_name : String, step_name : String, state : SysrootBuildState) : Bool
-      failure = state.progress.last_failure
+    private def self.retrying_step?(phase_name : String, step_name : String) : Bool
+      failure = @state.progress.last_failure
       return false unless failure
       failure.phase == phase_name && failure.step == step_name
     end
 
-    private def self.filter_phases_by_state(phases : Array(BuildPhase), state : SysrootBuildState) : Array(BuildPhase)
+    private def self.filter_phases_by_state(phases : Array(BuildPhase)) : Array(BuildPhase)
       phases.compact_map do |phase|
-        remaining = phase.steps.reject { |step| state.completed?(phase.name, step.name) }
+        remaining = phase.steps.reject { |step| @state.completed?(phase.name, step.name) }
         next nil if remaining.empty?
         BuildPhase.new(
           name: phase.name,
@@ -142,30 +143,6 @@ module Bootstrap
           steps: remaining,
         )
       end
-    end
-
-    # Select phases for execution based on the optional phase selector.
-    private def self.selected_phases(plan : BuildPlan, requested : String?) : Array(BuildPhase)
-      raise "Build plan is empty" if plan.phases.empty?
-      unless requested
-        return [default_phase(plan)]
-      end
-      return plan.phases if requested == "all"
-      matching = plan.phases.select { |phase| phase.name == requested }
-      raise "Unknown build phase #{requested}" if matching.empty?
-      matching
-    end
-
-    private def self.default_phase(plan : BuildPlan) : BuildPhase
-      if rootfs_marker_present?
-        rootfs_phase = plan.phases.find { |phase| phase.environment.starts_with?("rootfs-") }
-        return rootfs_phase if rootfs_phase
-      end
-      if outer_rootfs_marker_present?
-        non_host = plan.phases.find { |phase| !phase.environment.starts_with?("host-") }
-        return non_host if non_host
-      end
-      plan.phases.first
     end
 
     private def self.apply_rootfs_env_overrides(phases : Array(BuildPhase)) : Array(BuildPhase)
