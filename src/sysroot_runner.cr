@@ -5,136 +5,304 @@ require "process"
 require "random/secure"
 require "set"
 require "time"
-require "./cli"
-require "./sysroot_workspace"
 require "./build_plan"
+require "./build_plan_overrides"
+require "./build_plan_utils"
+require "./cli"
 require "./sysroot_build_state"
+require "./sysroot_workspace"
 require "./sysroot_namespace"
 require "./step_runner"
 
 module Bootstrap
-  # SysrootRunner houses the logic that replays build steps, including changing into the appropriate namespace when needed using SysrootNamespace.
-  # It is kept in a regular source file, rather than something like shell script pulled out of the JSON-formatted plan, to benefit from formatting, linting,
-  # and spec unit tests. The main entrypoint registers the CLI class and dispatches into
-  # the `run` helpers below. It can also be called from other coordinator classes like SysrootAllResume that can build the final output tarball.
-  #
-  # SysrootRunner utilizes:
-  # * CLI for presenting the `sysroot-runner` and `sysroot-status` command-line interfaces via the self.run method
-  # * SysrootWorkspace for identifying the current process's namespace relative to the ROOTFS_MARKER and build plan to get relative file paths
-  # * SysrootBuildState for reading and writing the build state
-  # * SysrootNamespace for changing the active namespace
-  # * StepRunner for the execution of the individual steps
-  #
-  # NOTE: SysrootRunner cannot return to an outer namespace once it enters one inside, so invocation via Process.run may be appropriate if a coordinator needs to retain the previous process namespace.
+  # SysrootRunner replays build plan phases and delegates step execution to
+  # StepRunner. Plan paths are rewritten to match the active namespace so the
+  # plan can remain rooted at /workspace regardless of where it is replayed.
   class SysrootRunner < CLI
-    @workspace : SysrootWorkspace
-    @state : SysrootBuildState
-    @step_runner : StepRunner
+    DEFAULT_PHASE = "default"
 
-    # workspace: holds the current working environment
-    # report: do we generate a build report
-    def initialize(
-      @workspace : SysrootWorkspace = SysrootWorkspace.new,
-      @start_phase : String = "all",
-      @packages : Array(String) = [] of String,
-      @report : Bool = true,
-      @resume : Bool = true,
-      @dry_run : Bool = true,
-      @clean_build_dirs : Bool = true,
-    )
-      @state = SysrootBuildState.new(workspace: @workspace)
-      @step_runner = StepRunner.new(clean_build_dirs: @clean_build_dirs, workspace: @workspace)
+    # Summarize the sysroot runner CLI behavior for help output.
+    def self.summary : String
+      "Execute build plan to build rootfs and emit rootfs tarball"
     end
 
-    # Execute the build plan
-    def run_plan
-      Log.info { "*** Running build plan #{@state.plan_path} from state #{@state.state_path} ***" }
-      report_dir = @state.report_dir
-      Log.info { "Using report_dir: #{report_dir}" } unless report_dir.nil?
-      phases = @state.selected_phases
-      # TODO
-      # phases = apply_rootfs_env_overrides(phases) if rootfs_marker_present?
-      # phases = filter_phases_by_packages(phases, @packages) if packages
-      # phases = filter_phases_by_state(phases, state) if resume && state
-      if @dry_run
-        # TODO
-        # Log.info { describe_phases(phases) }
+    # Return additional command aliases handled by the sysroot runner.
+    def self.aliases : Array(String)
+      ["sysroot-status", "sysroot-tarball"]
+    end
+
+    # Describe help output entries for sysroot runner commands.
+    def self.help_entries : Array(Tuple(String, String))
+      [
+        {"sysroot-runner", "Execute build plan to build rootfs"},
+        {"sysroot-status", "Print current sysroot build phase"},
+        {"sysroot-tarball", "Emit a prefix-free rootfs tarball"},
+      ]
+    end
+
+    # Dispatch sysroot runner subcommands by command name.
+    def self.run(args : Array(String), command_name : String) : Int32
+      case command_name
+      when "sysroot-runner"
+        run_runner(args)
+      when "sysroot-status"
+        run_status(args)
+      when "sysroot-tarball"
+        run_tarball(args)
+      else
+        raise "Unknown sysroot runner command #{command_name}"
+      end
+    end
+
+    # Execute a build plan from a path on disk.
+    def self.run_plan(plan_path : String,
+                      runner,
+                      phase : String? = nil,
+                      packages : Array(String) = [] of String,
+                      report_dir : String? = nil,
+                      dry_run : Bool = false,
+                      resume : Bool = true,
+                      state_path : String? = nil,
+                      overrides_path : String? = nil,
+                      use_default_overrides : Bool = true,
+                      workspace : SysrootWorkspace? = nil) : Nil
+      plan = BuildPlan.parse(File.read(plan_path))
+      run_plan(plan,
+        runner,
+        phase: phase,
+        packages: packages,
+        report_dir: report_dir,
+        dry_run: dry_run,
+        resume: resume,
+        state_path: state_path,
+        overrides_path: overrides_path,
+        use_default_overrides: use_default_overrides,
+        workspace: workspace)
+    end
+
+    # Execute a build plan with a custom step runner.
+    def self.run_plan(plan : BuildPlan,
+                      runner,
+                      phase : String? = nil,
+                      packages : Array(String) = [] of String,
+                      report_dir : String? = nil,
+                      dry_run : Bool = false,
+                      resume : Bool = true,
+                      state_path : String? = nil,
+                      overrides_path : String? = nil,
+                      use_default_overrides : Bool = true,
+                      workspace : SysrootWorkspace? = nil) : Nil
+      resolved_plan = plan
+      if workspace
+        resolved_plan = BuildPlanUtils.rewrite_workspace_root(resolved_plan, workspace.workspace_path.to_s)
+        resolved_plan = BuildPlan.new(resolved_plan.phases_for_current_namespace(workspace), resolved_plan.format_version)
+      end
+
+      resolved_plan = apply_overrides(resolved_plan, overrides_path, use_default_overrides, workspace)
+
+      selected_phase = phase || default_phase(resolved_plan)
+      phases = resolved_plan.selected_phases(selected_phase)
+      phases = filter_phases_by_packages(phases, packages) if packages.any?
+
+      state = load_state(workspace, state_path)
+      if state && resume
+        phases = filter_phases_by_state(phases, state)
+      end
+
+      prepare_destdirs(phases)
+
+      if dry_run
+        print_dry_run(phases)
         return
       end
-      if report_dir
-        # TODO
-        # @step_runner.report_dir = report_dir
-      end
-      phases.each_with_index do |phase, idx|
-        @state.mark_current_phase(phase.name)
-        # TODO
-        # run_phase(phase)
-        next_phase = phases[idx + 1]?.try(&.name)
-        @state.mark_current_phase(next_phase)
+
+      phases.each_with_index do |phase_entry, idx|
+        if state
+          state.mark_current_phase(phase_entry.name)
+          state.save
+        end
+        run_phase(phase_entry, runner, report_dir: report_dir, state: state, resume: resume)
+        if state
+          state.mark_current_phase(phases[idx + 1]?.try(&.name))
+          state.save
+        end
       end
     end
 
     # Run a single phase from the plan.
-    def self.run_phase(phase : BuildPhase)
-      if phase.environment.starts_with?("host-")
-        raise "Refusing to run #{phase.name} (env=#{phase.environment} namespace=#{@workspace.namespace})" unless @workspace.namespace == "host"
-      elsif phase.environment.in?({"alpine-seed", "sysroot-toolchain"})
-        if @workspace.hostname == "host"
-          Log.info { "**** Entering outer seed rootfs at #{@workspace.seed_rootfs_path} ****" }
-          @workspace.enter_seed_rootfs_namespace
-          elseif @workspace.hostname == "bq2"
-          raise "Refusing to run #{phase.name} (env=#{phase.environment} namespace=#{@workspace.namespace})"
-        end
-        raise unless @hostname.workspace == "seed"
-      elsif effective_phase.environment.starts_with?("rootfs-")
-        if @workspace.namespace.in({"host", "seed"})
-          Log.info { "**** Entering inner BQ2 rootfs at #{@workspace.bq2_rootfs_path} ****" }
-          @workspace.enter_bq2_rootfs_namespace
-        end
-        raise unless @hostname.workspace == "bq2"
+    def self.run_phase(phase : BuildPhase,
+                       runner,
+                       report_dir : String?,
+                       allow_outside_rootfs : Bool = false,
+                       state : SysrootBuildState? = nil,
+                       resume : Bool = true) : Nil
+      if phase.environment.starts_with?("rootfs-") && !allow_outside_rootfs
+        raise "Refusing to run #{phase.name} outside the rootfs" unless inside_rootfs?
       end
-      Log.info { "Executing phase #{phase.name} (env=#{phase.environment}, namespace=#{@workspace.namespace})" }
+      Log.info { "Executing phase #{phase.name} (env=#{phase.environment})" }
       Log.info { "**** #{phase.description} ****" }
-      run_steps(phase.steps)
+      run_steps(phase, phase.steps, runner, report_dir: report_dir, state: state, resume: resume)
       Log.info { "Completed phase #{phase.name}" }
     end
 
     # Execute a list of BuildStep entries, stopping immediately on failure.
     def self.run_steps(phase : BuildPhase,
                        steps : Array(BuildStep),
-                       resume : Bool = true)
+                       runner,
+                       report_dir : String?,
+                       state : SysrootBuildState? = nil,
+                       resume : Bool = true) : Nil
       Log.info { "Executing #{steps.size} build steps" }
       steps.each do |step|
-        if resume && @state.completed?(phase.name, step.name)
+        if resume && state && state.completed?(phase.name, step.name)
           Log.info { "Skipping previously completed #{phase.name}/#{step.name}" }
           next
         end
-        Log.info { "Building #{step.name} in #{step.workdir} (phase=#{phase.name}, namespace=#{@workspace.namespace})" }
+        Log.info { "Building #{step.name} in #{step.workdir} (phase=#{phase.name})" }
         begin
-          if resume && @state.retrying_last_failure?(phase.name, step.name)
-            Log.debug { "Keeping previous build directory due to retrying previous build" }
-            @runner.clean_build_dirs = false
-          end
           runner.run(phase, step)
-          @state.mark_success(phase.name, step.name)
+          if state
+            state.mark_success(phase.name, step.name)
+            state.save
+          end
         rescue ex
-          report_path = @runner.write_failure_report_if_available(phase, step, ex)
-          @state.mark_failure(phase.name, step.name, ex.message, report_path)
+          report_path = report_dir ? write_failure_report(report_dir, phase, step, ex) : nil
+          if state
+            state.mark_failure(phase.name, step.name, ex.message, report_path)
+            state.save
+          end
           raise ex
         end
       end
       Log.info { "All build steps completed" }
     end
 
-    private def self.retrying_step?(phase_name : String, step_name : String) : Bool
-      failure = @state.progress.last_failure
-      return false unless failure
-      failure.phase == phase_name && failure.step == step_name
+    # Run build plan phases/steps from the CLI.
+    private def self.run_runner(args : Array(String)) : Int32
+      packages = [] of String
+      start_phase : String? = DEFAULT_PHASE
+      report = true
+      resume = true
+      dry_run = false
+      host_workdir : Path? = nil
+      extra_binds = [] of Tuple(Path, Path)
+      parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-runner [options]") do |p|
+        p.on("--phase NAME", "Select first build phase to run (default: auto)") { |name| start_phase = name }
+        p.on("--package NAME", "Only run the named package(s) (repeatable)") { |name| packages << name }
+        p.on("--no-report", "Disable failure report writing") { report = false }
+        p.on("--no-resume", "Disable resume/state tracking (useful when the default state path is not writable)") { resume = false }
+        p.on("--dry-run", "Print plan entries and exit") { dry_run = true }
+        p.on("--workdir=PATH", "Starting path for looking for build plan (default: #{SysrootWorkspace::DEFAULT_HOST_WORKDIR})") { |path| host_workdir = Path[path] }
+        p.on("--bind=SRC:DST", "Bind-mount SRC into DST inside the rootfs (repeatable)") do |val|
+          extra_binds << parse_bind_spec(val)
+        end
+      end
+      return CLI.print_help(parser) if help
+
+      begin
+        workspace = SysrootWorkspace.new(host_workdir: host_workdir, extra_binds: extra_binds)
+      rescue ex
+        STDERR.puts "Please build out the workspace first with `bq2 sysroot-builder`: #{ex.message}"
+        return -1
+      end
+
+      build_state = SysrootBuildState.load_or_init(workspace)
+      plan_path = build_state.plan_path_path.to_s
+      overrides_path = build_state.overrides_path_path.try(&.to_s)
+      report_dir = report ? build_state.report_dir_path.try(&.to_s) : nil
+
+      step_runner = StepRunner.new(workspace: workspace)
+      run_plan(
+        plan_path,
+        step_runner,
+        phase: start_phase == DEFAULT_PHASE ? nil : start_phase,
+        packages: packages,
+        report_dir: report_dir,
+        dry_run: dry_run,
+        resume: resume,
+        state_path: resume ? build_state.state_path.to_s : nil,
+        overrides_path: overrides_path,
+        use_default_overrides: true,
+        workspace: workspace
+      )
+      0
     end
 
-    private def self.filter_phases_by_state(phases : Array(BuildPhase)) : Array(BuildPhase)
+    private def self.parse_bind_spec(value : String) : Tuple(Path, Path)
+      parts = value.split(":", 2)
+      raise "Expected --bind=SRC:DST" unless parts.size == 2
+      src = Path[parts[0]].expand
+      dst_raw = parts[1]
+      dst_clean = dst_raw.starts_with?("/") ? dst_raw[1..] : dst_raw
+      {src, Path[dst_clean]}
+    end
+
+    # Print the current build status and next phase/step.
+    private def self.run_status(args : Array(String)) : Int32
+      host_workdir : Path? = nil
+      parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-status [options]") do |p|
+        p.on("--workdir=PATH", "Starting path for looking for build plan (default: #{SysrootWorkspace::DEFAULT_HOST_WORKDIR})") { |path| host_workdir = Path[path] }
+      end
+      return CLI.print_help(parser) if help
+
+      begin
+        workspace = SysrootWorkspace.new(host_workdir: host_workdir)
+      rescue ex
+        STDERR.puts "No valid workspace found, build out the workspace first with `bq2 sysroot-builder`: #{ex.message}"
+        return -1
+      end
+
+      state = SysrootBuildState.load_or_init(workspace)
+      puts "plan_path=#{state.plan_path}"
+      puts "state_path=#{state.state_path}"
+      if (failure = state.progress.last_failure)
+        puts "last_failure=#{failure.phase}/#{failure.step}"
+      end
+      0
+    end
+
+    # Run the finalize-rootfs phase to emit a prefix-free rootfs tarball.
+    private def self.run_tarball(args : Array(String)) : Int32
+      parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-tarball [options]") do |p|
+      end
+      return CLI.print_help(parser) if help
+      STDERR.puts "sysroot-tarball is not yet wired up"
+      1
+    end
+
+    private def self.apply_overrides(plan : BuildPlan,
+                                     overrides_path : String?,
+                                     use_default_overrides : Bool,
+                                     workspace : SysrootWorkspace?) : BuildPlan
+      return plan if overrides_path.nil? && !use_default_overrides
+      path = overrides_path
+      if path.nil? && use_default_overrides && workspace
+        path = (workspace.var_lib_dir / SysrootBuildState::OVERRIDES_FILE).to_s
+      end
+      return plan unless path && File.exists?(path)
+      Log.info { "Applying build plan overrides from #{path}" }
+      overrides = BuildPlanOverrides.from_json(File.read(path))
+      overrides.apply(plan)
+    end
+
+    private def self.default_phase(plan : BuildPlan) : String
+      return plan.phases.first.name if plan.phases.size == 1
+      if inside_rootfs?
+        rootfs_phase = plan.phases.find { |phase| phase.environment.starts_with?("rootfs-") }
+        return rootfs_phase.name if rootfs_phase
+      end
+      plan.phases.first.name
+    end
+
+    private def self.inside_rootfs? : Bool
+      marker = ENV["BQ2_ROOTFS_MARKER"]?
+      return File.exists?(marker) if marker
+      File.exists?(Path["/#{SysrootWorkspace::ROOTFS_MARKER_NAME}"])
+    end
+
+    private def self.filter_phases_by_state(phases : Array(BuildPhase), state : SysrootBuildState) : Array(BuildPhase)
       phases.compact_map do |phase|
-        remaining = phase.steps.reject { |step| @state.completed?(phase.name, step.name) }
+        remaining = phase.steps.reject { |step| state.completed?(phase.name, step.name) }
         next nil if remaining.empty?
         BuildPhase.new(
           name: phase.name,
@@ -149,42 +317,39 @@ module Bootstrap
       end
     end
 
-    private def self.apply_rootfs_env_overrides(phases : Array(BuildPhase)) : Array(BuildPhase)
-      phases.map do |phase|
-        apply_rootfs_env_override(phase)
+    private def self.filter_phases_by_packages(phases : Array(BuildPhase), packages : Array(String)) : Array(BuildPhase)
+      matched = Set(String).new
+      phases.each do |phase|
+        phase.steps.each do |step|
+          matched << step.name if packages.includes?(step.name)
+        end
       end
+      missing = packages.uniq.reject { |name| matched.includes?(name) }
+      raise "Requested package(s) not found in selected phases: #{missing.join(", ")}" unless missing.empty?
+
+      selected = phases.compact_map do |phase|
+        steps = phase.steps.select { |step| packages.includes?(step.name) }
+        next nil if steps.empty?
+        BuildPhase.new(
+          name: phase.name,
+          description: phase.description,
+          workspace: phase.workspace,
+          environment: phase.environment,
+          install_prefix: phase.install_prefix,
+          destdir: phase.destdir,
+          env: phase.env,
+          steps: steps,
+        )
+      end
+      raise "No matching packages found in selected phases: #{packages.join(", ")}" if selected.empty?
+      selected
     end
 
-    private def self.apply_rootfs_env_override(phase : BuildPhase) : BuildPhase
-      return phase unless phase.environment.starts_with?("rootfs-")
-      overrides = native_rootfs_env
-      merged = phase.env.dup
-      overrides.each { |key, value| merged[key] = value }
-      BuildPhase.new(
-        name: phase.name,
-        description: phase.description,
-        workspace: phase.workspace,
-        environment: phase.environment,
-        install_prefix: phase.install_prefix,
-        destdir: phase.destdir,
-        env: merged,
-        steps: phase.steps,
-      )
-    end
-
-    private def self.native_rootfs_env : Hash(String, String)
-      return {} of String => String unless File.exists?("/usr/bin/clang") && File.exists?("/usr/bin/clang++")
-      {
-        # Prefer prefix-free /usr tools but keep /opt/sysroot on PATH for the toolchain.
-        "PATH" => "/usr/bin:/bin:/usr/sbin:/sbin:/opt/sysroot/bin:/opt/sysroot/sbin",
-      }
-    end
-
-    private def self.describe_phases(phases : Array(BuildPhase)) : String
-      phases.map do |phase|
-        steps = phase.steps.map(&.name).join(", ")
-        "#{phase.name} (#{phase.steps.size} steps): #{steps}"
-      end.join(" | ")
+    private def self.prepare_destdirs(phases : Array(BuildPhase))
+      phases.each do |phase|
+        next unless destdir = phase.destdir
+        prepare_destdir(destdir)
+      end
     end
 
     # Creates a minimal directory skeleton for `DESTDIR` installs. The intent is
@@ -199,6 +364,18 @@ module Bootstrap
       FileUtils.mkdir_p(File.join(destdir, "usr/sbin"))
       FileUtils.mkdir_p(File.join(destdir, "usr/lib"))
       FileUtils.mkdir_p(File.join(destdir, "var/lib"))
+    end
+
+    private def self.print_dry_run(phases : Array(BuildPhase)) : Nil
+      phases.each do |phase|
+        phase.steps.each do |step|
+          payload = {
+            "phase" => phase,
+            "step"  => step,
+          }
+          puts payload.to_pretty_json
+        end
+      end
     end
 
     private def self.write_failure_report(report_dir : String, phase : BuildPhase, step : BuildStep, ex : Exception) : String?
@@ -256,192 +433,17 @@ module Bootstrap
       nil
     end
 
-    # Summarize the sysroot runner CLI behavior for help output.
-    def self.summary : String
-      "Executed build plan to build rootfs and build rootfs tarball"
-    end
-
-    # Return additional command aliases handled by the sysroot runner.
-    def self.aliases : Array(String)
-      ["sysroot-status", "sysroot-tarball"]
-    end
-
-    # Describe help output entries for sysroot runner commands.
-    def self.help_entries : Array(Tuple(String, String))
-      [
-        {"sysroot-runner", "Execute build plan to build rootfs"},
-        {"sysroot-status", "Print current sysroot build phase"},
-        {"sysroot-tarball", "Emit a prefix-free rootfs tarball"},
-      ]
-    end
-
-    # Dispatch sysroot runner subcommands by command name.
-    def self.run(args : Array(String), command_name : String) : Int32
-      case command_name
-      when "sysroot-runner"
-        run_runner(args)
-      when "sysroot-status"
-        run_status(args)
-      when "sysroot-tarball"
-        run_tarball(args)
-      else
-        raise "Unknown sysroot runner command #{command_name}"
-      end
-    end
-
-    # Run build plan phases/steps
-    private def self.run_runner(args : Array(String)) : Int32
-      packages = [] of String
-      start_phase = "all"
-      report = true
-      resume = true
-      dry_run = false
-      host_workdir : Path? = nil
-      extra_binds = [] of Tuple(Path, Path)
-      parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-runner [options]") do |p|
-        p.on("--phase NAME", "Select first build phase to run (default: all)") { |name| start_phase = name }
-        p.on("--package NAME", "Only run the named package(s) (repeatable)") { |name| packages << name }
-        p.on("--no-report", "Disable failure report writing") { report = false }
-        p.on("--no-resume", "Disable resume/state tracking (useful when the default state path is not writable)") { resume = false }
-        p.on("--dry-run", "List selected phases/steps and exit") { dry_run = true }
-        p.on("--workdir=PATH", "Starting path for looking for build plan (default: #{SysrootWorkspace::DEFAULT_HOST_WORKDIR})") { |path| host_workdir = Path[path] }
-        p.on("--bind=SRC:DST", "Bind-mount SRC into DST inside the rootfs (repeatable)") do |val|
-          extra_binds << parse_bind_spec(val)
-        end
-      end
-      return CLI.print_help(parser) if help
-
-      begin
-        workspace = SysrootWorkspace.new(host_workdir: host_workdir, extra_binds: extra_binds)
-      rescue ex
-        STDERR.puts "Please build out the workspace first with `bq2 sysroot-builder`: #{ex.message}"
-        return -1
-      end
-
-      runner = SysrootRunner.new(
-        workspace: workspace,
-        start_phase: start_phase,
-        packages: packages,
-        report: report,
-        resume: resume,
-        dry_run: dry_run
-      )
-      # TODO
-      # runner.run_plan
-      0
-    end
-
-    private def self.parse_bind_spec(value : String) : Tuple(Path, Path)
-      parts = value.split(":", 2)
-      raise "Expected --bind=SRC:DST" unless parts.size == 2
-      src = Path[parts[0]].expand
-      dst_raw = parts[1]
-      dst_clean = dst_raw.starts_with?("/") ? dst_raw[1..] : dst_raw
-      {src, Path[dst_clean]}
-    end
-
-    # Print the current build status and next phase/step.
-    private def self.run_status(args : Array(String)) : Int32
-      host_workdir : Path? = nil
-      show_latest_report = false
-      show_latest_log = false
-
-      parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-status [options]") do |p|
-        p.on("--workdir=PATH", "Starting path for looking for build plan (default: #{SysrootWorkspace::DEFAULT_HOST_WORKDIR})") { |path| host_workdir = Path[path] }
-        p.on("--latest-report", "Print the latest failure report JSON") { show_latest_report = true }
-        p.on("--latest-log", "Print the output log from the latest failure report") { show_latest_log = true }
-      end
-      return CLI.print_help(parser) if help
-
-      begin
-        # TODO
-        # workspace = SysrootWorkspace.new(host_workdir: host_workdir, extra_binds: extra_binds)
-        workspace = SysrootWorkspace.new(host_workdir: host_workdir)
-      rescue ex
-        STDERR.puts "No valid workspace found, build out the workspace first with `bq2 sysroot-builder`: #{ex.message}"
-        return -1
-      end
-
-      runner = SysrootRunner.new(workspace: workspace)
-
-      # TODO
-      return 0
-
-      if runner.state.next_phase
-        puts("next_phase=#{runner.state.next_phase.name}")
-        puts("next_step=#{runner.state.next_step.not_nil!.name}") if runner.state.next_step
-      else
-        puts("next_phase=(none)")
-      end
-      if (success = runner.state.progress.last_success)
-        puts("last_success=#{success.phase}/#{success.step}")
-      end
-      if (failure = runner.state.progress.last_failure)
-        puts("last_failure=#{failure.phase}/#{failure.step}")
-      end
-
-      if show_latest_report || show_latest_log
-        if runner.state.report_path
-          puts("latest_report=#{runner.state.report_path}")
-          puts(File.read(runner.state.report_path)) if show_latest_report
-        else
-          puts("latest_report=(missing)")
-        end
-        if show_latest_log
-          if runner.state.log_path
-            puts("latest_log=#{runner.state.log_path}")
-            puts(File.read(runner.state.log_path)) if File.exists?(runner.state.log_path)
-          else
-            puts("latest_log=(missing)")
-          end
-        end
-      end
-      0
-    end
-
-    private def self.resolve_latest_report_path(state : SysrootBuildState, _report_dir : String?, state_path : String?) : String?
-      report_path = state.progress.last_failure.try(&.report_path)
-      return nil unless report_path
-      resolved = state.resolve_rootfs_path(report_path, state_path)
-      return resolved if File.exists?(resolved)
-      nil
-    end
-
-    private def self.latest_report_path(report_dir : String) : String?
-      return nil unless Dir.exists?(report_dir)
-      files = Dir.glob(File.join(report_dir, "*.json"))
-      return nil if files.empty?
-      files.sort.last
-    end
-
-    private def self.report_log_path(report_path : String) : String?
-      return nil unless report_path.ends_with?(".json")
-      candidate = report_path.sub(/\.json$/, ".log")
-      File.exists?(candidate) ? candidate : nil
-    end
-
-    private def self.output_log_for_report(report_path : String) : String?
-      json = JSON.parse(File.read(report_path))
-      json["output_log"]?.try(&.as_s?)
-    rescue ex
-      Log.warn { "Failed to parse report #{report_path}: #{ex.message}" }
-      nil
-    end
-
     private def self.slugify(value : String) : String
       value.gsub(/[^A-Za-z0-9]+/, "_").gsub(/^_+|_+$/, "").downcase
     end
 
-    # Run the finalize-rootfs phase to emit a prefix-free rootfs tarball.
-    private def self.run_tarball(args : Array(String)) : Int32
-      workspace = SysrootWorkspace.new
-      parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-tarball [options]") do |p|
-      end
-      return CLI.print_help(parser) if help
-      step_runner = StepRunner.new
-      # TODO: Either load the existing build plan or generate a minimal plan with the "rootfs" strategy
-      # TODO: Call step_runner.run with the plan
-      0
+    private def self.load_state(workspace : SysrootWorkspace?, state_path : String?) : SysrootBuildState?
+      return nil unless workspace
+      return SysrootBuildState.load(workspace, Path[state_path]) if state_path
+      SysrootBuildState.load_or_init(workspace)
+    rescue ex
+      Log.warn { "Failed to load state: #{ex.message}" }
+      nil
     end
   end
 end
