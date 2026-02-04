@@ -103,7 +103,7 @@ module Bootstrap
     end
 
     # Create a workspace rooted at *host_workdir*, ensuring marker + dirs exist.
-    def self.create(host_workdir : Path = Path["#{DEFAULT_HOST_WORKDIR}"], extra_binds : Array(String) = [] of String) : SysrootWorkspace
+    def self.create(host_workdir : Path = Path["#{DEFAULT_HOST_WORKDIR}"], extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path,Path)) : SysrootWorkspace
       workspace = SysrootWorkspace.new(host_workdir: host_workdir, extra_binds: extra_binds)
       FileUtils.mkdir_p(workspace.sysroot_path)
       FileUtils.mkdir_p(workspace.bq2_rootfs_path)

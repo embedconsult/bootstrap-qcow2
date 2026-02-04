@@ -1,4 +1,5 @@
 require "json"
+require "log"
 require "./sysroot_workspace"
 
 module Bootstrap
@@ -148,29 +149,22 @@ module Bootstrap
     # Select phases for execution based on the optional phase selector.
     def selected_phases(requested : String = "all") : Array(BuildPhase)
       raise "Build plan is empty" if @phases.empty?
-      unless requested
-        return [default_phase(plan)]
-      end
       return @phases if requested == "all"
       matching = @phases.select { |phase| phase.name == requested }
       raise "Unknown build phase #{requested}" if matching.empty?
       matching
     end
 
-    def phases_for_current_workspace(workspace : SysrootWorkspace) : BuildPhase
-      case workspace.namespace
-      when .host?
-        rootfs_phase = plan.phases.find { |phase| phase.environment.starts_with?("rootfs-") }
-        return rootfs_phase if rootfs_phase
+    # Return phases that are valid for the current namespace
+    def phases_for_current_namespace : BuildPhase
+      candidate_phases = @phases
+      if @workspace.namespace.seed?
+        candidate_phases.reject! { |phase| phase.environment.starts_with?("host-") }
       end
-      if outer_rootfs_marker_present?
-      when .seed?
-        non_host = plan.phases.find { |phase| !phase.environment.starts_with?("host-") }
-        return non_host if non_host
+      if @workspace.namespace.bq2?
+        candidate_phases.reject! { |phase| phase.environment.starts_with?("rootfs-") }
       end
-      plan.phases.first
     end
-
   end
 end
 
