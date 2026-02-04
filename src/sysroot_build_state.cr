@@ -24,7 +24,7 @@ module Bootstrap
     getter format_version : Int32 = FORMAT_VERSION
 
     @[JSON::Field(ignore: true)]
-    property workspace : SysrootWorkspace?
+    @workspace : SysrootWorkspace = SysrootWorkspace.new
 
     # Identifier for the prepared rootfs. This changes whenever the rootfs is
     # regenerated from scratch.
@@ -57,83 +57,71 @@ module Bootstrap
     # Runner progress tracked per phase/package.
     getter progress : Progress = Progress.new
 
-    def self.new(workspace : SysrootWorkspace? = nil,
-                 rootfs_id : String = Random::Secure.hex(8),
-                 created_at : String = Time.utc.to_s,
-                 updated_at : String? = nil,
-                 plan_digest : String? = nil,
-                 overrides_digest : String? = nil,
-                 invalidated_at : String? = nil,
-                 invalidation_reason : String? = nil,
-                 progress : Progress = Progress.new,
-                 format_version : Int32 = FORMAT_VERSION,
-                 raise_on_invalid_state : Bool = false)
-      state = SysrootBuildState.allocate
-      workspace ||= SysrootWorkspace.new
-      new_workspace = workspace.not_nil!
-      new_state_path = new_workspace.log_path / STATE_FILE
-      if File.exists?(new_state_path)
-        state = state.class.from_json(File.open(new_state_path))
-        state.workspace = new_workspace
+    def initialize(@workspace : SysrootWorkspace = SysrootWorkspace.new,
+                   @rootfs_id : String = Random::Secure.hex(8),
+                   @created_at : String = Time.utc.to_s,
+                   @updated_at : String? = nil,
+                   @plan_digest : String? = nil,
+                   @overrides_digest : String? = nil,
+                   @invalidated_at : String? = nil,
+                   @invalidation_reason : String? = nil,
+                   @progress : Progress = Progress.new,
+                   @format_version : Int32 = FORMAT_VERSION,
+                   raise_on_invalid_state : Bool = false)
+      if File.exists?(state_path)
+        file_state = self.class.from_json(File.open(state_path))
 
         # Ensure stored digests match the current plan/overrides files.
         #
         # When the plan or overrides inputs change, this clears completed steps so
         # the runner does not incorrectly skip work based on stale state.
-        previous_plan = state.plan_digest
-        previous_overrides = state.overrides_digest
-        current_plan = state.class.digest_for?(state.plan_path)
-        current_overrides = state.class.digest_for?(state.overrides_path)
+        previous_plan = file_state.plan_digest
+        previous_overrides = file_state.overrides_digest
+        current_plan = self.class.digest_for?(plan_path)
+        current_overrides = self.class.digest_for?(overrides_path)
+        @plan_digest = current_plan
+        @overrides_digest = current_overrides
 
-        state.plan_digest = current_plan
-        state.overrides_digest = current_overrides
-
-        unless progress.completed_steps.empty?
+        unless file_state.progress.completed_steps.empty?
           changed = false
           changed ||= previous_plan != current_plan
           changed ||= previous_overrides != current_overrides
 
           if changed
             raise "State file does not reconcile with plan" if raise_on_invalid_state
-            state.progress.completed_steps.clear
-            state.progress.current_phase = nil
-            state.progress.last_success = nil
-            state.progress.last_failure = nil
-            state.invalidated_at = Time.utc.to_s
-            state.invalidation_reason = "Build plan/overrides changed"
+            @progress.completed_steps.clear
+            @progress.current_phase = nil
+            @progress.last_success = nil
+            @progress.last_failure = nil
+            @invalidated_at = Time.utc.to_s
+            @invalidation_reason = "Build plan/overrides changed"
           end
         end
       else
-        state.touch
-        state.workspace = new_workspace
-        FileUtils.mkdir_p(new_state_path.parent)
-        File.write(new_state_path, state.to_pretty_json)
+        touch
+        FileUtils.mkdir_p(state_path.parent)
+        File.write(state_path, to_pretty_json)
       end
-      state
     end
 
     # Current rootfs-relative plan path
     def plan_path : Path
-      w = @workspace.nil? ? SysrootWorkspace.new : @workspace.not_nil!
-      w.log_path / PLAN_FILE
+      @workspace.log_path / PLAN_FILE
     end
 
     # Current rootfs-relative state path
     def state_path : Path
-      w = @workspace.nil? ? SysrootWorkspace.new : @workspace.not_nil!
-      w.log_path / STATE_FILE
+      @workspace.log_path / STATE_FILE
     end
 
     # Current rootfs-relative overrides path
     def overrides_path : Path
-      w = @workspace.nil? ? SysrootWorkspace.new : @workspace.not_nil!
-      w.log_path / OVERRIDES_FILE
+      @workspace.log_path / OVERRIDES_FILE
     end
 
     # Current rootfs-relative report directory
     def report_dir : Path
-      w = @workspace.nil? ? SysrootWorkspace.new : @workspace.not_nil!
-      w.log_path / REPORT_DIR_NAME
+      @workspace.log_path / REPORT_DIR_NAME
     end
 
     # Returns true when the build plan file exists for this workspace.
@@ -144,10 +132,6 @@ module Bootstrap
     # Returns true when the build state file exists for this workspace.
     def state_exists? : Bool
       File.exists?(state_path)
-    end
-
-    # Ensure a state file exists on disk, creating an empty one when needed.
-    def self.ensure_state_file(workspace : SysrootWorkspace) : Nil
     end
 
     # Return the SHA256 hex digest for *path*, or nil when the file is missing.
@@ -202,9 +186,22 @@ module Bootstrap
       save
     end
 
+    # Update the current phase tracking marker.
+    def mark_current_phase(phase_name : String?) : Nil
+      @progress.current_phase = phase_name
+      touch
+      save
+    end
+
     # Update `updated_at` to the current UTC time.
     def touch : Nil
       @updated_at = Time.utc.to_s
+    end
+
+    # Return the selected build phases from the current plan.
+    def selected_phases(requested : String = "all") : Array(BuildPhase)
+      plan = BuildPlan.parse(File.read(plan_path))
+      plan.selected_phases(requested)
     end
 
     # Return true when the resume step matches the most recent failure.

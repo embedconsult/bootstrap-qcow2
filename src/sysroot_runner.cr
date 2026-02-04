@@ -52,19 +52,23 @@ module Bootstrap
       report_dir = @state.report_dir
       Log.info { "Using report_dir: #{report_dir}" } unless report_dir.nil?
       phases = @state.selected_phases
-      phases = apply_rootfs_env_overrides(phases) if rootfs_marker_present?
-      phases = filter_phases_by_packages(phases, @packages) if packages
-      phases = filter_phases_by_state(phases, state) if resume && state
+      # TODO
+      # phases = apply_rootfs_env_overrides(phases) if rootfs_marker_present?
+      # phases = filter_phases_by_packages(phases, @packages) if packages
+      # phases = filter_phases_by_state(phases, state) if resume && state
       if @dry_run
-        Log.info { describe_phases(phases) }
+        # TODO
+        # Log.info { describe_phases(phases) }
         return
       end
       if report_dir
-        @runner.report_dir = report_dir
+        # TODO
+        # @step_runner.report_dir = report_dir
       end
       phases.each_with_index do |phase, idx|
         @state.mark_current_phase(phase.name)
-        run_phase(phase)
+        # TODO
+        # run_phase(phase)
         next_phase = phases[idx + 1]?.try(&.name)
         @state.mark_current_phase(next_phase)
       end
@@ -107,7 +111,7 @@ module Bootstrap
         end
         Log.info { "Building #{step.name} in #{step.workdir} (phase=#{phase.name}, namespace=#{@workspace.namespace})" }
         begin
-          if resume && @state.retrying_step?(phase.name, step.name)
+          if resume && @state.retrying_last_failure?(phase.name, step.name)
             Log.debug { "Keeping previous build directory due to retrying previous build" }
             @runner.clean_build_dirs = false
           end
@@ -322,7 +326,9 @@ module Bootstrap
         resume: resume,
         dry_run: dry_run
       )
-      runner.run_plan
+      # TODO
+      # runner.run_plan
+      0
     end
 
     private def self.parse_bind_spec(value : String) : Tuple(Path, Path)
@@ -348,13 +354,18 @@ module Bootstrap
       return CLI.print_help(parser) if help
 
       begin
-        workspace = SysrootWorkspace.new(host_workdir: host_workdir, extra_binds: extra_binds)
+        # TODO
+        # workspace = SysrootWorkspace.new(host_workdir: host_workdir, extra_binds: extra_binds)
+        workspace = SysrootWorkspace.new(host_workdir: host_workdir)
       rescue ex
         STDERR.puts "No valid workspace found, build out the workspace first with `bq2 sysroot-builder`: #{ex.message}"
         return -1
       end
 
       runner = SysrootRunner.new(workspace: workspace)
+
+      # TODO
+      return 0
 
       if runner.state.next_phase
         puts("next_phase=#{runner.state.next_phase.name}")

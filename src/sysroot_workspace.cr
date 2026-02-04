@@ -103,13 +103,14 @@ module Bootstrap
     end
 
     # Create a workspace rooted at *host_workdir*, ensuring marker + dirs exist.
-    def self.create(host_workdir : Path = Path["#{DEFAULT_HOST_WORKDIR}"], extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path,Path)) : SysrootWorkspace
+    def self.create(host_workdir : Path = Path["#{DEFAULT_HOST_WORKDIR}"], extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path)) : SysrootWorkspace
       workspace = SysrootWorkspace.new(host_workdir: host_workdir, extra_binds: extra_binds)
-      FileUtils.mkdir_p(workspace.sysroot_path)
+      FileUtils.mkdir_p(workspace.sysroot_path.not_nil!)
       FileUtils.mkdir_p(workspace.bq2_rootfs_path)
       File.write(workspace.marker_path, "bq2-rootfs\n") unless File.exists?(workspace.marker_path)
       FileUtils.mkdir_p(workspace.workspace_path)
       FileUtils.mkdir_p(workspace.log_path)
+      workspace
     end
 
     private def update_namespace(namespace : String)

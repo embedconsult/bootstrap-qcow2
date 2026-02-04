@@ -93,7 +93,6 @@ module Bootstrap
 
     getter name : String
     getter description : String
-    getter workspace : String
     getter environment : String
     getter install_prefix : String
     getter destdir : String?
@@ -104,7 +103,6 @@ module Bootstrap
     # defaults.
     def initialize(@name : String,
                    @description : String,
-                   @workspace : String,
                    @environment : String,
                    @install_prefix : String,
                    @destdir : String? = nil,
@@ -155,15 +153,16 @@ module Bootstrap
       matching
     end
 
-    # Return phases that are valid for the current namespace
-    def phases_for_current_namespace : BuildPhase
-      candidate_phases = @phases
-      if @workspace.namespace.seed?
+    # Return phases that are valid for the provided workspace namespace
+    def phases_for_current_namespace(workspace : SysrootWorkspace) : Array(BuildPhase)
+      candidate_phases = @phases.dup
+      if workspace.namespace.seed?
         candidate_phases.reject! { |phase| phase.environment.starts_with?("host-") }
       end
-      if @workspace.namespace.bq2?
-        candidate_phases.reject! { |phase| phase.environment.starts_with?("rootfs-") }
+      if workspace.namespace.bq2?
+        candidate_phases.reject! { |phase| phase.environment.starts_with?("seed-") }
       end
+      candidate_phases
     end
   end
 end
