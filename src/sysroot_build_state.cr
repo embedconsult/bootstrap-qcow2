@@ -24,7 +24,7 @@ module Bootstrap
     getter format_version : Int32 = FORMAT_VERSION
 
     @[JSON::Field(ignore: true)]
-    @workspace : SysrootWorkspace?
+    property workspace : SysrootWorkspace?
 
     # Identifier for the prepared rootfs. This changes whenever the rootfs is
     # regenerated from scratch.
@@ -68,20 +68,47 @@ module Bootstrap
                    progress : Progress = Progress.new,
                    format_version : Int32 = FORMAT_VERSION,
                    raise_on_invalid_state : Bool = false)
-      state = BuildState.alloc
+      state = SysrootBuildState.allocate
       workspace ||= SysrootWorkspace.new
       new_workspace = workspace.not_nil!
       new_state_path = new_workspace.log_path / STATE_FILE
       if File.exists?(new_state_path)
-        # TODO: Move reconcile_inputs to here
-        #raise "State file does not reconcile with plan: #{@invalidation_reason}" if reconcile_inputs && raise_on_invalid_state
-        state = self.class.from_json(File.open(new_state_path))
+        state = state.class.from_json(File.open(new_state_path))
+        state.workspace = new_workspace
+
+        # Ensure stored digests match the current plan/overrides files.
+        #
+        # When the plan or overrides inputs change, this clears completed steps so
+        # the runner does not incorrectly skip work based on stale state.
+        previous_plan = state.plan_digest
+        previous_overrides = state.overrides_digest
+        current_plan = state.class.digest_for?(state.plan_path)
+        current_overrides = state.class.digest_for?(state.overrides_path)
+
+        state.plan_digest = current_plan
+        state.overrides_digest = current_overrides
+
+        unless progress.completed_steps.empty?
+          changed = false
+          changed ||= previous_plan != current_plan
+          changed ||= previous_overrides != current_overrides
+
+	  if changed
+            raise "State file does not reconcile with plan" if raise_on_invalid_state
+            state.progress.completed_steps.clear
+            state.progress.current_phase = nil
+            state.progress.last_success = nil
+            state.progress.last_failure = nil
+            state.invalidated_at = Time.utc.to_s
+            state.invalidation_reason = "Build plan/overrides changed"
+	  end
+	end
       else
-        touch
+        state.touch
+        state.workspace = new_workspace
         FileUtils.mkdir_p(new_state_path.parent)
         File.write(new_state_path, state.to_pretty_json)
       end
-      state.workspace = new_workspace
       state
     end
 
@@ -98,7 +125,7 @@ module Bootstrap
     end
 
     # Current rootfs-relative overrides path
-    private def overrides_path : Path
+    def overrides_path : Path
       w = @workspace.nil? ? SysrootWorkspace.new : @workspace.not_nil!
       w.log_path / OVERRIDES_FILE
     end
@@ -178,35 +205,6 @@ module Bootstrap
       @updated_at = Time.utc.to_s
     end
 
-    # Ensure stored digests match the current plan/overrides files.
-    #
-    # When the plan or overrides inputs change, this clears completed steps so
-    # the runner does not incorrectly skip work based on stale state.
-    def self.reconcile_inputs(BuildState state) : Bool
-      previous_plan = plan_digest
-      previous_overrides = overrides_digest
-      current_plan = self.class.digest_for?(plan_path)
-      current_overrides = self.class.digest_for?(overrides_path)
-
-      @plan_digest = current_plan
-      @overrides_digest = current_overrides
-
-      return true if progress.completed_steps.empty?
-
-      changed = false
-      changed ||= previous_plan != current_plan
-      changed ||= previous_overrides != current_overrides
-      return true unless changed
-
-      progress.completed_steps.clear
-      progress.current_phase = nil
-      progress.last_success = nil
-      progress.last_failure = nil
-      @invalidated_at = Time.utc.to_s
-      @invalidation_reason = "Build plan/overrides changed; cleared completed steps"
-      false
-    end
-
     # Return true when the resume step matches the most recent failure.
     def retrying_last_failure?(phase : String?, step : String?) : Bool
       return false unless phase && step
@@ -267,12 +265,6 @@ module Bootstrap
       path = failure_report_path(state_path)
       return nil unless path && File.exists?(path)
       File.read(path)
-    end
-
-    private def resolved_overrides_path : String?
-      return nil unless overrides_path
-      return overrides_path.not_nil! unless overrides_path == rootfs_overrides_path
-      overrides_path_path.to_s
     end
 
     # Minimal step reference used for progress tracking.
