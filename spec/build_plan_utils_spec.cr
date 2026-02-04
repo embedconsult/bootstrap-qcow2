@@ -7,7 +7,7 @@ describe Bootstrap::BuildPlanUtils do
       Bootstrap::BuildPhase.new(
         name: "one",
         description: "phase",
-        workspace_root: "/workspace",
+        workdir: "/workspace",
         environment: "test",
         install_prefix: "/opt/sysroot",
         destdir: "/workspace/rootfs",
@@ -24,8 +24,8 @@ describe Bootstrap::BuildPlanUtils do
       ),
     ])
 
-    rewritten = Bootstrap::BuildPlanUtils.rewrite_workspace_root(plan, "/work/ws")
-    rewritten.phases.first.workspace_root.should eq "/work/ws"
+    rewritten = Bootstrap::BuildPlanUtils.rewrite_workdir(plan, "/work/ws")
+    rewritten.phases.first.workdir.should eq "/work/ws"
     rewritten.phases.first.destdir.should eq "/work/ws/rootfs"
     rewritten.phases.first.steps.first.workdir.should eq "/work/ws/m4-1.4.19"
     rewritten.phases.first.steps.first.build_dir.should eq "/work/ws/m4-1.4.19-build"

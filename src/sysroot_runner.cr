@@ -94,7 +94,7 @@ module Bootstrap
                       workspace : SysrootWorkspace? = nil) : Nil
       resolved_plan = plan
       if workspace
-        resolved_plan = BuildPlanUtils.rewrite_workspace_root(resolved_plan, workspace.workspace_path.to_s)
+        resolved_plan = BuildPlanUtils.rewrite_workdir(resolved_plan, workspace.workspace_path.to_s)
         resolved_plan = BuildPlan.new(resolved_plan.phases_for_current_namespace(workspace), resolved_plan.format_version)
       end
 
@@ -310,7 +310,7 @@ module Bootstrap
         BuildPhase.new(
           name: phase.name,
           description: phase.description,
-          workspace_root: phase.workspace_root,
+          workdir: phase.workdir,
           environment: phase.environment,
           install_prefix: phase.install_prefix,
           destdir: phase.destdir,
@@ -336,7 +336,7 @@ module Bootstrap
         BuildPhase.new(
           name: phase.name,
           description: phase.description,
-          workspace_root: phase.workspace_root,
+          workdir: phase.workdir,
           environment: phase.environment,
           install_prefix: phase.install_prefix,
           destdir: phase.destdir,
@@ -406,7 +406,7 @@ module Bootstrap
         "phase"          => {
           "name"           => phase.name,
           "environment"    => phase.environment,
-          "workspace_root" => phase.workspace_root,
+          "workdir"        => phase.workdir,
           "install_prefix" => phase.install_prefix,
           "destdir"        => phase.destdir,
           "env"            => phase.env,

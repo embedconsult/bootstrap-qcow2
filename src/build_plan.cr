@@ -95,9 +95,9 @@ module Bootstrap
     getter name : String
     # Human-readable description shown in logs.
     getter description : String
-    # Canonical workspace root for plan paths (rooted at /workspace inside the rootfs).
+    # Canonical workdir root for plan paths (rooted at /workspace inside the rootfs).
     @[JSON::Field(key: "workspace")]
-    getter workspace_root : String
+    getter workdir : String
     # Namespace tag used to pick the namespace the phase should run inside.
     getter environment : String
     # Install prefix used by build strategies that honor configure/CMake prefixes.
@@ -113,7 +113,7 @@ module Bootstrap
     # defaults.
     def initialize(@name : String,
                    @description : String,
-                   @workspace_root : String,
+                   @workdir : String,
                    @environment : String,
                    @install_prefix : String,
                    @destdir : String? = nil,

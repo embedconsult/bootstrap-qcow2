@@ -34,7 +34,7 @@ describe Bootstrap::BuildPlan do
       Bootstrap::BuildPhase.new(
         name: "phase-a",
         description: "phase a",
-        workspace_root: "/workspace",
+        workdir: "/workspace",
         environment: "test",
         install_prefix: "/opt/sysroot",
         steps: [
