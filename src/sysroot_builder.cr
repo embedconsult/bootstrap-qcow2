@@ -776,6 +776,8 @@ module Bootstrap
       # outer_workspace = "#{SysrootWorkspace.bq2_roofs_from(SysrootWorkspace::Namespace::Seed)}"
       # inner_workspace = "#{SysrootWorkspace.bq2_roofs_from(SysrootWorkspace::Namespace::BQ2)}"
       rootfs_tarball = "#{@workspace.workspace_path}/bq2-rootfs-#{bootstrap_source_version}.tar.gz"
+      workspace_root = "/#{SysrootWorkspace::BQ2_DIR_NAME}/#{SysrootWorkspace::WORKSPACE_DIR_NAME}"
+      bq2_rootfs_root = "/#{SysrootWorkspace::BQ2_DIR_NAME}"
       sysroot_triple = sysroot_target_triple
       sysroot_env = sysroot_phase_env(sysroot_prefix)
       rootfs_env = rootfs_phase_env(sysroot_prefix)
@@ -817,7 +819,7 @@ module Bootstrap
           BuildPhase.new(
             name: "host-setup",
             description: "Prepare cached sources and seed the rootfs from the host.",
-            workdir: SysrootWorkspace::ROOTFS_WORKSPACE_PATH.to_s,
+            workdir: workspace_root,
             namespace: "host",
             install_prefix: "/",
             destdir: nil,
@@ -830,7 +832,7 @@ module Bootstrap
           BuildPhase.new(
             name: "sysroot-from-alpine",
             description: "Build a self-contained sysroot using Alpine-hosted tools.",
-            workdir: SysrootWorkspace::ROOTFS_WORKSPACE_PATH.to_s,
+            workdir: workspace_root,
             namespace: "seed",
             install_prefix: sysroot_prefix,
             destdir: nil,
@@ -899,10 +901,10 @@ module Bootstrap
           BuildPhase.new(
             name: "rootfs-from-sysroot",
             description: "Build a minimal rootfs using the newly built sysroot toolchain.",
-            workdir: SysrootWorkspace::ROOTFS_WORKSPACE_PATH.to_s,
+            workdir: workspace_root,
             namespace: "seed",
             install_prefix: "/usr",
-            destdir: "#{SysrootWorkspace::ROOTFS_WORKSPACE_PATH}/rootfs",
+            destdir: bq2_rootfs_root,
             env: rootfs_env,
           ),
           package_allowlist: ["musl", "busybox", "linux-headers"],
@@ -941,7 +943,7 @@ module Bootstrap
           BuildPhase.new(
             name: "system-from-sysroot",
             description: "Rebuild sysroot packages into /usr inside the new rootfs (prefix-free).",
-            workdir: SysrootWorkspace::ROOTFS_WORKSPACE_PATH.to_s,
+            workdir: workspace_root,
             namespace: "rootfs",
             install_prefix: "/usr",
             destdir: nil,
@@ -1005,7 +1007,7 @@ module Bootstrap
           BuildPhase.new(
             name: "tools-from-system",
             description: "Build additional developer tools inside the new rootfs.",
-            workdir: SysrootWorkspace::ROOTFS_WORKSPACE_PATH.to_s,
+            workdir: workspace_root,
             namespace: "rootfs",
             install_prefix: "/usr",
             destdir: nil,
@@ -1030,7 +1032,7 @@ module Bootstrap
           BuildPhase.new(
             name: "finalize-rootfs",
             description: "Strip the sysroot prefix and emit a prefix-free rootfs tarball.",
-            workdir: SysrootWorkspace::ROOTFS_WORKSPACE_PATH.to_s,
+            workdir: workspace_root,
             namespace: "rootfs",
             install_prefix: "/usr",
             destdir: nil,

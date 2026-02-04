@@ -4,7 +4,7 @@ require "../src/sysroot_build_state"
 describe Bootstrap::SysrootBuildState do
   it "round-trips JSON and preserves completed step markers" do
     with_tempdir do |dir|
-      workspace = Bootstrap::SysrootWorkspace.from_host_workdir(dir)
+      workspace = Bootstrap::SysrootWorkspace.new(host_workdir: dir)
       state = Bootstrap::SysrootBuildState.new(workspace: workspace)
       state.mark_success("phase-a", "musl")
       encoded = state.to_json
@@ -16,7 +16,7 @@ describe Bootstrap::SysrootBuildState do
 
   it "loads or initializes state and updates metadata" do
     with_tempdir do |dir|
-      workspace = Bootstrap::SysrootWorkspace.from_host_workdir(dir)
+      workspace = Bootstrap::SysrootWorkspace.new(host_workdir: dir)
       state = Bootstrap::SysrootBuildState.load_or_init(workspace)
       state.plan_path_path.should eq workspace.log_path / Bootstrap::SysrootBuildState::PLAN_FILE
       state.overrides_path_path.should eq workspace.log_path / Bootstrap::SysrootBuildState::OVERRIDES_FILE
@@ -31,7 +31,7 @@ describe Bootstrap::SysrootBuildState do
 
   it "clears completed steps when overrides content changes" do
     with_tempdir do |dir|
-      workspace = Bootstrap::SysrootWorkspace.from_host_workdir(dir)
+      workspace = Bootstrap::SysrootWorkspace.new(host_workdir: dir)
       plan_path = workspace.log_path / Bootstrap::SysrootBuildState::PLAN_FILE
       overrides_path = workspace.log_path / Bootstrap::SysrootBuildState::OVERRIDES_FILE
       state_path = workspace.log_path / Bootstrap::SysrootBuildState::STATE_FILE
