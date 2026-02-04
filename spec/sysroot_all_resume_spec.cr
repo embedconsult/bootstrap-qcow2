@@ -39,7 +39,7 @@ private def write_state(path : Path,
   completed_steps.each do |(phase, step)|
     state.mark_success(phase, step)
   end
-  state.plan_digest = Bootstrap::SysrootBuildState.digest_for?(plan_path.to_s)
+  state.plan_digest = Bootstrap::SysrootBuildState.digest_for?(plan_path)
   FileUtils.mkdir_p(path.parent)
   state.save(path)
   state

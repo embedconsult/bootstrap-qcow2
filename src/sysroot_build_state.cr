@@ -11,7 +11,6 @@ module Bootstrap
   # The build plan JSON is treated as immutable during iterations. Instead, the
   # runner records progress into this state file so subsequent runs can pick up
   # where they left off without re-running already successful steps.
-  @[JSON::Serializable::Options(ignore_unknown_fields: true)]
   class SysrootBuildState
     include JSON::Serializable
 
@@ -25,7 +24,9 @@ module Bootstrap
     getter format_version : Int32 = FORMAT_VERSION
 
     @[JSON::Field(ignore: true)]
-    @workspace : SysrootWorkspace? = nil
+    @workspace : SysrootWorkspace = SysrootWorkspace.new(host_workdir: Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR])
+    @[JSON::Field(ignore: true)]
+    @state_path : Path? = nil
 
     # Identifier for the prepared rootfs. This changes whenever the rootfs is
     # regenerated from scratch.
@@ -52,7 +53,8 @@ module Bootstrap
     # Runner progress tracked per phase/package.
     getter progress : Progress = Progress.new
 
-    def initialize(@workspace : SysrootWorkspace? = nil,
+    def initialize(@workspace : SysrootWorkspace = SysrootWorkspace.new,
+                   @state_path : Path? = nil,
                    @rootfs_id : String = Random::Secure.hex(8),
                    @created_at : String = Time.utc.to_s,
                    @updated_at : String? = nil,
@@ -65,15 +67,15 @@ module Bootstrap
     end
 
     # Load state from a JSON file.
-    def self.load(workspace : SysrootWorkspace, state_path : Path = workspace.var_lib_dir / STATE_FILE) : SysrootBuildState
+    def self.load(workspace : SysrootWorkspace, state_path : Path = workspace.log_path / STATE_FILE) : SysrootBuildState
       state = from_json(File.read(state_path))
-      state.assign_workspace(workspace)
+      state.assign_workspace(workspace, state_path)
       state
     end
 
     # Load or initialize a state file with plan/override digest reconciliation.
     def self.load_or_init(workspace : SysrootWorkspace,
-                          state_path : Path = workspace.var_lib_dir / STATE_FILE,
+                          state_path : Path = workspace.log_path / STATE_FILE,
                           overrides_path : Path? = nil) : SysrootBuildState
       if File.exists?(state_path)
         state = load(workspace, state_path)
@@ -111,22 +113,22 @@ module Bootstrap
 
     # Current rootfs-relative state path
     def state_path : Path
-      workspace.var_lib_dir / STATE_FILE
+      @state_path || (@workspace.log_path / STATE_FILE)
     end
 
     # Resolve the plan path into the active namespace.
     def plan_path_path : Path
-      workspace.var_lib_dir / PLAN_FILE
+      @workspace.log_path / PLAN_FILE
     end
 
     # Resolve overrides path into the active namespace.
     def overrides_path_path : Path
-      workspace.var_lib_dir / OVERRIDES_FILE
+      @workspace.log_path / OVERRIDES_FILE
     end
 
     # Resolve report directory path into the active namespace.
     def report_dir_path : Path
-      workspace.var_lib_dir / REPORT_DIR_NAME
+      @workspace.log_path / REPORT_DIR_NAME
     end
 
     # Returns true when the build plan file exists for this workspace.
@@ -140,11 +142,10 @@ module Bootstrap
     end
 
     # Return the SHA256 hex digest for *path*, or nil when the file is missing.
-    def self.digest_for?(path : Path | String) : String?
-      resolved = path.is_a?(Path) ? path : Path[path]
-      return nil unless File.exists?(resolved)
+    def self.digest_for?(path : Path) : String?
+      return nil unless File.exists?(path)
       digest = Digest::SHA256.new
-      File.open(resolved) do |file|
+      File.open(path) do |file|
         buffer = Bytes.new(8192)
         while (read = file.read(buffer)) > 0
           digest.update(buffer[0, read])
@@ -175,6 +176,7 @@ module Bootstrap
       end
       @progress.last_success = StepRef.new(phase: phase_name, step: step_name, occurred_at: Time.utc.to_s)
       touch
+      save
     end
 
     # Record that *step_name* failed within *phase_name*.
@@ -188,12 +190,14 @@ module Bootstrap
         report_path: report_path
       )
       touch
+      save
     end
 
     # Update the current phase tracking marker.
     def mark_current_phase(phase_name : String?) : Nil
       @progress.current_phase = phase_name
       touch
+      save
     end
 
     # Update `updated_at` to the current UTC time.
@@ -207,12 +211,9 @@ module Bootstrap
       plan.selected_phases(requested)
     end
 
-    def assign_workspace(workspace : SysrootWorkspace) : Nil
+    def assign_workspace(workspace : SysrootWorkspace, state_path : Path? = nil) : Nil
       @workspace = workspace
-    end
-
-    private def workspace : SysrootWorkspace
-      @workspace || SysrootWorkspace.new(host_workdir: Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR])
+      @state_path = state_path
     end
 
     # Minimal step reference used for progress tracking.

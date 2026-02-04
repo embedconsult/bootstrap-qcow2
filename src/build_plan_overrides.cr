@@ -67,7 +67,7 @@ module Bootstrap
         name: phase.name,
         description: phase.description,
         workdir: phase.workdir,
-        environment: phase.environment,
+        namespace: phase.namespace,
         install_prefix: install_prefix,
         destdir: destdir,
         env: env,

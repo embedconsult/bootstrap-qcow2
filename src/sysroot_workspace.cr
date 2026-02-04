@@ -141,9 +141,5 @@ module Bootstrap
     def rootfs_root_path : Path
       @bq2_rootfs_path
     end
-
-    def var_lib_dir : Path
-      @log_path
-    end
   end
 end

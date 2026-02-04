@@ -37,10 +37,10 @@ module Bootstrap
   class StepRunner
     property clean_build_dirs : Bool
     property report_dir : String?
-    getter workspace : SysrootWorkspace?
+    getter workspace : SysrootWorkspace
     @command_log_prefix : String?
 
-    def initialize(@clean_build_dirs : Bool = true, @workspace : SysrootWorkspace? = nil)
+    def initialize(@workspace : SysrootWorkspace, @clean_build_dirs : Bool = true)
       @command_log_prefix = nil
       @report_dir = nil
     end
@@ -380,13 +380,7 @@ module Bootstrap
     end
 
     private def sources_dir : Path
-      if workspace = @workspace
-        if host_workdir = workspace.host_workdir
-          return host_workdir / "sources"
-        end
-        return workspace.workspace_path / "sources"
-      end
-      Path["/workspace/sources"]
+      @workspace.host_workdir.not_nil! / "sources"
     end
 
     private def verify(spec : SourceSpec, path : Path) : Bool

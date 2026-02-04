@@ -95,11 +95,10 @@ module Bootstrap
     getter name : String
     # Human-readable description shown in logs.
     getter description : String
-    # Canonical workdir root for plan paths (rooted at /workspace inside the rootfs).
-    @[JSON::Field(key: "workspace")]
+    # Canonical workdir root for plan paths.
     getter workdir : String
-    # Namespace tag used to pick the namespace the phase should run inside.
-    getter environment : String
+    # Namespace tag used to decide where this phase is allowed to execute.
+    getter namespace : String
     # Install prefix used by build strategies that honor configure/CMake prefixes.
     getter install_prefix : String
     # Optional DESTDIR staging root (used for rootfs assembly).
@@ -114,7 +113,7 @@ module Bootstrap
     def initialize(@name : String,
                    @description : String,
                    @workdir : String,
-                   @environment : String,
+                   @namespace : String,
                    @install_prefix : String,
                    @destdir : String? = nil,
                    @env : Hash(String, String) = {} of String => String,
@@ -164,16 +163,16 @@ module Bootstrap
       matching
     end
 
-    # Return phases that are valid for the provided workspace namespace
+    # Return phases that are valid for the provided workspace namespace.
     def phases_for_current_namespace(workspace : SysrootWorkspace) : Array(BuildPhase)
-      candidate_phases = @phases.dup
-      if workspace.namespace.seed?
-        candidate_phases.reject! { |phase| phase.environment.starts_with?("host-") }
+      case workspace.namespace
+      in .host?
+        @phases
+      in .seed?
+        @phases.reject { |phase| phase.namespace == "host" }
+      in .bq2?
+        @phases.reject { |phase| phase.namespace == "host" || phase.namespace == "seed" }
       end
-      if workspace.namespace.bq2?
-        candidate_phases.reject! { |phase| phase.environment.starts_with?("seed-") }
-      end
-      candidate_phases
     end
   end
 end

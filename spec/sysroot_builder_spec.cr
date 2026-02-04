@@ -127,10 +127,10 @@ describe Bootstrap::SysrootBuilder do
     end
   end
 
-  it "builds a base rootfs spec for the configured architecture" do
+  it "builds a seed rootfs spec for the configured architecture" do
     with_temp_workdir do |_dir|
-      builder = Bootstrap::SysrootBuilder.new(architecture: "arm64", branch: "edge", base_version: "edge")
-      spec = builder.base_rootfs_spec
+      builder = Bootstrap::SysrootBuilder.new(architecture: "arm64")
+      spec = builder.seed_rootfs_spec
       spec.name.should eq "bootstrap-rootfs"
       spec.url.to_s.should contain("arm64")
     end
@@ -162,7 +162,7 @@ describe Bootstrap::SysrootBuilder do
 
   it "lists build phase names" do
     with_temp_workdir do |_dir|
-      phases = Bootstrap::SysrootBuilder.new.phase_specs.map(&.name)
+      phases = Bootstrap::SysrootBuilder.new.phase_specs.map { |spec| spec.phase.name }
       phases.should eq ["host-setup", "sysroot-from-alpine", "rootfs-from-sysroot", "system-from-sysroot", "tools-from-system", "finalize-rootfs"]
     end
   end
@@ -170,10 +170,10 @@ describe Bootstrap::SysrootBuilder do
   it "seeds rootfs profile, CA bundle, and final musl loader path" do
     with_temp_workdir do |_dir|
       builder = Bootstrap::SysrootBuilder.new
-      sysroot_phase = builder.phase_specs.find(&.name.==("sysroot-from-alpine")).not_nil!
+      sysroot_phase = builder.phase_specs.find { |spec| spec.phase.name == "sysroot-from-alpine" }.not_nil!
       sysroot_zlib_env = sysroot_phase.env_overrides["zlib"]
       sysroot_zlib_env["CFLAGS"].should contain("-fPIC")
-      rootfs_phase = builder.phase_specs.find(&.name.==("rootfs-from-sysroot")).not_nil!
+      rootfs_phase = builder.phase_specs.find { |spec| spec.phase.name == "rootfs-from-sysroot" }.not_nil!
       prepare_step = rootfs_phase.extra_steps.find(&.name.==("prepare-rootfs")).not_nil!
       profile = prepare_step.env["FILE_1_CONTENT"]
       profile.should contain("SSL_CERT_FILE=\"/etc/ssl/certs/ca-certificates.crt\"")
@@ -181,11 +181,11 @@ describe Bootstrap::SysrootBuilder do
       ca_bundle = prepare_step.env["FILE_4_CONTENT"]
       ca_bundle.should contain("BEGIN CERTIFICATE")
 
-      system_phase = builder.phase_specs.find(&.name.==("system-from-sysroot")).not_nil!
+      system_phase = builder.phase_specs.find { |spec| spec.phase.name == "system-from-sysroot" }.not_nil!
       system_zlib_env = system_phase.env_overrides["zlib"]
       system_zlib_env["CFLAGS"].should contain("-fPIC")
 
-      finalize_phase = builder.phase_specs.find(&.name.==("finalize-rootfs")).not_nil!
+      finalize_phase = builder.phase_specs.find { |spec| spec.phase.name == "finalize-rootfs" }.not_nil!
       final_ld_step = finalize_phase.extra_steps.find(&.name.==("musl-ld-path-final")).not_nil!
       final_ld_step.content.should eq "/lib:/usr/lib\n"
     end
@@ -345,7 +345,8 @@ describe Bootstrap::SysrootBuilder do
       tarball = dir / "miniroot.tar"
       Process.run("tar", ["-cf", tarball.to_s, "-C", tar_dir.to_s, "."])
 
-      builder = StubBuilder.new(base_rootfs_path: tarball)
+      builder = StubBuilder.new
+      builder.fake_tarball = tarball
       builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
       builder.skip_stage_sources = true
       rootfs = builder.prepare_rootfs(include_sources: false)
@@ -365,7 +366,8 @@ describe Bootstrap::SysrootBuilder do
         io.write(Bytes.new(1024, 0))
       end
 
-      builder = StubBuilder.new(base_rootfs_path: tarball)
+      builder = StubBuilder.new
+      builder.fake_tarball = tarball
       builder.override_packages = [] of Bootstrap::SysrootBuilder::PackageSpec
       builder.skip_stage_sources = true
       rootfs = builder.prepare_rootfs(include_sources: false)

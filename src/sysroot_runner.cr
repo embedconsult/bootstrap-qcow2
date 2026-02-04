@@ -7,7 +7,6 @@ require "set"
 require "time"
 require "./build_plan"
 require "./build_plan_overrides"
-require "./build_plan_utils"
 require "./cli"
 require "./sysroot_build_state"
 require "./sysroot_workspace"
@@ -16,8 +15,7 @@ require "./step_runner"
 
 module Bootstrap
   # SysrootRunner replays build plan phases and delegates step execution to
-  # StepRunner. Plan paths are rewritten to match the active namespace so the
-  # plan can remain rooted at /workspace regardless of where it is replayed.
+  # StepRunner for the active namespace.
   class SysrootRunner < CLI
     DEFAULT_PHASE = "default"
 
@@ -93,11 +91,7 @@ module Bootstrap
                       use_default_overrides : Bool = true,
                       workspace : SysrootWorkspace? = nil) : Nil
       resolved_plan = plan
-      if workspace
-        resolved_plan = BuildPlanUtils.rewrite_workdir(resolved_plan, workspace.workspace_path.to_s)
-        resolved_plan = BuildPlan.new(resolved_plan.phases_for_current_namespace(workspace), resolved_plan.format_version)
-      end
-
+      resolved_plan = BuildPlan.new(resolved_plan.phases_for_current_namespace(workspace), resolved_plan.format_version) if workspace
       resolved_plan = apply_overrides(resolved_plan, overrides_path, use_default_overrides, workspace)
 
       selected_phase = phase || default_phase(resolved_plan)
@@ -138,10 +132,10 @@ module Bootstrap
                        state : SysrootBuildState? = nil,
                        resume : Bool = true,
                        state_path : Path? = nil) : Nil
-      if phase.environment.starts_with?("rootfs-") && !allow_outside_rootfs
+      if phase.namespace == "rootfs" && !allow_outside_rootfs
         raise "Refusing to run #{phase.name} outside the rootfs" unless inside_rootfs?
       end
-      Log.info { "Executing phase #{phase.name} (env=#{phase.environment})" }
+      Log.info { "Executing phase #{phase.name} (namespace=#{phase.namespace})" }
       Log.info { "**** #{phase.description} ****" }
       run_steps(phase, phase.steps, runner, report_dir: report_dir, state: state, resume: resume, state_path: state_path)
       Log.info { "Completed phase #{phase.name}" }
@@ -280,7 +274,7 @@ module Bootstrap
       return plan if overrides_path.nil? && !use_default_overrides
       path = overrides_path
       if path.nil? && use_default_overrides && workspace
-        path = (workspace.var_lib_dir / SysrootBuildState::OVERRIDES_FILE).to_s
+        path = (workspace.log_path / SysrootBuildState::OVERRIDES_FILE).to_s
       end
       return plan unless path && File.exists?(path)
       Log.info { "Applying build plan overrides from #{path}" }
@@ -291,7 +285,7 @@ module Bootstrap
     private def self.default_phase(plan : BuildPlan) : String
       return plan.phases.first.name if plan.phases.size == 1
       if inside_rootfs?
-        rootfs_phase = plan.phases.find { |phase| phase.environment.starts_with?("rootfs-") }
+        rootfs_phase = plan.phases.find { |phase| phase.namespace == "rootfs" }
         return rootfs_phase.name if rootfs_phase
       end
       plan.phases.first.name
@@ -311,7 +305,7 @@ module Bootstrap
           name: phase.name,
           description: phase.description,
           workdir: phase.workdir,
-          environment: phase.environment,
+          namespace: phase.namespace,
           install_prefix: phase.install_prefix,
           destdir: phase.destdir,
           env: phase.env,
@@ -337,7 +331,7 @@ module Bootstrap
           name: phase.name,
           description: phase.description,
           workdir: phase.workdir,
-          environment: phase.environment,
+          namespace: phase.namespace,
           install_prefix: phase.install_prefix,
           destdir: phase.destdir,
           env: phase.env,
@@ -405,7 +399,7 @@ module Bootstrap
         "occurred_at"    => timestamp,
         "phase"          => {
           "name"           => phase.name,
-          "environment"    => phase.environment,
+          "namespace"      => phase.namespace,
           "workdir"        => phase.workdir,
           "install_prefix" => phase.install_prefix,
           "destdir"        => phase.destdir,
@@ -441,11 +435,8 @@ module Bootstrap
     end
 
     private def self.load_state(workspace : SysrootWorkspace?, state_path : String?) : SysrootBuildState?
-      if state_path
-        return SysrootBuildState.load(workspace, Path[state_path]) if workspace
-        return SysrootBuildState.from_json(File.read(state_path))
-      end
       return nil unless workspace
+      return SysrootBuildState.load(workspace, Path[state_path]) if state_path
       SysrootBuildState.load_or_init(workspace)
     rescue ex
       Log.warn { "Failed to load state: #{ex.message}" }

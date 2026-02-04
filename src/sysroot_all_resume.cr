@@ -78,7 +78,7 @@ module Bootstrap
       plan = BuildPlan.parse(File.read(plan_path))
       if state_exists
         state = SysrootBuildState.load(workspace, build_state.state_path)
-        plan_digest = SysrootBuildState.digest_for?(plan_path.to_s)
+        plan_digest = SysrootBuildState.digest_for?(plan_path)
         if plan_digest.nil? || state.plan_digest != plan_digest
           return Decision.new("sysroot-runner", "plan digest mismatch; ignoring state", plan_path: plan_path)
         end

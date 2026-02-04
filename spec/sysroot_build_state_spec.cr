@@ -18,12 +18,12 @@ describe Bootstrap::SysrootBuildState do
     with_tempdir do |dir|
       workspace = Bootstrap::SysrootWorkspace.from_host_workdir(dir)
       state = Bootstrap::SysrootBuildState.load_or_init(workspace)
-      state.plan_path_path.should eq workspace.var_lib_dir / Bootstrap::SysrootBuildState::PLAN_FILE
-      state.overrides_path_path.should eq workspace.var_lib_dir / Bootstrap::SysrootBuildState::OVERRIDES_FILE
-      state.report_dir_path.should eq workspace.var_lib_dir / Bootstrap::SysrootBuildState::REPORT_DIR_NAME
+      state.plan_path_path.should eq workspace.log_path / Bootstrap::SysrootBuildState::PLAN_FILE
+      state.overrides_path_path.should eq workspace.log_path / Bootstrap::SysrootBuildState::OVERRIDES_FILE
+      state.report_dir_path.should eq workspace.log_path / Bootstrap::SysrootBuildState::REPORT_DIR_NAME
       state.save
       loaded = Bootstrap::SysrootBuildState.load(workspace)
-      loaded.plan_path_path.should eq workspace.var_lib_dir / Bootstrap::SysrootBuildState::PLAN_FILE
+      loaded.plan_path_path.should eq workspace.log_path / Bootstrap::SysrootBuildState::PLAN_FILE
     end
   ensure
     # tempdir cleanup handled by helper
@@ -32,9 +32,9 @@ describe Bootstrap::SysrootBuildState do
   it "clears completed steps when overrides content changes" do
     with_tempdir do |dir|
       workspace = Bootstrap::SysrootWorkspace.from_host_workdir(dir)
-      plan_path = workspace.var_lib_dir / Bootstrap::SysrootBuildState::PLAN_FILE
-      overrides_path = workspace.var_lib_dir / Bootstrap::SysrootBuildState::OVERRIDES_FILE
-      state_path = workspace.var_lib_dir / Bootstrap::SysrootBuildState::STATE_FILE
+      plan_path = workspace.log_path / Bootstrap::SysrootBuildState::PLAN_FILE
+      overrides_path = workspace.log_path / Bootstrap::SysrootBuildState::OVERRIDES_FILE
+      state_path = workspace.log_path / Bootstrap::SysrootBuildState::STATE_FILE
 
       FileUtils.mkdir_p(plan_path.parent)
       File.write(plan_path, "[]")

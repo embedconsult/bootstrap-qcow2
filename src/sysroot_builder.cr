@@ -8,7 +8,6 @@ require "path"
 require "process"
 require "uri"
 require "./build_plan"
-require "./build_plan_utils"
 require "./cli"
 require "./process_runner"
 require "./alpine_setup"
@@ -19,12 +18,11 @@ require "./tarball"
 module Bootstrap
   # SysrootBuilder prepares a chroot-able environment that can rebuild a
   # complete sysroot using source tarballs cached on the host. The default seed
-  # uses Alpine’s minirootfs, but the seed rootfs, architecture, and package set
-  # are all swappable once a self-hosted rootfs exists.
+  # uses Alpine’s minirootfs.
   #
   # Key expectations:
   # * No shell-based downloads: HTTP/Digest from Crystal stdlib only.
-  # * aarch64-first defaults, but architecture/branch/version are configurable.
+  # * aarch64-first defaults.
   # * Deterministic source handling: every tarball is cached locally with CRC32 +
   #   SHA256 bookkeeping for reuse and verification.
   # * bootstrap-qcow2 source is fetched as a tarball and staged into the inner
@@ -79,9 +77,6 @@ module Bootstrap
     getter workspace : SysrootWorkspace
     @architecture : String
     @seed : String
-    @branch : String
-    @base_version : String
-    @base_rootfs_path : Path?
 
     record PackageSpec,
       name : String,
@@ -126,26 +121,16 @@ module Bootstrap
       configure_overrides : Hash(String, Array(String)) = {} of String => Array(String),
       patch_overrides : Hash(String, Array(String)) = {} of String => Array(String)
 
-    # Convenience accessor for phase names (used by specs and diagnostics).
-    struct PhaseSpec
-      def name : String
-        phase.name
-      end
-    end
-
     # Create a sysroot builder in workspace.
     def initialize(workspace : SysrootWorkspace | Nil = nil,
                    @architecture : String = DEFAULT_ARCH,
-                   @seed : String = DEFAULT_ROOTFS_SEED,
-                   @branch : String = DEFAULT_ROOTFS_BRANCH,
-                   @base_version : String = DEFAULT_ROOTFS_VERSION,
-                   @base_rootfs_path : Path? = nil)
+                   @seed : String = DEFAULT_ROOTFS_SEED)
       @workspace = workspace || SysrootWorkspace.create
     end
 
     # Host workspace path for the builder.
     def host_workdir : Path
-      @workspace.host_workdir || Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR]
+      @workspace.host_workdir.not_nil!
     end
 
     # Cache directory for checksum metadata.
@@ -165,32 +150,26 @@ module Bootstrap
 
     # Path to the outer rootfs directory on the host.
     def outer_rootfs_dir : Path
-      host_workdir / "rootfs"
+      @workspace.seed_rootfs_path.not_nil!
     end
 
     # Path to the workspace directory inside the inner rootfs.
     def inner_rootfs_workspace_dir : Path
-      @workspace.workspace_path
+      @workspace.bq2_rootfs_path
     end
 
     # Build a PackageSpec pointing at the base rootfs tarball for the configured
-    # architecture/branch/version. The checksum URL is derived from the upstream
-    # naming convention when available.
+    # architecture. The checksum URL is derived from the upstream naming
+    # convention when available.
     def seed_rootfs_spec : PackageSpec
-      # TODO: Enable CLI overrides of seed, version and branch
       if @seed == "Alpine"
-        file = "alpine-minirootfs-#{@base_version}-#{@architecture}.tar.gz"
-        url = URI.parse("https://dl-cdn.alpinelinux.org/alpine/#{@branch}/releases/#{@architecture}/#{file}")
+        file = "alpine-minirootfs-#{DEFAULT_ROOTFS_VERSION}-#{@architecture}.tar.gz"
+        url = URI.parse("https://dl-cdn.alpinelinux.org/alpine/#{DEFAULT_ROOTFS_BRANCH}/releases/#{@architecture}/#{file}")
         checksum_url = URI.parse("#{url}.sha256") rescue nil
-        PackageSpec.new("bootstrap-rootfs", "#{@base_version}", url, nil, checksum_url)
+        PackageSpec.new("bootstrap-rootfs", "#{DEFAULT_ROOTFS_VERSION}", url, nil, checksum_url)
       else
         raise "Not currently defined seed: #{@seed}"
       end
-    end
-
-    # Alias for the base rootfs tarball spec.
-    def base_rootfs_spec : PackageSpec
-      seed_rootfs_spec
     end
 
     # Return true when a serialized plan exists in the workspace.
@@ -516,7 +495,7 @@ module Bootstrap
     def prepare_rootfs(include_sources : Bool = true) : Path
       FileUtils.rm_rf(outer_rootfs_dir)
       FileUtils.mkdir_p(outer_rootfs_dir)
-      base_rootfs = resolve_base_rootfs_tarball(base_rootfs_spec)
+      base_rootfs = resolve_base_rootfs_tarball(seed_rootfs_spec)
       Tarball.extract(base_rootfs, outer_rootfs_dir, preserve_ownership: false, owner_uid: nil, owner_gid: nil)
       @workspace = SysrootWorkspace.create(host_workdir)
       FileUtils.mkdir_p(inner_rootfs_workspace_dir)
@@ -556,24 +535,9 @@ module Bootstrap
       "bq2-rootfs-#{bootstrap_source_version}.tar.gz"
     end
 
-    # Resolve the base rootfs tarball, favoring a local override when provided.
+    # Resolve the base rootfs tarball.
     private def resolve_base_rootfs_tarball(base_rootfs : PackageSpec) : Path
-      if @base_rootfs_path
-        path = @base_rootfs_path.not_nil!
-        raise "Base rootfs tarball not found at #{path}" unless File.exists?(path)
-        return path
-      end
-
-      if (path = default_base_rootfs_path) && File.exists?(path)
-        return path
-      end
-
       download_and_verify(base_rootfs)
-    end
-
-    # Returns the default local rootfs tarball path when present.
-    private def default_base_rootfs_path : Path?
-      sources_dir / "bq2-rootfs-#{bootstrap_source_version}.tar.gz"
     end
 
     private def checksum_paths(pkg : PackageSpec) : Tuple(Path, Path)
@@ -802,12 +766,11 @@ module Bootstrap
     # 1. build a complete sysroot from sources using Alpine's seed environment
     # 2. validate the sysroot by using it as the toolchain when assembling a rootfs
     #
-    # Phase environments:
-    # - host-setup: runs on the host before entering any namespace.
-    # - sysroot-from-alpine: runs in the Alpine seed rootfs (host tools).
-    # - rootfs-from-sysroot: runs inside the workspace rootfs and seeds /etc plus /opt/sysroot.
-    # - system-from-sysroot/tools-from-system/finalize-rootfs: run inside the workspace rootfs,
-    #   prefer /usr/bin, and rely on musl's /etc/ld-musl-<arch>.path for runtime lookup.
+    # Phase namespaces:
+    # - host: runs on the host before entering any namespace.
+    # - seed: runs in the Alpine seed rootfs (host tools).
+    # - rootfs: runs inside the workspace rootfs, prefers /usr/bin, and relies on
+    #   musl's /etc/ld-musl-<arch>.path for runtime lookup.
     def phase_specs : Array(PhaseSpec)
       sysroot_prefix = "/#{SysrootWorkspace::SYSROOT_DIR_NAME}"
       # outer_workspace = "#{SysrootWorkspace.bq2_roofs_from(SysrootWorkspace::Namespace::Seed)}"
@@ -855,7 +818,7 @@ module Bootstrap
             name: "host-setup",
             description: "Prepare cached sources and seed the rootfs from the host.",
             workdir: SysrootWorkspace::ROOTFS_WORKSPACE_PATH.to_s,
-            environment: "host-setup",
+            namespace: "host",
             install_prefix: "/",
             destdir: nil,
             env: host_setup_env,
@@ -868,7 +831,7 @@ module Bootstrap
             name: "sysroot-from-alpine",
             description: "Build a self-contained sysroot using Alpine-hosted tools.",
             workdir: SysrootWorkspace::ROOTFS_WORKSPACE_PATH.to_s,
-            environment: "seed-alpine",
+            namespace: "seed",
             install_prefix: sysroot_prefix,
             destdir: nil,
             env: sysroot_env,
@@ -937,7 +900,7 @@ module Bootstrap
             name: "rootfs-from-sysroot",
             description: "Build a minimal rootfs using the newly built sysroot toolchain.",
             workdir: SysrootWorkspace::ROOTFS_WORKSPACE_PATH.to_s,
-            environment: "seed-sysroot-toolchain",
+            namespace: "seed",
             install_prefix: "/usr",
             destdir: "#{SysrootWorkspace::ROOTFS_WORKSPACE_PATH}/rootfs",
             env: rootfs_env,
@@ -979,7 +942,7 @@ module Bootstrap
             name: "system-from-sysroot",
             description: "Rebuild sysroot packages into /usr inside the new rootfs (prefix-free).",
             workdir: SysrootWorkspace::ROOTFS_WORKSPACE_PATH.to_s,
-            environment: "rootfs-system",
+            namespace: "rootfs",
             install_prefix: "/usr",
             destdir: nil,
             env: rootfs_env,
@@ -1043,7 +1006,7 @@ module Bootstrap
             name: "tools-from-system",
             description: "Build additional developer tools inside the new rootfs.",
             workdir: SysrootWorkspace::ROOTFS_WORKSPACE_PATH.to_s,
-            environment: "rootfs-system",
+            namespace: "rootfs",
             install_prefix: "/usr",
             destdir: nil,
             env: rootfs_env,
@@ -1068,7 +1031,7 @@ module Bootstrap
             name: "finalize-rootfs",
             description: "Strip the sysroot prefix and emit a prefix-free rootfs tarball.",
             workdir: SysrootWorkspace::ROOTFS_WORKSPACE_PATH.to_s,
-            environment: "rootfs-finalize",
+            namespace: "rootfs",
             install_prefix: "/usr",
             destdir: nil,
             env: rootfs_phase_env(sysroot_prefix),
@@ -1204,8 +1167,6 @@ module Bootstrap
       {
         "BQ2_ARCH" => @architecture,
         # TODO
-        # "BQ2_BRANCH"        => @branch,
-        # "BQ2_BASE_VERSION"  => @base_version,
         # "BQ2_SOURCE_BRANCH" => bootstrap_source_version,
       }
     end
@@ -1283,7 +1244,7 @@ module Bootstrap
         name: spec.phase.name,
         description: spec.phase.description,
         workdir: spec.phase.workdir,
-        environment: spec.phase.environment,
+        namespace: spec.phase.namespace,
         install_prefix: spec.phase.install_prefix,
         destdir: spec.phase.destdir,
         env: spec.phase.env,
@@ -1601,16 +1562,9 @@ module Bootstrap
     private def self.run_builder(args : Array(String)) : Int32
       architecture = DEFAULT_ARCH
       seed = DEFAULT_ROOTFS_SEED
-      branch = SysrootBuilder::DEFAULT_ROOTFS_BRANCH
-      base_version = SysrootBuilder::DEFAULT_ROOTFS_VERSION
-      base_rootfs_path : Path? = nil
-
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-builder [options]") do |p|
         p.on("-a ARCH", "--arch=ARCH", "Target architecture (default: #{architecture})") { |val| architecture = val }
         p.on("-s SEED", "--seed=SEED", "Seed to use for initial rootfs (default: #{seed})") { |val| seed = val }
-        p.on("-b BRANCH", "--branch=BRANCH", "Source branch/release tag (default: #{branch})") { |val| branch = val }
-        p.on("-v VERSION", "--base-version=VERSION", "Base rootfs version/tag (default: #{base_version})") { |val| base_version = val }
-        p.on("--base-rootfs PATH", "Use a local rootfs tarball instead of downloading the Alpine minirootfs") { |val| base_rootfs_path = Path[val].expand }
       end
       return CLI.print_help(parser) if help
 
@@ -1618,9 +1572,6 @@ module Bootstrap
       builder = SysrootBuilder.new(
         architecture: architecture,
         seed: seed,
-        branch: branch,
-        base_version: base_version,
-        base_rootfs_path: base_rootfs_path,
       )
       plan_path = builder.write_plan
       puts "Prepared sysroot workspace at #{builder.workspace.host_workdir}"
