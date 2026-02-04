@@ -208,8 +208,8 @@ module Bootstrap
 
       build_state = SysrootBuildState.load_or_init(workspace)
       plan_path = build_state.plan_path_path.to_s
-      overrides_path = build_state.overrides_path_path.try(&.to_s)
-      report_dir = report ? build_state.report_dir_path.try(&.to_s) : nil
+      overrides_path = build_state.overrides_path_path.to_s
+      report_dir = report ? build_state.report_dir_path.to_s : nil
 
       step_runner = StepRunner.new(workspace: workspace)
       run_plan(
@@ -253,7 +253,7 @@ module Bootstrap
       end
 
       state = SysrootBuildState.load_or_init(workspace)
-      puts "plan_path=#{state.plan_path}"
+      puts "plan_path=#{state.plan_path_path}"
       puts "state_path=#{state.state_path}"
       if (failure = state.progress.last_failure)
         puts "last_failure=#{failure.phase}/#{failure.step}"

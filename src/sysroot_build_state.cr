@@ -11,6 +11,7 @@ module Bootstrap
   # The build plan JSON is treated as immutable during iterations. Instead, the
   # runner records progress into this state file so subsequent runs can pick up
   # where they left off without re-running already successful steps.
+  @[JSON::Serializable::Options(ignore_unknown_fields: true)]
   class SysrootBuildState
     include JSON::Serializable
 
@@ -20,24 +21,11 @@ module Bootstrap
     REPORT_DIR_NAME = "sysroot-build-reports"
     FORMAT_VERSION  = 1
 
-    DEFAULT_PLAN      = "/var/lib/#{PLAN_FILE}"
-    DEFAULT_OVERRIDES = "/var/lib/#{OVERRIDES_FILE}"
-    DEFAULT_REPORTS   = "/var/lib/#{REPORT_DIR_NAME}"
-
     # Schema version for forward-compatible upgrades.
     getter format_version : Int32 = FORMAT_VERSION
 
     @[JSON::Field(ignore: true)]
     @workspace : SysrootWorkspace = SysrootWorkspace.new
-
-    # Rootfs-relative plan path (e.g., /var/lib/sysroot-build-plan.json).
-    property plan_path : String
-
-    # Rootfs-relative overrides path.
-    property overrides_path : String?
-
-    # Rootfs-relative report directory.
-    property report_dir : String?
 
     # Identifier for the prepared rootfs. This changes whenever the rootfs is
     # regenerated from scratch.
@@ -65,9 +53,6 @@ module Bootstrap
     getter progress : Progress = Progress.new
 
     def initialize(@workspace : SysrootWorkspace = SysrootWorkspace.new,
-                   @plan_path : String = DEFAULT_PLAN,
-                   @overrides_path : String? = DEFAULT_OVERRIDES,
-                   @report_dir : String? = DEFAULT_REPORTS,
                    @rootfs_id : String = Random::Secure.hex(8),
                    @created_at : String = Time.utc.to_s,
                    @updated_at : String? = nil,
@@ -95,10 +80,6 @@ module Bootstrap
       else
         state = SysrootBuildState.new(workspace: workspace)
       end
-
-      state.plan_path = DEFAULT_PLAN if state.plan_path.empty?
-      state.overrides_path ||= DEFAULT_OVERRIDES
-      state.report_dir ||= DEFAULT_REPORTS
 
       plan_digest = digest_for?(state.plan_path_path)
       overrides_path_path = overrides_path || state.overrides_path_path
@@ -135,19 +116,17 @@ module Bootstrap
 
     # Resolve the plan path into the active namespace.
     def plan_path_path : Path
-      resolve_rootfs_path(@plan_path)
+      @workspace.var_lib_dir / PLAN_FILE
     end
 
     # Resolve overrides path into the active namespace.
-    def overrides_path_path : Path?
-      return nil unless overrides_path
-      resolve_rootfs_path(overrides_path.not_nil!)
+    def overrides_path_path : Path
+      @workspace.var_lib_dir / OVERRIDES_FILE
     end
 
     # Resolve report directory path into the active namespace.
-    def report_dir_path : Path?
-      return nil unless report_dir
-      resolve_rootfs_path(report_dir.not_nil!)
+    def report_dir_path : Path
+      @workspace.var_lib_dir / REPORT_DIR_NAME
     end
 
     # Returns true when the build plan file exists for this workspace.
@@ -226,12 +205,6 @@ module Bootstrap
     def selected_phases(requested : String = "all") : Array(BuildPhase)
       plan = BuildPlan.parse(File.read(plan_path_path))
       plan.selected_phases(requested)
-    end
-
-    # Resolve a rootfs-absolute *path* against the rootfs root.
-    def resolve_rootfs_path(path : String) : Path
-      return Path[path] unless path.starts_with?("/")
-      @workspace.rootfs_root_path / path.lchop("/")
     end
 
     def assign_workspace(workspace : SysrootWorkspace) : Nil

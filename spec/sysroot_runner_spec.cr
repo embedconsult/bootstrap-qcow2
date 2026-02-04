@@ -49,7 +49,7 @@ describe Bootstrap::SysrootRunner do
     ]
 
     runner = RecordingRunner.new
-    Bootstrap::SysrootRunner.run_steps(phase, steps, runner)
+    Bootstrap::SysrootRunner.run_steps(phase, steps, runner, report_dir: nil)
 
     runner.calls.size.should eq 2
     runner.calls.first[:workdir].should eq "/tmp"
