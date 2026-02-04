@@ -9,7 +9,7 @@ module Bootstrap
 
     # Returns a copy of *plan* with its workspace-root rewritten.
     #
-    # This updates the phase workspace, phase destdir (when present), and each
+    # This updates the phase workspace_root, phase destdir (when present), and each
     # step workdir (plus any step-level install prefix/destdir fields) when they
     # are rooted at `from_root`.
     def self.rewrite_workspace_root(plan : BuildPlan, to_root : String, from_root : String = DEFAULT_WORKSPACE_ROOT) : BuildPlan
@@ -36,7 +36,7 @@ module Bootstrap
         BuildPhase.new(
           name: phase.name,
           description: phase.description,
-          workspace: rewrite_root(phase.workspace, from_root, to_root),
+          workspace_root: rewrite_root(phase.workspace_root, from_root, to_root),
           environment: phase.environment,
           install_prefix: phase.install_prefix,
           destdir: phase.destdir ? rewrite_root(phase.destdir.not_nil!, from_root, to_root) : nil,

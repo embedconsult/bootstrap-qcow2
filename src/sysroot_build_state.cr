@@ -25,7 +25,7 @@ module Bootstrap
     getter format_version : Int32 = FORMAT_VERSION
 
     @[JSON::Field(ignore: true)]
-    @workspace : SysrootWorkspace = SysrootWorkspace.new
+    @workspace : SysrootWorkspace? = nil
 
     # Identifier for the prepared rootfs. This changes whenever the rootfs is
     # regenerated from scratch.
@@ -52,7 +52,7 @@ module Bootstrap
     # Runner progress tracked per phase/package.
     getter progress : Progress = Progress.new
 
-    def initialize(@workspace : SysrootWorkspace = SysrootWorkspace.new,
+    def initialize(@workspace : SysrootWorkspace? = nil,
                    @rootfs_id : String = Random::Secure.hex(8),
                    @created_at : String = Time.utc.to_s,
                    @updated_at : String? = nil,
@@ -111,22 +111,22 @@ module Bootstrap
 
     # Current rootfs-relative state path
     def state_path : Path
-      @workspace.var_lib_dir / STATE_FILE
+      workspace.var_lib_dir / STATE_FILE
     end
 
     # Resolve the plan path into the active namespace.
     def plan_path_path : Path
-      @workspace.var_lib_dir / PLAN_FILE
+      workspace.var_lib_dir / PLAN_FILE
     end
 
     # Resolve overrides path into the active namespace.
     def overrides_path_path : Path
-      @workspace.var_lib_dir / OVERRIDES_FILE
+      workspace.var_lib_dir / OVERRIDES_FILE
     end
 
     # Resolve report directory path into the active namespace.
     def report_dir_path : Path
-      @workspace.var_lib_dir / REPORT_DIR_NAME
+      workspace.var_lib_dir / REPORT_DIR_NAME
     end
 
     # Returns true when the build plan file exists for this workspace.
@@ -209,6 +209,10 @@ module Bootstrap
 
     def assign_workspace(workspace : SysrootWorkspace) : Nil
       @workspace = workspace
+    end
+
+    private def workspace : SysrootWorkspace
+      @workspace || SysrootWorkspace.new(host_workdir: Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR])
     end
 
     # Minimal step reference used for progress tracking.

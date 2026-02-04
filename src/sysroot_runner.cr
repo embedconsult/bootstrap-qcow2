@@ -105,6 +105,7 @@ module Bootstrap
       phases = filter_phases_by_packages(phases, packages) if packages.any?
 
       state = load_state(workspace, state_path)
+      state_save_path = state_path ? Path[state_path] : nil
       if state && resume
         phases = filter_phases_by_state(phases, state)
       end
@@ -119,12 +120,12 @@ module Bootstrap
       phases.each_with_index do |phase_entry, idx|
         if state
           state.mark_current_phase(phase_entry.name)
-          state.save
+          save_state(state, state_save_path)
         end
-        run_phase(phase_entry, runner, report_dir: report_dir, state: state, resume: resume)
+        run_phase(phase_entry, runner, report_dir: report_dir, state: state, resume: resume, state_path: state_save_path)
         if state
           state.mark_current_phase(phases[idx + 1]?.try(&.name))
-          state.save
+          save_state(state, state_save_path)
         end
       end
     end
@@ -135,13 +136,14 @@ module Bootstrap
                        report_dir : String?,
                        allow_outside_rootfs : Bool = false,
                        state : SysrootBuildState? = nil,
-                       resume : Bool = true) : Nil
+                       resume : Bool = true,
+                       state_path : Path? = nil) : Nil
       if phase.environment.starts_with?("rootfs-") && !allow_outside_rootfs
         raise "Refusing to run #{phase.name} outside the rootfs" unless inside_rootfs?
       end
       Log.info { "Executing phase #{phase.name} (env=#{phase.environment})" }
       Log.info { "**** #{phase.description} ****" }
-      run_steps(phase, phase.steps, runner, report_dir: report_dir, state: state, resume: resume)
+      run_steps(phase, phase.steps, runner, report_dir: report_dir, state: state, resume: resume, state_path: state_path)
       Log.info { "Completed phase #{phase.name}" }
     end
 
@@ -151,7 +153,8 @@ module Bootstrap
                        runner,
                        report_dir : String?,
                        state : SysrootBuildState? = nil,
-                       resume : Bool = true) : Nil
+                       resume : Bool = true,
+                       state_path : Path? = nil) : Nil
       Log.info { "Executing #{steps.size} build steps" }
       steps.each do |step|
         if resume && state && state.completed?(phase.name, step.name)
@@ -163,13 +166,13 @@ module Bootstrap
           runner.run(phase, step)
           if state
             state.mark_success(phase.name, step.name)
-            state.save
+            save_state(state, state_path)
           end
         rescue ex
           report_path = report_dir ? write_failure_report(report_dir, phase, step, ex) : nil
           if state
             state.mark_failure(phase.name, step.name, ex.message, report_path)
-            state.save
+            save_state(state, state_path)
           end
           raise ex
         end
@@ -307,7 +310,7 @@ module Bootstrap
         BuildPhase.new(
           name: phase.name,
           description: phase.description,
-          workspace: phase.workspace,
+          workspace_root: phase.workspace_root,
           environment: phase.environment,
           install_prefix: phase.install_prefix,
           destdir: phase.destdir,
@@ -333,7 +336,7 @@ module Bootstrap
         BuildPhase.new(
           name: phase.name,
           description: phase.description,
-          workspace: phase.workspace,
+          workspace_root: phase.workspace_root,
           environment: phase.environment,
           install_prefix: phase.install_prefix,
           destdir: phase.destdir,
@@ -403,7 +406,7 @@ module Bootstrap
         "phase"          => {
           "name"           => phase.name,
           "environment"    => phase.environment,
-          "workspace"      => phase.workspace,
+          "workspace_root" => phase.workspace_root,
           "install_prefix" => phase.install_prefix,
           "destdir"        => phase.destdir,
           "env"            => phase.env,
@@ -438,12 +441,23 @@ module Bootstrap
     end
 
     private def self.load_state(workspace : SysrootWorkspace?, state_path : String?) : SysrootBuildState?
+      if state_path
+        return SysrootBuildState.load(workspace, Path[state_path]) if workspace
+        return SysrootBuildState.from_json(File.read(state_path))
+      end
       return nil unless workspace
-      return SysrootBuildState.load(workspace, Path[state_path]) if state_path
       SysrootBuildState.load_or_init(workspace)
     rescue ex
       Log.warn { "Failed to load state: #{ex.message}" }
       nil
+    end
+
+    private def self.save_state(state : SysrootBuildState, state_path : Path?) : Nil
+      if state_path
+        state.save(state_path)
+      else
+        state.save
+      end
     end
   end
 end

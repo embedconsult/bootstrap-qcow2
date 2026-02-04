@@ -91,20 +91,29 @@ module Bootstrap
   struct BuildPhase
     include JSON::Serializable
 
+    # Phase identifier used by the runner (e.g., "sysroot-from-alpine").
     getter name : String
+    # Human-readable description shown in logs.
     getter description : String
-    getter workspace : String
+    # Canonical workspace root for plan paths (rooted at /workspace inside the rootfs).
+    @[JSON::Field(key: "workspace")]
+    getter workspace_root : String
+    # Namespace tag used to pick the namespace the phase should run inside.
     getter environment : String
+    # Install prefix used by build strategies that honor configure/CMake prefixes.
     getter install_prefix : String
+    # Optional DESTDIR staging root (used for rootfs assembly).
     getter destdir : String?
+    # Default environment variables applied to every step in the phase.
     getter env : Hash(String, String)
+    # Ordered list of build steps for this phase.
     getter steps : Array(BuildStep)
 
     # Creates a build phase containing steps plus shared install/environment
     # defaults.
     def initialize(@name : String,
                    @description : String,
-                   @workspace : String,
+                   @workspace_root : String,
                    @environment : String,
                    @install_prefix : String,
                    @destdir : String? = nil,
