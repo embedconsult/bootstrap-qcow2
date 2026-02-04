@@ -72,8 +72,8 @@ module Bootstrap
     DEFAULT_CRYSTAL        = "1.19.1"
     SHARDS_CACHE_DIR       = ".shards-cache" # Cache directory name for prefetched shards dependencies.
     # Source: https://curl.se/ca/cacert.pem (Mozilla CA certificate bundle).
-    CA_BUNDLE_PEM = {{ read_file("#{__DIR__}/../data/ca-bundle/ca-certificates.crt") }}
-    DEFAULT_NAMESERVER     = "8.8.8.8"
+    CA_BUNDLE_PEM      = {{ read_file("#{__DIR__}/../data/ca-bundle/ca-certificates.crt") }}
+    DEFAULT_NAMESERVER = "8.8.8.8"
 
     getter workspace : SysrootWorkspace
     getter architecture : String

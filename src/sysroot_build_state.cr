@@ -58,16 +58,16 @@ module Bootstrap
     getter progress : Progress = Progress.new
 
     def self.new(workspace : SysrootWorkspace? = nil,
-                   rootfs_id : String = Random::Secure.hex(8),
-                   created_at : String = Time.utc.to_s,
-                   updated_at : String? = nil,
-                   plan_digest : String? = nil,
-                   overrides_digest : String? = nil,
-                   invalidated_at : String? = nil,
-                   invalidation_reason : String? = nil,
-                   progress : Progress = Progress.new,
-                   format_version : Int32 = FORMAT_VERSION,
-                   raise_on_invalid_state : Bool = false)
+                 rootfs_id : String = Random::Secure.hex(8),
+                 created_at : String = Time.utc.to_s,
+                 updated_at : String? = nil,
+                 plan_digest : String? = nil,
+                 overrides_digest : String? = nil,
+                 invalidated_at : String? = nil,
+                 invalidation_reason : String? = nil,
+                 progress : Progress = Progress.new,
+                 format_version : Int32 = FORMAT_VERSION,
+                 raise_on_invalid_state : Bool = false)
       state = SysrootBuildState.allocate
       workspace ||= SysrootWorkspace.new
       new_workspace = workspace.not_nil!
@@ -93,7 +93,7 @@ module Bootstrap
           changed ||= previous_plan != current_plan
           changed ||= previous_overrides != current_overrides
 
-	  if changed
+          if changed
             raise "State file does not reconcile with plan" if raise_on_invalid_state
             state.progress.completed_steps.clear
             state.progress.current_phase = nil
@@ -101,8 +101,8 @@ module Bootstrap
             state.progress.last_failure = nil
             state.invalidated_at = Time.utc.to_s
             state.invalidation_reason = "Build plan/overrides changed"
-	  end
-	end
+          end
+        end
       else
         state.touch
         state.workspace = new_workspace

@@ -40,7 +40,7 @@ module Bootstrap
       @report : Bool = true,
       @resume : Bool = true,
       @dry_run : Bool = true,
-      @clean_build_dirs : Bool = true
+      @clean_build_dirs : Bool = true,
     )
       @state = SysrootBuildState.new(workspace: @workspace)
       @step_runner = StepRunner.new(clean_build_dirs: @clean_build_dirs, workspace: @workspace)
