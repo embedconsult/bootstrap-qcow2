@@ -7,20 +7,20 @@ module Bootstrap
   #
   # Environment names (namespace):
   # - host: used for initial invocation and building the workspace
-  # - seed: outer rootfs used for building the tools into /opt/sysroot to build the rootfs
+  # - seed: outer rootfs used for building the tools into /opt/sysroot to build the bq2 rootfs
   # - bq2: the final inner rootfs as /
   #
   # Stable path references:
   # - host_workdir: directory on host used to store all of the working files (host: <host_workdir>)
   # - seed_rootfs_path: directory containing the outer rootfs (host:
-  #   <host_workdir>/rootfs, outer rootfs: /).
-  # - sysroot_path: directory to target the initial tool build (host: <host_workdir>/rootfs/opt/sysroot,
+  #   <host_workdir>/seed-rootfs, outer rootfs: /).
+  # - sysroot_path: directory to target the initial tool build (host: <host_workdir>/seed-rootfs/opt/sysroot,
   #   outer rootfs: /opt/sysroot)
   # - bq2_rootfs_path: directory that contains .bq2-rootfs and the inner rootfs (host:
-  #   <host_workdir>/rootfs/workspace/rootfs, outer rootfs: /workspace/rootfs, inner rootfs: /).
+  #   <host_workdir>/seed-rootfs/workspace/rootfs, outer rootfs: /workspace/rootfs, inner rootfs: /).
   # - workspace_path: directory that contains the workspace root (host:
-  #   <host_workdir>/rootfs/workspace, outer rootfs: /workspace, inner rootfs: /workspace).
-  # - log_path: /var/lib under in the inner rootfs (host <host_workdir>/rootfs/workspace/rootfs/var/lib,
+  #   <host_workdir>/seed-rootfs/workspace, outer rootfs: /workspace, inner rootfs: /workspace).
+  # - log_path: /var/lib under in the inner rootfs (host <host_workdir>/seed-rootfs/workspace/rootfs/var/lib,
   #   outer rootfs: /workspace/rootfs/var/lib, inner rootfs: /var/lib).
   #
   # To simplify coordination of path changes from namespace changes, this class should be used instead of
@@ -28,7 +28,7 @@ module Bootstrap
   class SysrootWorkspace
     ROOTFS_MARKER_NAME      = ".bq2-rootfs"
     DEFAULT_HOST_WORKDIR    = "data/sysroot"
-    ROOTFS_DIR_NAME         = "rootfs"
+    SEED_DIR_NAME           = "seed-rootfs"
     WORKSPACE_DIR_NAME      = "workspace"
     INNER_ROOTFS_DIR_NAME   = "rootfs"
     LOG_DIR_NAME            = "var/lib"
@@ -41,7 +41,7 @@ module Bootstrap
       BQ2
     end
     PROBE_PATHS_FOR_MARKER = [
-      {namespace: Namespace::Host, path: Path["#{DEFAULT_HOST_WORKDIR}/#{ROOTFS_DIR_NAME}/#{WORKSPACE_DIR_NAME}/#{INNER_ROOTFS_DIR_NAME}/#{ROOTFS_MARKER_NAME}"]},
+      {namespace: Namespace::Host, path: Path["#{DEFAULT_HOST_WORKDIR}/#{SEED_DIR_NAME}/#{WORKSPACE_DIR_NAME}/#{INNER_ROOTFS_DIR_NAME}/#{ROOTFS_MARKER_NAME}"]},
       {namespace: Namespace::Seed, path: ROOTFS_WORKSPACE_ROOTFS / ROOTFS_MARKER_NAME},
       {namespace: Namespace::BQ2, path: Path["/#{ROOTFS_MARKER_NAME}"]},
     ]
@@ -87,7 +87,7 @@ module Bootstrap
     def self.seed_rootfs_from(namespace : Namespace, host_workdir : Path? = nil)
       case namespace
       in .host?
-        host_workdir.not_nil! / Path["#{ROOTFS_DIR_NAME}"]
+        host_workdir.not_nil! / Path["#{SEED_DIR_NAME}"]
       in .seed?
         Path["/"]
       in .bq2?
@@ -111,7 +111,7 @@ module Bootstrap
     def self.workspace_from(namespace : Namespace, host_workdir : Path? = nil)
       case namespace
       in .host?
-        host_workdir.not_nil! / Path["#{ROOTFS_DIR_NAME}/#{WORKSPACE_DIR_NAME}"]
+        host_workdir.not_nil! / Path["#{SEED_DIR_NAME}/#{WORKSPACE_DIR_NAME}"]
       in .seed?
         ROOTFS_WORKSPACE_PATH
       in .bq2?

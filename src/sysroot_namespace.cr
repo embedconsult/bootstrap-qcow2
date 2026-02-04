@@ -88,7 +88,7 @@ module Bootstrap
 
     # Enter the rootfs namespace and exec the requested command.
     private def self.run_namespace(args : Array(String)) : Int32
-      rootfs = "#{SysrootWorkspace::DEFAULT_HOST_WORKDIR}/#{SysrootWorkspace::ROOTFS_DIR_NAME}"
+      rootfs = "#{SysrootWorkspace::DEFAULT_HOST_WORKDIR}/#{SysrootWorkspace::SEED_DIR_NAME}"
       extra_binds = [] of Tuple(Path, Path)
       command = [] of String
       codex_mode = false

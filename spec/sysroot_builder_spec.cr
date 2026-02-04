@@ -110,7 +110,7 @@ describe Bootstrap::SysrootBuilder do
       builder.cache_dir.expand.should eq host_workdir / "cache"
       builder.checksum_dir.expand.should eq host_workdir / "cache/checksums"
       builder.sources_dir.expand.should eq host_workdir / "sources"
-      builder.outer_rootfs_dir.expand.should eq host_workdir / "rootfs"
+      builder.outer_rootfs_dir.expand.should eq host_workdir / "seed-rootfs"
     end
   end
 

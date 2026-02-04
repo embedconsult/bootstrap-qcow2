@@ -1,8 +1,8 @@
-require "compress/gzip"
 require "digest/crc32"
 require "file_utils"
 require "log"
 require "path"
+require "./tar_writer"
 
 module Bootstrap
   # Helpers for tarball extraction
@@ -10,10 +10,7 @@ module Bootstrap
     # Create a gzip-compressed tarball from *source_dir*.
     def self.write_gz(source_dir : Path, output : Path) : Nil
       FileUtils.mkdir_p(output.parent)
-      args = ["-czf", output.to_s, "-C", source_dir.to_s, "."]
-      Log.info { "Running: tar #{args.join(" ")}" }
-      status = Process.run("tar", args)
-      raise "Failed to write tarball #{output}" unless status.success?
+      TarWriter.write_gz([source_dir], output, base_path: source_dir)
     end
 
     # Extract a tarball into *destination*.
