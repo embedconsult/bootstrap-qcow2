@@ -121,7 +121,7 @@ module Bootstrap
           "/bin/sh",
           "--login",
           "-c",
-          "/work/bin/codex --add-dir /var --add-dir /opt --add-dir /bq2-rootfs/workspace -C /work/bootstrap-qcow2 -s workspace-write",
+          "/work/bin/codex --add-dir /var --add-dir /opt --add-dir /workspace -C /work/bootstrap-qcow2 -s workspace-write",
         ]
         unless remaining.empty?
           command[-1] = [command[-1], remaining.join(" ")].join(" ")

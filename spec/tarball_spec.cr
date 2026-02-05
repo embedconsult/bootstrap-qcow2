@@ -1,4 +1,5 @@
 require "./spec_helper"
+require "../src/tar_writer"
 
 describe "Bootstrap::Tarball" do
   it "preserves entry mtimes from the archive" do
@@ -14,7 +15,7 @@ describe "Bootstrap::Tarball" do
       File.utime(fixed, fixed, file_path)
 
       archive = dir / "out.tar.gz"
-      Bootstrap::Tarball.write_gz(source, archive)
+      Bootstrap::TarWriter.write_gz([source], archive, base_path: source)
 
       Bootstrap::Tarball.extract(archive, dest, false, nil, nil)
 

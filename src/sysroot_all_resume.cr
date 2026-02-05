@@ -67,18 +67,18 @@ module Bootstrap
       plan_exists = build_state.plan_exists?
       state_exists = build_state.state_exists?
       if state_exists && !plan_exists
-        raise "Ambiguous resume state: state exists at #{build_state.state_path} but plan is missing at #{build_state.plan_path_path}"
+        raise "Ambiguous resume state: state exists at #{build_state.state_path} but plan is missing at #{build_state.plan_path}"
       end
 
       unless plan_exists
-        return Decision.new("plan-write", "missing build plan at #{build_state.plan_path_path}")
+        return Decision.new("plan-write", "missing build plan at #{build_state.plan_path}")
       end
 
-      plan_path = build_state.plan_path_path
+      plan_path = build_state.plan_path
       plan = BuildPlan.parse(File.read(plan_path))
       if state_exists
         state = SysrootBuildState.load(workspace, build_state.state_path)
-        plan_digest = SysrootBuildState.digest_for?(plan_path.to_s)
+        plan_digest = SysrootBuildState.digest_for?(plan_path)
         if plan_digest.nil? || state.plan_digest != plan_digest
           return Decision.new("sysroot-runner", "plan digest mismatch; ignoring state", plan_path: plan_path)
         end
