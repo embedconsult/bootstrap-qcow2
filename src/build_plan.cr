@@ -66,6 +66,7 @@ module Bootstrap
     getter extract_sources : Array(ExtractSpec)?
     getter packages : Array(String)?
     getter content : String?
+    getter sources_directory : String?
 
     # Creates a single step within a build phase.
     #
@@ -86,7 +87,8 @@ module Bootstrap
                    @sources : Array(SourceSpec)? = nil,
                    @extract_sources : Array(ExtractSpec)? = nil,
                    @packages : Array(String)? = nil,
-                   @content : String? = nil)
+                   @content : String? = nil,
+                   @sources_directory : String? = nil)
     end
   end
 

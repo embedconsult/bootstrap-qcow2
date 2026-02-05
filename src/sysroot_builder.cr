@@ -1044,6 +1044,7 @@ module Bootstrap
       package_sources = package_source_specs(packages)
       extract_sources = extract_source_specs(packages)
       rootfs_sources = package_source_specs([seed_rootfs_spec])
+      rootfs_extract = extract_source_specs([seed_rootfs_spec])
       [
         build_step(
           name: "download-sources",
@@ -1054,15 +1055,15 @@ module Bootstrap
         build_step(
           name: "populate-seed",
           strategy: "populate-seed",
-          sources: rootfs_sources,
-          workdir: sources_dir.to_s,
+          extract_sources: rootfs_extract,
+          sources_directory: sources_dir.to_s,
           destdir: @workspace.seed_rootfs_path.not_nil!.to_s,
         ),
         build_step(
           name: "extract-sources",
           strategy: "extract-sources",
           extract_sources: extract_sources,
-          workdir: sources_dir.to_s,
+          sources_directory: sources_dir.to_s,
           destdir: @workspace.workspace_path.to_s,
         ),
       ]
@@ -1118,7 +1119,8 @@ module Bootstrap
                            sources : Array(SourceSpec)? = nil,
                            extract_sources : Array(ExtractSpec)? = nil,
                            packages : Array(String)? = nil,
-                           content : String? = nil) : BuildStep
+                           content : String? = nil,
+                           sources_directory : String? = nil) : BuildStep
       BuildStep.new(
         name: name,
         strategy: strategy,
@@ -1133,6 +1135,7 @@ module Bootstrap
         extract_sources: extract_sources,
         packages: packages,
         content: content,
+        sources_directory: sources_directory,
       )
     end
 

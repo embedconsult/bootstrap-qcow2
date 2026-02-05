@@ -302,7 +302,7 @@ module Bootstrap
     def extract_sources(step : BuildStep) : Nil
       sources = step.extract_sources || raise "extract-sources requires step.extract_sources"
       destination = step.destdir ? Path[step.destdir.not_nil!] : Path["."]
-      source_root = step.workdir ? Path[step.workdir.not_nil!] : sources_dir
+      source_root = step.sources_directory ? Path[step.sources_directory.not_nil!] : sources_dir
       sources.each do |spec|
         archive = source_root / spec.filename
         raise "Missing source tarball #{archive}" unless File.exists?(archive)
@@ -313,11 +313,11 @@ module Bootstrap
 
     # Populate the seed rootfs using the base rootfs tarball.
     def populate_seed(step : BuildStep) : Nil
-      sources = step.sources || raise "populate-seed requires step.sources"
+      sources = step.extract_sources || raise "populate-seed requires step.extract_sources"
       raise "populate-seed expects at least one source" if sources.empty?
       workspace = @workspace || raise "populate-seed requires a workspace"
       seed_rootfs = workspace.seed_rootfs_path || raise "populate-seed requires seed rootfs path"
-      source_root = step.workdir ? Path[step.workdir.not_nil!] : sources_dir
+      source_root = step.sources_directory ? Path[step.sources_directory.not_nil!] : sources_dir
       destination = step.destdir ? Path[step.destdir.not_nil!] : seed_rootfs
       archive = source_root / sources.first.filename
       raise "Missing seed rootfs tarball #{archive}" unless File.exists?(archive)
