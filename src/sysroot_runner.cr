@@ -306,7 +306,7 @@ module Bootstrap
 
     # Return the namespace label for the current workspace.
     private def self.namespace_name(workspace : SysrootWorkspace) : String
-      workspace.namespace.to_s.underscore
+      workspace.namespace.label
     end
 
     # Return true when the phase should execute in a different namespace.
