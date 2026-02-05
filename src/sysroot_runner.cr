@@ -116,7 +116,19 @@ module Bootstrap
           state.mark_current_phase(phase_entry.name)
           save_state(state, state_save_path)
         end
-        run_phase(phase_entry, runner, report_dir: report_dir, state: state, resume: resume, state_path: state_save_path)
+        if workspace && namespace_switch_required?(phase_entry, workspace)
+          state = run_phase_in_namespace(
+            phase_entry,
+            runner,
+            report_dir: report_dir,
+            state: state,
+            resume: resume,
+            state_path: state_save_path,
+            workspace: workspace,
+          )
+        else
+          run_phase(phase_entry, runner, report_dir: report_dir, state: state, resume: resume, state_path: state_save_path)
+        end
         if state
           state.mark_current_phase(phases[idx + 1]?.try(&.name))
           save_state(state, state_save_path)
@@ -301,6 +313,79 @@ module Bootstrap
       marker = ENV["BQ2_ROOTFS_MARKER"]?
       return File.exists?(marker) if marker
       File.exists?(Path["/#{SysrootWorkspace::ROOTFS_MARKER_NAME}"])
+    end
+
+    # Return the namespace label for the current workspace.
+    private def self.namespace_name(workspace : SysrootWorkspace) : String
+      case workspace.namespace
+      in .host?
+        "host"
+      in .seed?
+        "seed"
+      in .bq2?
+        "bq2"
+      end
+    end
+
+    # Return true when the phase should execute in a different namespace.
+    private def self.namespace_switch_required?(phase : BuildPhase, workspace : SysrootWorkspace) : Bool
+      case phase.namespace
+      when "host", "seed", "bq2"
+        phase.namespace != namespace_name(workspace)
+      else
+        false
+      end
+    end
+
+    # Run a phase in a child process after entering the requested namespace.
+    private def self.run_phase_in_namespace(phase : BuildPhase,
+                                            runner,
+                                            report_dir : String?,
+                                            state : SysrootBuildState?,
+                                            resume : Bool,
+                                            state_path : Path?,
+                                            workspace : SysrootWorkspace) : SysrootBuildState?
+      process = Process.fork do
+        enter_phase_namespace(phase, workspace)
+        run_phase(phase, runner, report_dir: report_dir, state: state, resume: resume, state_path: state_path)
+        Process.exit(0)
+      rescue ex
+        Log.error { "Failed to run #{phase.name} in namespace #{phase.namespace}: #{ex.message}" }
+        Process.exit(1)
+      end
+      status = process.not_nil!.wait
+      raise "Phase #{phase.name} failed in namespace #{phase.namespace}" unless status.success?
+      return state unless state && state_path
+      SysrootBuildState.load(workspace, state_path)
+    end
+
+    # Enter the requested phase namespace, if needed.
+    private def self.enter_phase_namespace(phase : BuildPhase, workspace : SysrootWorkspace) : Nil
+      case phase.namespace
+      when "host"
+        raise "Cannot enter host namespace from #{namespace_name(workspace)}" unless workspace.namespace.host?
+      when "seed"
+        if workspace.namespace.host?
+          workspace.enter_seed_rootfs_namespace
+        elsif workspace.namespace.seed?
+          # Already in seed namespace.
+        else
+          raise "Cannot enter seed namespace from #{namespace_name(workspace)}"
+        end
+      when "bq2"
+        if workspace.namespace.host?
+          workspace.enter_seed_rootfs_namespace
+          workspace.enter_bq2_rootfs_namespace
+        elsif workspace.namespace.seed?
+          workspace.enter_bq2_rootfs_namespace
+        elsif workspace.namespace.bq2?
+          # Already in bq2 namespace.
+        else
+          raise "Cannot enter bq2 namespace from #{namespace_name(workspace)}"
+        end
+      else
+        raise "Unknown phase namespace #{phase.namespace}"
+      end
     end
 
     private def self.filter_phases_by_state(phases : Array(BuildPhase), state : SysrootBuildState) : Array(BuildPhase)
