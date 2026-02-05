@@ -29,6 +29,11 @@ module Bootstrap
     # Flush output at most 2 times per second.
     # Source: build output throttling requirement (2 Hz).
     DEFAULT_FLUSH_INTERVAL = 0.5.seconds
+    # Refresh the spinner at 5 Hz to balance responsiveness with IO overhead.
+    # Source: human-visible feedback cadence for long-running tasks.
+    DEFAULT_SPINNER_INTERVAL = 0.2.seconds
+    # ASCII spinner frames to ensure compatibility with minimal terminals.
+    SPINNER_FRAMES = ["-", "\\", "|", "/"]
 
     # Run *argv* with throttled stdout/stderr, returning status + elapsed time.
     def self.run(argv : Array(String),
@@ -60,6 +65,24 @@ module Bootstrap
         end
       end
       Result.new(status, elapsed, output_path)
+    end
+
+    # Run a long-lived block with a fiber-driven spinner and return the elapsed time.
+    def self.run_fibered(label : String,
+                         stdout : IO = STDOUT,
+                         stderr : IO = STDERR,
+                         spinner_interval : Time::Span = DEFAULT_SPINNER_INTERVAL,
+                         &block : ->) : Time::Span
+      spinner = FiberSpinner.new(label, stdout, stderr, spinner_interval)
+      elapsed = Time.measure do
+        spinner.start
+        begin
+          yield
+        ensure
+          spinner.stop
+        end
+      end
+      elapsed
     end
 
     # Run a command with throttled stdout/stderr output.
@@ -156,6 +179,8 @@ module Bootstrap
         @stderr_passthrough = !@stderr.tty? && @display_io != @stderr
         @mutex = Mutex.new
         @closed = false
+        @last_render_fragment_seq = 0_u64
+        @spinner_frame_index = 0
       end
 
       # Append bytes destined for stdout.
@@ -246,11 +271,21 @@ module Bootstrap
         if (fragment = select_fragment_line)
           lines << fragment
         end
-        return if lines.empty?
+        show_spinner = @fragment_seq == @last_render_fragment_seq
+        spinner_frame = show_spinner ? next_spinner_frame : nil
+        if lines.empty?
+          return unless spinner_frame
+          lines = Array.new(TAIL_LINES - 1, TailLine.new("", false)) + [TailLine.new(spinner_frame, false)]
+        end
 
         lines = lines.last(TAIL_LINES)
         if lines.size < TAIL_LINES
           lines = Array.new(TAIL_LINES - lines.size, TailLine.new("", false)) + lines
+        end
+        if spinner_frame
+          last = lines.pop
+          spinner_text = last.text.empty? ? spinner_frame : "#{last.text} #{spinner_frame}"
+          lines << TailLine.new(spinner_text, last.stderr)
         end
         return if lines == @last_rendered
 
@@ -263,6 +298,7 @@ module Bootstrap
         display_io.flush
         @rendered_lines = TAIL_LINES
         @last_rendered = lines
+        @last_render_fragment_seq = @fragment_seq
       end
 
       private def clear_rendered_lines(io : IO) : Nil
@@ -359,7 +395,77 @@ module Bootstrap
         end
       end
 
+      # Rotate through spinner frames when no new output arrives.
+      private def next_spinner_frame : String
+        frame = SPINNER_FRAMES[@spinner_frame_index % SPINNER_FRAMES.size]
+        @spinner_frame_index &+= 1
+        frame
+      end
+
       private record TailLine, text : String, stderr : Bool
+    end
+
+    private class FiberSpinner
+      @display_io : IO?
+
+      # Create a spinner that renders to the first available TTY output.
+      def initialize(@label : String,
+                     @stdout : IO,
+                     @stderr : IO,
+                     @interval : Time::Span = DEFAULT_SPINNER_INTERVAL)
+        @display_io = select_display_io
+        @mutex = Mutex.new
+        @running = false
+        @rendered = false
+        @frame_index = 0
+      end
+
+      # Start the spinner loop on a fiber.
+      def start : Nil
+        return unless @display_io
+        @mutex.synchronize { @running = true }
+        spawn do
+          loop do
+            sleep @interval
+            break unless @mutex.synchronize { @running }
+            render
+          end
+        end
+      end
+
+      # Stop rendering and clear the spinner line.
+      def stop : Nil
+        @mutex.synchronize { @running = false }
+        clear
+      end
+
+      # Render the next spinner frame.
+      private def render : Nil
+        display_io = @display_io
+        return unless display_io
+        frame = SPINNER_FRAMES[@frame_index % SPINNER_FRAMES.size]
+        @frame_index &+= 1
+        display_io.print("\r\033[0m\033[2K#{frame} #{@label}")
+        display_io.flush
+        @rendered = true
+      end
+
+      # Clear any rendered spinner output.
+      private def clear : Nil
+        display_io = @display_io
+        return unless display_io
+        return unless @rendered
+        display_io.print("\r\033[0m\033[2K")
+        display_io.flush
+        @rendered = false
+      end
+
+      # Select the first available TTY output stream.
+      private def select_display_io : IO?
+        return @stdout if @stdout.tty?
+        return @stderr if @stderr.tty?
+        nil
+      end
     end
   end
 end

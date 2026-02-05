@@ -270,9 +270,12 @@ module Bootstrap
           end
 
           Log.debug { "Downloading #{spec.name} #{spec.version} from #{spec.url}" }
-          download_with_redirects(spec.url, target)
-          raise "Empty download for #{spec.name}" if File.size(target) == 0
-          verify(spec, target)
+          elapsed = ProcessRunner.run_fibered("Downloading #{spec.name}") do
+            download_with_redirects(spec.url, target)
+            raise "Empty download for #{spec.name}" if File.size(target) == 0
+            verify(spec, target)
+          end
+          Log.info { "Downloaded #{spec.name} in #{elapsed.total_seconds.round(3)}s" }
           return target
         rescue error
           File.delete(target) if File.exists?(target)
@@ -308,7 +311,10 @@ module Bootstrap
         archive = source_root / spec.filename
         raise "Missing source tarball #{archive}" unless File.exists?(archive)
         Log.info { "Extracting #{archive} into #{destination}" }
-        Tarball.extract(archive, destination, preserve_ownership: false, owner_uid: nil, owner_gid: nil)
+        elapsed = ProcessRunner.run_fibered("Extracting #{spec.name}") do
+          Tarball.extract(archive, destination, preserve_ownership: false, owner_uid: nil, owner_gid: nil)
+        end
+        Log.info { "Extracted #{spec.name} in #{elapsed.total_seconds.round(3)}s" }
         if build_directory = spec.build_directory
           build_path = destination / build_directory
           raise "Expected #{build_path} after extracting #{archive}" unless Dir.exists?(build_path)
