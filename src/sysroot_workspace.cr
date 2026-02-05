@@ -30,8 +30,8 @@ module Bootstrap
     DEFAULT_HOST_WORKDIR = "data/sysroot"
     SEED_DIR_NAME        = "seed-rootfs"
     BQ2_DIR_NAME         = "bq2-rootfs"
-    WORKSPACE_DIR_NAME   = "workspace"
     LOG_DIR_NAME         = "var/lib"
+    WORKSPACE_DIR_NAME   = "workspace"
     SYSROOT_DIR_NAME     = "opt/sysroot"
     enum Namespace
       Host
@@ -47,21 +47,15 @@ module Bootstrap
     getter host_workdir : Path?
     getter seed_rootfs_path : Path?
     getter sysroot_path : Path?
-    getter bq2_rootfs_path : Path
-    getter marker_path : Path
-    getter workspace_path : Path
-    getter log_path : Path
+    getter bq2_rootfs_path : Path = Path["/"]
+    getter marker_path : Path = Path["/"]
+    getter workspace_path : Path = Path["/"]
+    getter log_path : Path = Path["/"]
     getter namespace : Namespace
     @extra_binds : Array(Tuple(Path, Path))
 
     def initialize(@host_workdir : Path? = nil,
                    @extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path))
-      @seed_rootfs_path = nil
-      @sysroot_path = nil
-      @bq2_rootfs_path = Path["/"]
-      @workspace_path = Path["/"]
-      @marker_path = Path["/"]
-      @log_path = Path["/"]
       if @host_workdir.nil?
         found_marker = PROBE_PATHS_FOR_MARKER.find { |s| File.exists?(s[:path]) }
         raise "Missing BQ2 rootfs marker at one of these paths: #{PROBE_PATHS_FOR_MARKER}" if found_marker.nil?
@@ -76,7 +70,12 @@ module Bootstrap
 
       raise "Invalid namespace: #{@namespace}" unless [Namespace::Host, Namespace::Seed, Namespace::BQ2].includes?(@namespace)
 
-      refresh_paths
+      @seed_rootfs_path = self.class.seed_rootfs_from(@namespace, @host_workdir)
+      @sysroot_path = self.class.sysroot_from(@namespace, @host_workdir)
+      @bq2_rootfs_path = self.class.bq2_rootfs_from(@namespace, @host_workdir)
+      @workspace_path = self.class.workspace_from(@namespace, @host_workdir)
+      @marker_path = @bq2_rootfs_path / Path["#{ROOTFS_MARKER_NAME}"]
+      @log_path = @bq2_rootfs_path / Path["#{LOG_DIR_NAME}"]
     end
 
     def self.seed_rootfs_from(namespace : Namespace, host_workdir : Path? = nil)
@@ -132,10 +131,6 @@ module Bootstrap
 
     private def update_namespace(namespace : Namespace) : Nil
       @namespace = namespace
-      refresh_paths
-    end
-
-    private def refresh_paths : Nil
       @seed_rootfs_path = self.class.seed_rootfs_from(@namespace, @host_workdir)
       @sysroot_path = self.class.sysroot_from(@namespace, @host_workdir)
       @bq2_rootfs_path = self.class.bq2_rootfs_from(@namespace, @host_workdir)
