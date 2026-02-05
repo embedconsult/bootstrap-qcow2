@@ -753,7 +753,7 @@ module Bootstrap
               musl_ld_path,
               "/lib:/usr/lib:/opt/sysroot/lib:/opt/sysroot/lib/#{sysroot_triple}:/opt/sysroot/usr/lib\n",
             ),
-            prepare_rootfs_step([
+            write_file_steps([
               {"/etc/os-release", os_release_content},
               {"/etc/profile", profile_content},
               {"/etc/resolv.conf", resolv_conf_content},
@@ -767,7 +767,7 @@ module Bootstrap
               workdir: sysroot_prefix,
               install_prefix: sysroot_prefix,
             ),
-          ],
+          ].flatten,
         ),
         PhaseSpec.new(
           BuildPhase.new(
@@ -822,16 +822,11 @@ module Bootstrap
             ],
             "libxml2" => libxml2_cmake_flags,
           },
-          extra_steps: [
-            symlink_step(
-              "bq2-symlinks",
-              [
-                {"bq2", "/usr/bin/curl"},
-                {"bq2", "/usr/bin/git-remote-https"},
-                {"bq2", "/usr/bin/pkg-config"},
-              ],
-            ),
-          ],
+          extra_steps: symlink_steps([
+            {"bq2", "/usr/bin/curl"},
+            {"bq2", "/usr/bin/git-remote-https"},
+            {"bq2", "/usr/bin/pkg-config"},
+          ]),
         ),
         PhaseSpec.new(
           BuildPhase.new(
@@ -1012,6 +1007,7 @@ module Bootstrap
             version: pkg.version,
             url: uri.to_s,
             filename: pkg.filename_for(uri),
+            build_directory: pkg.build_directory,
             sha256: pkg.sha256,
             checksum_url: checksum_uri ? checksum_uri.to_s : nil,
           )
@@ -1019,29 +1015,38 @@ module Bootstrap
       end
     end
 
+    private def extract_source_specs(specs : Array(PackageSpec)) : Array(ExtractSpec)
+      specs.map do |pkg|
+        ExtractSpec.new(
+          name: pkg.name,
+          version: pkg.version,
+          filename: pkg.filename,
+          build_directory: source_dir_for(pkg),
+        )
+      end
+    end
+
     private def host_setup_steps : Array(BuildStep)
-      workdir = @workspace.host_workdir.to_s
       package_sources = package_source_specs(packages)
-      extract_sources = package_source_specs(packages)
+      extract_sources = extract_source_specs(packages)
       rootfs_sources = package_source_specs([seed_rootfs_spec])
       [
         build_step(
           name: "download-sources",
           strategy: "download-sources",
-          workdir: workdir,
           sources: package_sources,
+          destdir: sources_dir.to_s,
         ),
         build_step(
           name: "populate-seed",
           strategy: "populate-seed",
-          workdir: workdir,
           sources: rootfs_sources,
         ),
         build_step(
           name: "extract-sources",
           strategy: "extract-sources",
-          workdir: workdir,
-          sources: extract_sources,
+          extract_sources: extract_sources,
+          destdir: @workspace.workspace_path.to_s,
         ),
       ]
     end
@@ -1086,7 +1091,7 @@ module Bootstrap
     # Create a BuildStep with defaulted arrays for simple helper usage.
     private def build_step(name : String,
                            strategy : String,
-                           workdir : String,
+                           workdir : String? = nil,
                            install_prefix : String? = nil,
                            env : Hash(String, String) = {} of String => String,
                            configure_flags : Array(String) = [] of String,
@@ -1094,6 +1099,7 @@ module Bootstrap
                            destdir : String? = nil,
                            build_dir : String? = nil,
                            sources : Array(SourceSpec)? = nil,
+                           extract_sources : Array(ExtractSpec)? = nil,
                            packages : Array(String)? = nil,
                            content : String? = nil) : BuildStep
       BuildStep.new(
@@ -1107,6 +1113,7 @@ module Bootstrap
         env: env,
         build_dir: build_dir,
         sources: sources,
+        extract_sources: extract_sources,
         packages: packages,
         content: content,
       )
@@ -1117,10 +1124,16 @@ module Bootstrap
       build_step(
         name: name,
         strategy: "write-file",
-        workdir: "/",
         install_prefix: path,
         content: content,
       )
+    end
+
+    # Build write-file steps for a list of path/content pairs.
+    private def write_file_steps(files : Array(Tuple(String, String))) : Array(BuildStep)
+      files.map_with_index do |(path, content), idx|
+        write_file_step("prepare-rootfs-#{idx}", path, content)
+      end
     end
 
     # Build an apk-add step with an explicit package list.
@@ -1128,41 +1141,20 @@ module Bootstrap
       build_step(
         name: name,
         strategy: "apk-add",
-        workdir: "/",
         packages: packages,
       )
     end
 
-    # Build a prepare-rootfs step for a list of path/content pairs.
-    private def prepare_rootfs_step(files : Array(Tuple(String, String))) : BuildStep
-      env = {} of String => String
-      files.each_with_index do |(path, content), idx|
-        env["FILE_#{idx}_PATH"] = path
-        env["FILE_#{idx}_CONTENT"] = content
+    # Build symlink steps from a list of source/destination pairs.
+    private def symlink_steps(links : Array(Tuple(String, String))) : Array(BuildStep)
+      links.map_with_index do |(source, dest), idx|
+        build_step(
+          name: "symlink-#{idx}",
+          strategy: "symlink",
+          install_prefix: dest,
+          content: source,
+        )
       end
-      build_step(
-        name: "prepare-rootfs",
-        strategy: "prepare-rootfs",
-        workdir: "/",
-        install_prefix: "/",
-        env: env,
-      )
-    end
-
-    # Build a symlink step from a list of source/destination pairs.
-    private def symlink_step(name : String, links : Array(Tuple(String, String))) : BuildStep
-      env = {} of String => String
-      links.each_with_index do |(source, dest), idx|
-        env["LINK_#{idx}_SRC"] = source
-        env["LINK_#{idx}_DEST"] = dest
-      end
-      build_step(
-        name: name,
-        strategy: "symlink",
-        workdir: "/",
-        install_prefix: "/",
-        env: env,
-      )
     end
 
     # Build the steps for a package, expanding multi-stage packages as needed.
@@ -1370,7 +1362,20 @@ module Bootstrap
 
     # Returns the patch list for a package after applying phase-level overrides.
     private def patches_for(pkg : PackageSpec, spec : PhaseSpec) : Array(String)
-      pkg.patches + (spec.patch_overrides[pkg.name]? || [] of String)
+      patches = pkg.patches + (spec.patch_overrides[pkg.name]? || [] of String)
+      host_workdir = @workspace.host_workdir.not_nil!
+      host_workspace = @workspace.workspace_path.to_s
+      namespace_workspace = case spec.phase.namespace
+                            when "seed"
+                              SysrootWorkspace.workspace_from(SysrootWorkspace::Namespace::Seed, host_workdir).to_s
+                            when "bq2"
+                              SysrootWorkspace.workspace_from(SysrootWorkspace::Namespace::BQ2, host_workdir).to_s
+                            else
+                              host_workspace
+                            end
+      patches.map do |patch|
+        patch.starts_with?(host_workspace) ? patch.sub(host_workspace, namespace_workspace) : patch
+      end
     end
 
     # Placeholder for future build command materialization.

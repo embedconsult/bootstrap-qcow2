@@ -4,7 +4,7 @@ require "file_utils"
 require "random/secure"
 
 class RecordingRunner
-  getter calls = [] of NamedTuple(phase: String, name: String, workdir: String, strategy: String, configure_flags: Array(String), env: Hash(String, String))
+  getter calls = [] of NamedTuple(phase: String, name: String, workdir: String?, strategy: String, configure_flags: Array(String), env: Hash(String, String))
   property status : Bool = true
   property exit_code : Int32 = 0
 

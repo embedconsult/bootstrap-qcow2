@@ -54,9 +54,10 @@ module Bootstrap
     #   into a rootfs directory without needing chroot/pivot_root.
     # - `env` combines phase env with step env, with step keys overriding.
     def run(phase : BuildPhase, step : BuildStep)
-      Dir.cd(step.workdir) do
-        cpus = (System.cpu_count || 1).to_i32
-        Log.info { "Starting #{step.strategy} build for #{step.name} in #{step.workdir} (cpus=#{cpus})" }
+      workdir = step.workdir
+      cpus = (System.cpu_count || 1).to_i32
+      Log.info { "Starting #{step.strategy} build for #{step.name} in #{workdir || "(no chdir)"} (cpus=#{cpus})" }
+      run_block = -> {
         @command_log_prefix = log_prefix_for(phase, step)
         apply_patches(step.patches)
         env = effective_env(phase, step)
@@ -64,8 +65,9 @@ module Bootstrap
         destdir = step.destdir || phase.destdir
         case step.strategy
         when "cmake"
-          build_dir = step.build_dir || step.workdir
-          bootstrap_path = File.join(step.workdir, "bootstrap")
+          step_root = workdir || "."
+          build_dir = step.build_dir || step_root
+          bootstrap_path = File.join(step_root, "bootstrap")
           had_build_files = File.exists?(File.join(build_dir, "CMakeCache.txt")) ||
                             File.exists?(File.join(build_dir, "Makefile")) ||
                             Dir.exists?(File.join(build_dir, "CMakeFiles"))
@@ -91,7 +93,7 @@ module Bootstrap
           run_cmd(["make", "CONFIG_PREFIX=#{install_root}", "install"], env: env)
         when "makefile-classic"
           makefile = "Makefile.bq2"
-          raise "Missing #{makefile} in #{step.workdir}" unless File.exists?(makefile)
+          raise "Missing #{makefile} in #{workdir || Dir.current}" unless File.exists?(makefile)
           run_cmd(["make", "-f", makefile, "-j#{cpus}"], env: env)
           if destdir
             run_cmd(["make", "-f", makefile, "DESTDIR=#{destdir}", "install"], env: env)
@@ -141,24 +143,13 @@ module Bootstrap
           end
           raise "prepare-rootfs wrote no files" unless wrote
         when "symlink"
-          idx = 0
-          linked = false
-          loop do
-            src_key = "LINK_#{idx}_SRC"
-            dest_key = "LINK_#{idx}_DEST"
-            source = step.env[src_key]?
-            dest = step.env[dest_key]?
-            break unless source || dest
-            raise "symlink requires #{src_key}" unless source
-            raise "symlink requires #{dest_key}" unless dest
-            target = destdir ? "#{destdir}#{dest}" : dest
-            FileUtils.mkdir_p(File.dirname(target))
-            FileUtils.rm_rf(target) if File.exists?(target) || File.symlink?(target)
-            File.symlink(source, target)
-            linked = true
-            idx += 1
-          end
-          raise "symlink wrote no links" unless linked
+          raise "symlink requires step.install_prefix (destination)" unless step.install_prefix
+          source = step.content || step.env["CONTENT"]?
+          raise "symlink requires content (source path)" unless source
+          target = destdir ? "#{destdir}#{install_prefix}" : install_prefix
+          FileUtils.mkdir_p(File.dirname(target))
+          FileUtils.rm_rf(target) if File.exists?(target) || File.symlink?(target)
+          File.symlink(source, target)
         when "remove-tree"
           raise "remove-tree requires step.install_prefix (path to remove)" unless step.install_prefix
           remove_root = destdir ? "#{destdir}#{install_prefix}" : install_prefix
@@ -168,7 +159,7 @@ module Bootstrap
           output = step.install_prefix
           raise "tarball requires step.install_prefix (output path)" unless output
           output = output.not_nil!
-          source_root = step.workdir
+          source_root = workdir || "/"
           if destdir
             if source_root.starts_with?(destdir)
               # Already rooted at the destdir.
@@ -242,6 +233,11 @@ module Bootstrap
           end
         end
         Log.info { "Finished #{step.name}" }
+      }
+      if workdir
+        Dir.cd(workdir, &run_block)
+      else
+        run_block.call
       end
     end
 
@@ -253,13 +249,14 @@ module Bootstrap
     # Download all configured package sources and return their cached paths.
     def download_sources(step : BuildStep) : Array(Path)
       sources = step.sources || raise "download-sources requires step.sources"
-      sources.map { |spec| download_and_verify(spec) }
+      sources_dir = step.destdir ? Path[step.destdir.not_nil!] : sources_dir()
+      sources.map { |spec| download_and_verify(spec, sources_dir) }
     end
 
     # Download a source tarball (if missing) into the source cache and verify
     # its checksum before returning the cached path.
-    def download_and_verify(spec : SourceSpec) : Path
-      target = sources_dir / spec.filename
+    def download_and_verify(spec : SourceSpec, target_dir : Path = sources_dir) : Path
+      target = target_dir / spec.filename
       attempts = 3
       attempts.times do |idx|
         begin
@@ -303,8 +300,8 @@ module Bootstrap
 
     # Extract all configured package sources into the workdir.
     def extract_sources(step : BuildStep) : Nil
-      sources = step.sources || raise "extract-sources requires step.sources"
-      destination = Path[step.workdir]
+      sources = step.extract_sources || raise "extract-sources requires step.extract_sources"
+      destination = step.destdir ? Path[step.destdir.not_nil!] : Path["."]
       sources.each do |spec|
         archive = sources_dir / spec.filename
         raise "Missing source tarball #{archive}" unless File.exists?(archive)

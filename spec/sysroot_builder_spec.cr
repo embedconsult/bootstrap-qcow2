@@ -105,11 +105,11 @@ describe Bootstrap::SysrootBuilder do
       sysroot_zlib_env = sysroot_phase.env_overrides["zlib"]
       sysroot_zlib_env["CFLAGS"].should contain("-fPIC")
       rootfs_phase = builder.phase_specs.find { |spec| spec.phase.name == "rootfs-from-sysroot" }.not_nil!
-      prepare_step = rootfs_phase.extra_steps.find(&.name.==("prepare-rootfs")).not_nil!
-      profile = prepare_step.env["FILE_1_CONTENT"]
+      prepare_step = rootfs_phase.extra_steps.find(&.name.==("prepare-rootfs-1")).not_nil!
+      profile = prepare_step.content.not_nil!
       profile.should contain("SSL_CERT_FILE=\"/etc/ssl/certs/ca-certificates.crt\"")
       profile.should contain("LANG=C.UTF-8")
-      ca_bundle = prepare_step.env["FILE_4_CONTENT"]
+      ca_bundle = rootfs_phase.extra_steps.find(&.name.==("prepare-rootfs-4")).not_nil!.content.not_nil!
       ca_bundle.should contain("BEGIN CERTIFICATE")
 
       system_phase = builder.phase_specs.find { |spec| spec.phase.name == "system-from-sysroot" }.not_nil!
@@ -147,7 +147,19 @@ describe Bootstrap::SysrootBuilder do
       rootfs_phase = plan.phases.find(&.name.==("rootfs-from-sysroot")).not_nil!
       rootfs_phase.install_prefix.should eq "/usr"
       rootfs_phase.destdir.should eq "/bq2-rootfs"
-      rootfs_phase.steps.map(&.name).should eq ["musl", "busybox", "linux-headers", "musl-ld-path", "prepare-rootfs", "sysroot"]
+      rootfs_phase.steps.map(&.name).should eq [
+        "musl",
+        "busybox",
+        "linux-headers",
+        "musl-ld-path",
+        "prepare-rootfs-0",
+        "prepare-rootfs-1",
+        "prepare-rootfs-2",
+        "prepare-rootfs-3",
+        "prepare-rootfs-4",
+        "prepare-rootfs-5",
+        "sysroot",
+      ]
 
       finalize_phase = plan.phases.find(&.name.==("finalize-rootfs")).not_nil!
       finalize_phase.steps.map(&.name).should eq ["strip-sysroot", "musl-ld-path-final", "rootfs-tarball"]

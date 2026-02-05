@@ -50,7 +50,7 @@ module Bootstrap
 
     getter name : String
     getter strategy : String
-    getter workdir : String
+    getter workdir : String?
     getter configure_flags : Array(String)
     getter patches : Array(String)
     getter build_dir : String?
@@ -71,7 +71,7 @@ module Bootstrap
     # a `make clean` before building (when supported by the strategy).
     def initialize(@name : String,
                    @strategy : String,
-                   @workdir : String,
+                   @workdir : String?,
                    @configure_flags : Array(String),
                    @patches : Array(String),
                    @install_prefix : String? = nil,
