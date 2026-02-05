@@ -2,6 +2,7 @@ require "digest/crc32"
 require "file_utils"
 require "log"
 require "path"
+require "compress/gzip"
 
 module Bootstrap
   # Helpers for tarball extraction
@@ -486,3 +487,5 @@ module Bootstrap
     end
   end
 end
+
+require "compress/gzip"

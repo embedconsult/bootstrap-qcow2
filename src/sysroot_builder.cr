@@ -1029,13 +1029,14 @@ module Bootstrap
       end
     end
 
-    private def extract_source_specs(specs : Array(PackageSpec)) : Array(ExtractSpec)
+    private def extract_source_specs(specs : Array(PackageSpec), include_build_directory : Bool = true) : Array(ExtractSpec)
       specs.map do |pkg|
+        build_directory = include_build_directory ? source_dir_for(pkg) : nil
         ExtractSpec.new(
           name: pkg.name,
           version: pkg.version,
           filename: pkg.filename,
-          build_directory: source_dir_for(pkg),
+          build_directory: build_directory,
         )
       end
     end
@@ -1044,7 +1045,7 @@ module Bootstrap
       package_sources = package_source_specs(packages)
       extract_sources = extract_source_specs(packages)
       rootfs_sources = package_source_specs([seed_rootfs_spec])
-      rootfs_extract = extract_source_specs([seed_rootfs_spec])
+      rootfs_extract = extract_source_specs([seed_rootfs_spec], include_build_directory: false)
       [
         build_step(
           name: "download-sources",

@@ -13,13 +13,13 @@ module Bootstrap
     getter name : String
     getter version : String
     getter filename : String
-    getter build_directory : String
+    getter build_directory : String?
 
     # Describes how a source archive should be extracted.
     def initialize(@name : String,
                    @version : String,
                    @filename : String,
-                   @build_directory : String)
+                   @build_directory : String? = nil)
     end
   end
 
