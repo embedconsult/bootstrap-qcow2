@@ -52,7 +52,7 @@ module Bootstrap
     MS_PRIVATE     = (1_u64 << 18)
     MNT_DETACH     = 2
     DEFAULT_PATH   = "/opt/sysroot/bin:/opt/sysroot/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
-    DEFAULT_ROOTFS = SysrootWorkspace::DEFAULT_HOST_WORKDIR / SysrootWorkspace::OUTER_ROOTFS_DIR
+    DEFAULT_ROOTFS = Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR] / SysrootWorkspace::OUTER_ROOTFS_DIR
 
     class NamespaceError < RuntimeError
     end

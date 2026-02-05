@@ -68,12 +68,11 @@ module Bootstrap
                  progress : Progress = Progress.new,
                  format_version : Int32 = FORMAT_VERSION,
                  raise_on_invalid_state : Bool = false)
-      state = SysrootBuildState.allocate
       workspace ||= SysrootWorkspace.new
       new_workspace = workspace.not_nil!
       new_state_path = new_workspace.log_path / STATE_FILE
       if File.exists?(new_state_path)
-        state = state.class.from_json(File.open(new_state_path))
+        state = SysrootBuildState.from_json(File.open(new_state_path))
         state.workspace = new_workspace
 
         # Ensure stored digests match the current plan/overrides files.
@@ -88,7 +87,7 @@ module Bootstrap
         state.plan_digest = current_plan
         state.overrides_digest = current_overrides
 
-        unless progress.completed_steps.empty?
+        unless state.progress.completed_steps.empty?
           changed = false
           changed ||= previous_plan != current_plan
           changed ||= previous_overrides != current_overrides
@@ -103,19 +102,57 @@ module Bootstrap
             state.invalidation_reason = "Build plan/overrides changed"
           end
         end
-      else
-        state.touch
-        state.workspace = new_workspace
-        FileUtils.mkdir_p(new_state_path.parent)
-        File.write(new_state_path, state.to_pretty_json)
+        return state
       end
+
+      state = SysrootBuildState.allocate
+      current_plan = plan_digest || SysrootBuildState.digest_for?(new_workspace.log_path / PLAN_FILE)
+      current_overrides = overrides_digest || SysrootBuildState.digest_for?(new_workspace.log_path / OVERRIDES_FILE)
+      state.initialize_fields(
+        rootfs_id: rootfs_id,
+        created_at: created_at,
+        updated_at: updated_at,
+        plan_digest: current_plan,
+        overrides_digest: current_overrides,
+        invalidated_at: invalidated_at,
+        invalidation_reason: invalidation_reason,
+        progress: progress,
+        format_version: format_version,
+      )
+      state.workspace = new_workspace
+      state.touch if updated_at.nil?
       state
+    end
+
+    protected def initialize_fields(rootfs_id : String,
+                                    created_at : String,
+                                    updated_at : String?,
+                                    plan_digest : String?,
+                                    overrides_digest : String?,
+                                    invalidated_at : String?,
+                                    invalidation_reason : String?,
+                                    progress : Progress,
+                                    format_version : Int32) : Nil
+      @rootfs_id = rootfs_id
+      @created_at = created_at
+      @updated_at = updated_at
+      @plan_digest = plan_digest
+      @overrides_digest = overrides_digest
+      @invalidated_at = invalidated_at
+      @invalidation_reason = invalidation_reason
+      @progress = progress
+      @format_version = format_version
     end
 
     # Current rootfs-relative plan path
     def plan_path : Path
       w = @workspace.nil? ? SysrootWorkspace.new : @workspace.not_nil!
       w.log_path / PLAN_FILE
+    end
+
+    # Rootfs-relative report directory string.
+    def self.rootfs_report_dir : String
+      "/var/lib/#{REPORT_DIR_NAME}"
     end
 
     # Current rootfs-relative state path
@@ -138,7 +175,7 @@ module Bootstrap
 
     # Returns true when the build plan file exists for this workspace.
     def plan_exists? : Bool
-      File.exists?(path_path)
+      File.exists?(plan_path)
     end
 
     # Returns true when the build state file exists for this workspace.
@@ -146,8 +183,33 @@ module Bootstrap
       File.exists?(state_path)
     end
 
+    # Record the current phase name for status reporting.
+    def mark_current_phase(name : String?) : Nil
+      @progress.current_phase = name
+      touch
+      save
+    end
+
+    # Load a state file at *path* and associate the provided workspace.
+    def self.load(workspace : SysrootWorkspace, path : Path) : SysrootBuildState
+      state = SysrootBuildState.from_json(File.read(path))
+      state.workspace = workspace
+      state
+    end
+
+    # Ensure a state file exists on disk.
+    def ensure_state_file : Nil
+      return if File.exists?(state_path)
+      touch
+      save
+    end
+
     # Ensure a state file exists on disk, creating an empty one when needed.
     def self.ensure_state_file(workspace : SysrootWorkspace) : Nil
+      state = SysrootBuildState.new(workspace: workspace)
+      return if File.exists?(state.state_path)
+      state.touch
+      state.save
     end
 
     # Return the SHA256 hex digest for *path*, or nil when the file is missing.
@@ -226,7 +288,7 @@ module Bootstrap
     def overrides_contents(state_path : String? = nil) : String?
       path = overrides_path
       return nil unless path
-      resolved = resolve_rootfs_path(path, state_path)
+      resolved = resolve_rootfs_path(path.to_s, state_path)
       return nil unless File.exists?(resolved)
       File.read(resolved)
     end
@@ -243,7 +305,7 @@ module Bootstrap
 
       reports_dir = report_dir
       return nil unless reports_dir
-      resolved_reports_dir = resolve_rootfs_path(reports_dir, state_path)
+      resolved_reports_dir = resolve_rootfs_path(reports_dir.to_s, state_path)
       return nil unless Dir.exists?(resolved_reports_dir)
 
       latest_path = nil

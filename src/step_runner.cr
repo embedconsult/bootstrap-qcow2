@@ -1,14 +1,19 @@
+require "digest/sha256"
+require "file_utils"
+require "http/client"
 require "json"
 require "log"
-require "file_utils"
 require "process"
 require "random/secure"
 require "set"
 require "time"
+require "uri"
 require "./build_plan"
 require "./process_runner"
 require "./alpine_setup"
 require "./sysroot_workspace"
+require "./sysroot_builder"
+require "./tarball"
 
 module Bootstrap
   # Raised when a command fails during a StepRunner invocation.
@@ -32,11 +37,13 @@ module Bootstrap
   # * AlpineSetup for Alpine seed rootfs configuration
   class StepRunner
     property clean_build_dirs : Bool
+    property report_dir : String?
     getter workspace : SysrootWorkspace?
     @command_log_prefix : String?
 
     def initialize(@clean_build_dirs : Bool = true, @workspace : SysrootWorkspace? = nil)
       @command_log_prefix = nil
+      @report_dir = nil
     end
 
     # Run a build step using the selected strategy.
@@ -251,44 +258,143 @@ module Bootstrap
       end
     end
 
+    private def build_host_setup_builder(_phase : BuildPhase) : SysrootBuilder
+      workspace = @workspace || SysrootWorkspace.new
+      SysrootBuilder.new(workspace: workspace)
+    end
+
     # Download all configured package sources and return their cached paths.
     def download_sources(step : BuildStep) : Array(Path)
-      step.sources.flat_map { |pkg| download_all(pkg) }
-      pkg.all_urls.map_with_index do |uri, idx|
-        checksum_uri = idx.zero? ? pkg.checksum_url : URI.parse("#{uri}.sha256") rescue nil
-        logical = idx.zero? ? pkg : pkg_with_url(pkg, uri, checksum_uri)
-        download_and_verify(logical)
+      sources = step.sources || raise "download-sources requires step.sources"
+      sources.map { |source| download_source(source) }
+    end
+
+    # Extract configured source archives into the rootfs workspace.
+    def extract_sources(step : BuildStep) : Nil
+      extracts = step.extract_sources || raise "extract-sources requires step.extract_sources"
+      workspace_root = workspace.rootfs_workspace_path
+      extracts.each do |spec|
+        archive = sources_dir / spec.filename
+        raise "Missing source archive #{archive}" unless File.exists?(archive)
+        build_root = workspace_root / spec.build_directory
+        next if Dir.exists?(build_root)
+        Tarball.extract(archive, workspace_root, false, nil, nil)
       end
     end
 
-    # Download a package tarball (if missing) into the source cache and verify
-    # its checksum before returning the cached path.
-    def download_and_verify(pkg : PackageSpec) : Path
-      target = sources_dir / pkg.filename
+    # Populate the seed rootfs from the base rootfs tarball.
+    def populate_seed(step : BuildStep) : Nil
+      sources = step.sources || raise "populate-seed requires step.sources"
+      base = sources.first? || raise "populate-seed requires a base rootfs source"
+      archive = download_source(base)
+      seed_rootfs = workspace.seed_rootfs_path || raise "Missing seed rootfs path"
+      FileUtils.mkdir_p(seed_rootfs)
+      Tarball.extract(archive, seed_rootfs, false, nil, nil)
+      AlpineSetup.write_resolv_conf(seed_rootfs)
+    end
+
+    private def download_source(source : SourceSpec) : Path
+      target = sources_dir / source.filename
       attempts = 3
       attempts.times do |idx|
         begin
           if File.exists?(target)
-            if File.size(target) > 0 && verify(pkg, target)
+            if File.size(target) > 0 && verify_source(source, target)
               return target
             else
               File.delete(target)
             end
           end
 
-          Log.debug { "Downloading #{pkg.name} #{pkg.version} from #{pkg.url}" }
-          download_with_redirects(pkg.url, target)
-          raise "Empty download for #{pkg.name}" if File.size(target) == 0
-          verify(pkg, target)
+          Log.debug { "Downloading #{source.name} #{source.version} from #{source.url}" }
+          download_with_redirects(URI.parse(source.url), target)
+          raise "Empty download for #{source.name}" if File.size(target) == 0
+          verify_source(source, target)
           return target
         rescue error
           File.delete(target) if File.exists?(target)
           raise error if idx == attempts - 1
-          Log.warn { "Retrying #{pkg.name} after error: #{error.message}" }
+          Log.warn { "Retrying #{source.name} after error: #{error.message}" }
           sleep 2.seconds
         end
       end
       target
+    end
+
+    private def verify_source(source : SourceSpec, path : Path) : Bool
+      expected = expected_sha256(source)
+      return true unless expected
+      actual = sha256(path)
+      raise "SHA256 mismatch for #{source.name}: expected #{expected}, got #{actual}" unless expected == actual
+      true
+    end
+
+    private def expected_sha256(source : SourceSpec) : String?
+      source.sha256 || fetch_remote_checksum(source)
+    end
+
+    private def fetch_remote_checksum(source : SourceSpec) : String?
+      return nil unless checksum_url = source.checksum_url
+      body = fetch_string_with_redirects(URI.parse(checksum_url))
+      body ? normalize_checksum(body) : nil
+    end
+
+    private def normalize_checksum(body : String) : String
+      body.strip.split(/\s+/).first
+    end
+
+    private def sha256(path : Path) : String
+      digest = Digest::SHA256.new
+      File.open(path) do |file|
+        buffer = Bytes.new(8192)
+        while (read = file.read(buffer)) > 0
+          digest.update(buffer[0, read])
+        end
+      end
+      digest.final.hexstring
+    end
+
+    private def download_with_redirects(uri : URI, target : Path, limit : Int32 = 5) : Nil
+      raise "Too many redirects while fetching #{uri}" if limit < 0
+      HTTP::Client.get(uri) do |response|
+        if response.status_code.in?({301, 302, 303, 307, 308})
+          location = response.headers["Location"]?
+          raise "Redirect missing Location header for #{uri}" unless location
+          return download_with_redirects(URI.parse(location), target, limit - 1)
+        end
+        raise "Failed to download #{uri}: HTTP #{response.status_code}" unless response.success?
+        File.open(target, "wb") do |file|
+          IO.copy(response.body_io, file)
+        end
+      end
+    end
+
+    private def fetch_string_with_redirects(uri : URI, limit : Int32 = 5) : String?
+      raise "Too many redirects while fetching #{uri}" if limit < 0
+      buffer = IO::Memory.new
+      success = false
+      HTTP::Client.get(uri) do |response|
+        if response.status_code.in?({301, 302, 303, 307, 308})
+          location = response.headers["Location"]?
+          raise "Redirect missing Location header for #{uri}" unless location
+          return fetch_string_with_redirects(URI.parse(location), limit - 1)
+        end
+        return nil unless response.success?
+        IO.copy(response.body_io, buffer)
+        success = true
+      end
+      success ? buffer.to_s : nil
+    end
+
+    private def sources_dir : Path
+      workspace = @workspace || SysrootWorkspace.new
+      dir = workspace.sources_dir
+      FileUtils.mkdir_p(dir)
+      dir
+    end
+
+    private def workspace : SysrootWorkspace
+      @workspace || SysrootWorkspace.new
     end
 
     private def with_source_branch(env : Hash(String, String), &block : -> T) : T forall T

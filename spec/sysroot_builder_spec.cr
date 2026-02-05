@@ -106,11 +106,12 @@ describe Bootstrap::SysrootBuilder do
   it "exposes workspace directories" do
     with_temp_workdir do |dir|
       builder = Bootstrap::SysrootBuilder.new
-      host_workdir = Path["data/sysroot"].expand
+      host_workdir = builder.host_workdir.expand
       builder.cache_dir.expand.should eq host_workdir / "cache"
       builder.checksum_dir.expand.should eq host_workdir / "cache/checksums"
       builder.sources_dir.expand.should eq host_workdir / "sources"
-      builder.outer_rootfs_dir.expand.should eq host_workdir / "rootfs"
+      builder.prepare_workspace
+      builder.outer_rootfs_dir.expand.should eq host_workdir / "seed-rootfs"
     end
   end
 
@@ -119,10 +120,10 @@ describe Bootstrap::SysrootBuilder do
       builder = Bootstrap::SysrootBuilder.new
       builder.rootfs_ready?.should be_false
 
-      workspace = Bootstrap::SysrootWorkspace.from_host_workdir(builder.host_workdir)
+      workspace = Bootstrap::SysrootWorkspace.create(builder.host_workdir)
       build_state = Bootstrap::SysrootBuildState.new(workspace: workspace)
-      FileUtils.mkdir_p(build_state.plan_path_path.parent)
-      File.write(build_state.plan_path_path, "[]")
+      FileUtils.mkdir_p(build_state.plan_path.parent)
+      File.write(build_state.plan_path, "[]")
       builder.rootfs_ready?.should be_true
     end
   end
@@ -278,7 +279,7 @@ describe Bootstrap::SysrootBuilder do
 
       rootfs_phase = plan.phases.find(&.name.==("rootfs-from-sysroot")).not_nil!
       rootfs_phase.install_prefix.should eq "/usr"
-      rootfs_phase.destdir.should eq "/workspace/rootfs"
+      rootfs_phase.destdir.should eq "/bq2-rootfs"
       rootfs_phase.steps.map(&.name).should eq ["musl", "busybox", "linux-headers", "musl-ld-path", "prepare-rootfs", "sysroot"]
 
       finalize_phase = plan.phases.find(&.name.==("finalize-rootfs")).not_nil!
@@ -332,7 +333,7 @@ describe Bootstrap::SysrootBuilder do
       builder.package_tarballs["bootstrap-qcow2"] = source_tar
       builder.fake_tarball = tarball
       rootfs = builder.prepare_rootfs
-      File.exists?(rootfs / "workspace").should be_true
+      File.exists?(rootfs / "bq2-rootfs" / "workspace").should be_true
       File.exists?(builder.inner_rootfs_workspace_dir / "bootstrap-qcow2/src/main.cr").should be_true
     end
   end
@@ -449,7 +450,7 @@ describe Bootstrap::SysrootBuilder do
       builder.fake_tarball = tarball
       rootfs = builder.generate_chroot
       rootfs.should eq builder.outer_rootfs_dir
-      File.exists?(rootfs / "workspace").should be_true
+      File.exists?(rootfs / "bq2-rootfs" / "workspace").should be_true
     end
   end
 

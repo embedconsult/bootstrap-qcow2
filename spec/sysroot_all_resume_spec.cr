@@ -30,21 +30,15 @@ private def write_plan(path : Path) : Bootstrap::BuildPlan
   plan
 end
 
-private def write_state(path : Path,
-                        workspace : Bootstrap::SysrootWorkspace,
+private def write_state(workspace : Bootstrap::SysrootWorkspace,
                         plan_path : Path,
-                        plan : Bootstrap::BuildPlan,
                         completed_steps : Array(Tuple(String, String))) : Bootstrap::SysrootBuildState
   state = Bootstrap::SysrootBuildState.new(workspace: workspace)
-  state.plan_path = state.rootfs_plan_path
-  state.overrides_path = nil
-  state.report_dir = nil
   completed_steps.each do |(phase, step)|
     state.mark_success(phase, step)
   end
-  state.plan_digest = Bootstrap::SysrootBuildState.digest_for?(plan_path.to_s)
-  FileUtils.mkdir_p(path.parent)
-  state.save(path)
+  state.plan_digest = Bootstrap::SysrootBuildState.digest_for?(plan_path)
+  state.save
   state
 end
 
@@ -73,7 +67,7 @@ describe Bootstrap::SysrootAllResume do
     with_temp_workdir do |_dir|
       workspace = Bootstrap::SysrootWorkspace.create(Bootstrap::SysrootBuilder::DEFAULT_HOST_WORKDIR)
       build_state = Bootstrap::SysrootBuildState.new(workspace: workspace)
-      plan_path = build_state.plan_path_path
+      plan_path = build_state.plan_path
       write_plan(plan_path)
 
       decision = resume_for(workspace).decide
@@ -86,10 +80,9 @@ describe Bootstrap::SysrootAllResume do
     with_temp_workdir do |_dir|
       workspace = Bootstrap::SysrootWorkspace.create(Bootstrap::SysrootBuilder::DEFAULT_HOST_WORKDIR)
       build_state = Bootstrap::SysrootBuildState.new(workspace: workspace)
-      plan_path = build_state.plan_path_path
+      plan_path = build_state.plan_path
       plan = write_plan(plan_path)
-      state_path = build_state.state_path
-      write_state(state_path, workspace, plan_path, plan, [{"phase-a", "step-a"}])
+      write_state(workspace, plan_path, [{"phase-a", "step-a"}])
 
       decision = resume_for(workspace).decide
       decision.stage.should eq("sysroot-runner")
@@ -102,10 +95,9 @@ describe Bootstrap::SysrootAllResume do
     with_temp_workdir do |_dir|
       workspace = Bootstrap::SysrootWorkspace.create(Bootstrap::SysrootBuilder::DEFAULT_HOST_WORKDIR)
       build_state = Bootstrap::SysrootBuildState.new(workspace: workspace)
-      plan_path = build_state.plan_path_path
+      plan_path = build_state.plan_path
       plan = write_plan(plan_path)
-      state_path = build_state.state_path
-      write_state(state_path, workspace, plan_path, plan, [{"phase-a", "step-a"}, {"phase-b", "step-b"}])
+      write_state(workspace, plan_path, [{"phase-a", "step-a"}, {"phase-b", "step-b"}])
 
       decision = resume_for(workspace).decide
       decision.stage.should eq("complete")
@@ -116,12 +108,11 @@ describe Bootstrap::SysrootAllResume do
     with_temp_workdir do |_dir|
       workspace = Bootstrap::SysrootWorkspace.create(Bootstrap::SysrootBuilder::DEFAULT_HOST_WORKDIR)
       build_state = Bootstrap::SysrootBuildState.new(workspace: workspace)
-      plan_path = build_state.plan_path_path
-      plan = write_plan(plan_path)
-      state_path = build_state.state_path
-      state = write_state(state_path, workspace, plan_path, plan, [{"phase-a", "step-a"}])
+      plan_path = build_state.plan_path
+      write_plan(plan_path)
+      state = write_state(workspace, plan_path, [{"phase-a", "step-a"}])
       state.plan_digest = "deadbeef"
-      state.save(state_path)
+      state.save
 
       decision = resume_for(workspace).decide
       decision.stage.should eq("sysroot-runner")
@@ -134,9 +125,8 @@ describe Bootstrap::SysrootAllResume do
     with_temp_workdir do |_dir|
       workspace = Bootstrap::SysrootWorkspace.create(Bootstrap::SysrootBuilder::DEFAULT_HOST_WORKDIR)
       build_state = Bootstrap::SysrootBuildState.new(workspace: workspace)
-      state_path = build_state.state_path
-      plan_path = build_state.plan_path_path
-      write_state(state_path, workspace, plan_path, Bootstrap::BuildPlan.new([] of Bootstrap::BuildPhase), [] of Tuple(String, String))
+      plan_path = build_state.plan_path
+      write_state(workspace, plan_path, [] of Tuple(String, String))
       File.delete(plan_path) if File.exists?(plan_path)
 
       expect_raises(Exception, /plan is missing/) do

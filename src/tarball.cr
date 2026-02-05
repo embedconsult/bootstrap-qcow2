@@ -3,10 +3,17 @@ require "digest/crc32"
 require "file_utils"
 require "log"
 require "path"
+require "./tar_writer"
 
 module Bootstrap
   # Helpers for tarball extraction
   module Tarball
+    # Write a gzip-compressed tarball containing *source*.
+    def self.write_gz(source : Path, output : Path, base_path : Path? = nil) : Nil
+      root = base_path || source
+      TarWriter.write_gz([source], output, root)
+    end
+
     # Extract a tarball into *destination*.
     def self.extract(path : Path,
                      destination : Path,

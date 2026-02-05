@@ -30,6 +30,7 @@ module Bootstrap
     @workspace : SysrootWorkspace
     @state : SysrootBuildState
     @step_runner : StepRunner
+    getter state : SysrootBuildState
 
     # workspace: holds the current working environment
     # report: do we generate a build report
@@ -41,26 +42,28 @@ module Bootstrap
       @resume : Bool = true,
       @dry_run : Bool = true,
       @clean_build_dirs : Bool = true,
+      step_runner : StepRunner? = nil,
     )
       @state = SysrootBuildState.new(workspace: @workspace)
-      @step_runner = StepRunner.new(clean_build_dirs: @clean_build_dirs, workspace: @workspace)
+      @step_runner = step_runner || StepRunner.new(clean_build_dirs: @clean_build_dirs, workspace: @workspace)
     end
 
     # Execute the build plan
     def run_plan
+      plan = load_plan
       Log.info { "*** Running build plan #{@state.plan_path} from state #{@state.state_path} ***" }
       report_dir = @state.report_dir
-      Log.info { "Using report_dir: #{report_dir}" } unless report_dir.nil?
-      phases = @state.selected_phases
+      Log.info { "Using report_dir: #{report_dir}" } if @report && report_dir
+      phases = plan.selected_phases(@start_phase)
       phases = apply_rootfs_env_overrides(phases) if rootfs_marker_present?
-      phases = filter_phases_by_packages(phases, @packages) if packages
-      phases = filter_phases_by_state(phases, state) if resume && state
+      phases = filter_phases_by_packages(phases, @packages) unless @packages.empty?
+      phases = filter_phases_by_state(phases) if @resume
       if @dry_run
         Log.info { describe_phases(phases) }
         return
       end
-      if report_dir
-        @runner.report_dir = report_dir
+      if @report && report_dir
+        @step_runner.report_dir = report_dir.to_s
       end
       phases.each_with_index do |phase, idx|
         @state.mark_current_phase(phase.name)
@@ -71,50 +74,49 @@ module Bootstrap
     end
 
     # Run a single phase from the plan.
-    def self.run_phase(phase : BuildPhase)
+    def run_phase(phase : BuildPhase)
       if phase.environment.starts_with?("host-")
-        raise "Refusing to run #{phase.name} (env=#{phase.environment} namespace=#{@workspace.namespace})" unless @workspace.namespace == "host"
+        raise "Refusing to run #{phase.name} (env=#{phase.environment} namespace=#{@workspace.namespace_name})" unless @workspace.namespace.host?
       elsif phase.environment.in?({"alpine-seed", "sysroot-toolchain"})
-        if @workspace.hostname == "host"
+        if @workspace.namespace.host?
           Log.info { "**** Entering outer seed rootfs at #{@workspace.seed_rootfs_path} ****" }
           @workspace.enter_seed_rootfs_namespace
-          elseif @workspace.hostname == "bq2"
-          raise "Refusing to run #{phase.name} (env=#{phase.environment} namespace=#{@workspace.namespace})"
+        elsif @workspace.namespace.bq2?
+          raise "Refusing to run #{phase.name} (env=#{phase.environment} namespace=#{@workspace.namespace_name})"
         end
-        raise unless @hostname.workspace == "seed"
-      elsif effective_phase.environment.starts_with?("rootfs-")
-        if @workspace.namespace.in({"host", "seed"})
+        raise "Expected seed namespace, got #{@workspace.namespace_name}" unless @workspace.namespace.seed?
+      elsif phase.environment.starts_with?("rootfs-")
+        if @workspace.namespace.host? || @workspace.namespace.seed?
           Log.info { "**** Entering inner BQ2 rootfs at #{@workspace.bq2_rootfs_path} ****" }
           @workspace.enter_bq2_rootfs_namespace
         end
-        raise unless @hostname.workspace == "bq2"
+        raise "Expected bq2 namespace, got #{@workspace.namespace_name}" unless @workspace.namespace.bq2?
       end
-      Log.info { "Executing phase #{phase.name} (env=#{phase.environment}, namespace=#{@workspace.namespace})" }
+      Log.info { "Executing phase #{phase.name} (env=#{phase.environment}, namespace=#{@workspace.namespace_name})" }
       Log.info { "**** #{phase.description} ****" }
-      run_steps(phase.steps)
+      run_steps(phase, phase.steps)
       Log.info { "Completed phase #{phase.name}" }
     end
 
     # Execute a list of BuildStep entries, stopping immediately on failure.
-    def self.run_steps(phase : BuildPhase,
-                       steps : Array(BuildStep),
-                       resume : Bool = true)
+    def run_steps(phase : BuildPhase,
+                  steps : Array(BuildStep))
       Log.info { "Executing #{steps.size} build steps" }
       steps.each do |step|
-        if resume && @state.completed?(phase.name, step.name)
+        if @resume && @state.completed?(phase.name, step.name)
           Log.info { "Skipping previously completed #{phase.name}/#{step.name}" }
           next
         end
         Log.info { "Building #{step.name} in #{step.workdir} (phase=#{phase.name}, namespace=#{@workspace.namespace})" }
         begin
-          if resume && @state.retrying_step?(phase.name, step.name)
+          if @resume && @state.retrying_last_failure?(phase.name, step.name)
             Log.debug { "Keeping previous build directory due to retrying previous build" }
-            @runner.clean_build_dirs = false
+            @step_runner.clean_build_dirs = false
           end
-          runner.run(phase, step)
+          @step_runner.run(phase, step)
           @state.mark_success(phase.name, step.name)
         rescue ex
-          report_path = @runner.write_failure_report_if_available(phase, step, ex)
+          report_path = write_failure_report_if_available(phase, step, ex)
           @state.mark_failure(phase.name, step.name, ex.message, report_path)
           raise ex
         end
@@ -122,13 +124,7 @@ module Bootstrap
       Log.info { "All build steps completed" }
     end
 
-    private def self.retrying_step?(phase_name : String, step_name : String) : Bool
-      failure = @state.progress.last_failure
-      return false unless failure
-      failure.phase == phase_name && failure.step == step_name
-    end
-
-    private def self.filter_phases_by_state(phases : Array(BuildPhase)) : Array(BuildPhase)
+    private def filter_phases_by_state(phases : Array(BuildPhase)) : Array(BuildPhase)
       phases.compact_map do |phase|
         remaining = phase.steps.reject { |step| @state.completed?(phase.name, step.name) }
         next nil if remaining.empty?
@@ -145,13 +141,13 @@ module Bootstrap
       end
     end
 
-    private def self.apply_rootfs_env_overrides(phases : Array(BuildPhase)) : Array(BuildPhase)
+    private def apply_rootfs_env_overrides(phases : Array(BuildPhase)) : Array(BuildPhase)
       phases.map do |phase|
         apply_rootfs_env_override(phase)
       end
     end
 
-    private def self.apply_rootfs_env_override(phase : BuildPhase) : BuildPhase
+    private def apply_rootfs_env_override(phase : BuildPhase) : BuildPhase
       return phase unless phase.environment.starts_with?("rootfs-")
       overrides = native_rootfs_env
       merged = phase.env.dup
@@ -168,7 +164,7 @@ module Bootstrap
       )
     end
 
-    private def self.native_rootfs_env : Hash(String, String)
+    private def native_rootfs_env : Hash(String, String)
       return {} of String => String unless File.exists?("/usr/bin/clang") && File.exists?("/usr/bin/clang++")
       {
         # Prefer prefix-free /usr tools but keep /opt/sysroot on PATH for the toolchain.
@@ -176,17 +172,45 @@ module Bootstrap
       }
     end
 
-    private def self.describe_phases(phases : Array(BuildPhase)) : String
+    private def describe_phases(phases : Array(BuildPhase)) : String
       phases.map do |phase|
         steps = phase.steps.map(&.name).join(", ")
         "#{phase.name} (#{phase.steps.size} steps): #{steps}"
       end.join(" | ")
     end
 
+    private def filter_phases_by_packages(phases : Array(BuildPhase), packages : Array(String)) : Array(BuildPhase)
+      matched = Set(String).new
+      phases.each do |phase|
+        phase.steps.each do |step|
+          matched << step.name if packages.includes?(step.name)
+        end
+      end
+      missing = packages.uniq.reject { |name| matched.includes?(name) }
+      raise "Requested package(s) not found in selected phases: #{missing.join(", ")}" unless missing.empty?
+
+      selected = phases.compact_map do |phase|
+        steps = phase.steps.select { |step| packages.includes?(step.name) }
+        next nil if steps.empty?
+        BuildPhase.new(
+          name: phase.name,
+          description: phase.description,
+          workspace: phase.workspace,
+          environment: phase.environment,
+          install_prefix: phase.install_prefix,
+          destdir: phase.destdir,
+          env: phase.env,
+          steps: steps,
+        )
+      end
+      raise "No matching packages found in selected phases: #{packages.join(", ")}" if selected.empty?
+      selected
+    end
+
     # Creates a minimal directory skeleton for `DESTDIR` installs. The intent is
     # to keep packages with hard-coded expectations (e.g., `/usr/bin`) from
     # failing when the destdir tree is initially empty.
-    private def self.prepare_destdir(destdir : String)
+    private def prepare_destdir(destdir : String)
       FileUtils.mkdir_p(destdir)
       %w[bin dev etc lib opt proc sys tmp usr var workspace].each do |subdir|
         FileUtils.mkdir_p(File.join(destdir, subdir))
@@ -197,7 +221,7 @@ module Bootstrap
       FileUtils.mkdir_p(File.join(destdir, "var/lib"))
     end
 
-    private def self.write_failure_report(report_dir : String, phase : BuildPhase, step : BuildStep, ex : Exception) : String?
+    private def write_failure_report(report_dir : String, phase : BuildPhase, step : BuildStep, ex : Exception) : String?
       FileUtils.mkdir_p(report_dir)
       timestamp = Time.utc.to_s("%Y%m%dT%H%M%S.%LZ")
       phase_slug = slugify(phase.name)
@@ -250,6 +274,21 @@ module Bootstrap
     rescue report_ex
       Log.warn { "Failed to write build failure report: #{report_ex.message}" }
       nil
+    end
+
+    private def write_failure_report_if_available(phase : BuildPhase, step : BuildStep, ex : Exception) : String?
+      return nil unless @report
+      report_dir = @state.report_dir
+      return nil unless report_dir
+      write_failure_report(report_dir.to_s, phase, step, ex)
+    end
+
+    private def load_plan : BuildPlan
+      BuildPlan.parse(File.read(@state.plan_path))
+    end
+
+    private def rootfs_marker_present? : Bool
+      File.exists?(@workspace.marker_path)
     end
 
     # Summarize the sysroot runner CLI behavior for help output.
@@ -323,6 +362,7 @@ module Bootstrap
         dry_run: dry_run
       )
       runner.run_plan
+      0
     end
 
     private def self.parse_bind_spec(value : String) : Tuple(Path, Path)
@@ -348,7 +388,7 @@ module Bootstrap
       return CLI.print_help(parser) if help
 
       begin
-        workspace = SysrootWorkspace.new(host_workdir: host_workdir, extra_binds: extra_binds)
+        workspace = SysrootWorkspace.new(host_workdir: host_workdir)
       rescue ex
         STDERR.puts "No valid workspace found, build out the workspace first with `bq2 sysroot-builder`: #{ex.message}"
         return -1
@@ -356,11 +396,8 @@ module Bootstrap
 
       runner = SysrootRunner.new(workspace: workspace)
 
-      if runner.state.next_phase
-        puts("next_phase=#{runner.state.next_phase.name}")
-        puts("next_step=#{runner.state.next_step.not_nil!.name}") if runner.state.next_step
-      else
-        puts("next_phase=(none)")
+      if (current_phase = runner.state.progress.current_phase)
+        puts("current_phase=#{current_phase}")
       end
       if (success = runner.state.progress.last_success)
         puts("last_success=#{success.phase}/#{success.step}")
@@ -370,16 +407,18 @@ module Bootstrap
       end
 
       if show_latest_report || show_latest_log
-        if runner.state.report_path
-          puts("latest_report=#{runner.state.report_path}")
-          puts(File.read(runner.state.report_path)) if show_latest_report
+        report_path = runner.state.failure_report_path(runner.state.state_path.to_s)
+        if report_path
+          puts("latest_report=#{report_path}")
+          puts(File.read(report_path)) if show_latest_report
         else
           puts("latest_report=(missing)")
         end
         if show_latest_log
-          if runner.state.log_path
-            puts("latest_log=#{runner.state.log_path}")
-            puts(File.read(runner.state.log_path)) if File.exists?(runner.state.log_path)
+          log_path = report_path ? output_log_for_report(report_path) : nil
+          if log_path
+            puts("latest_log=#{log_path}")
+            puts(File.read(log_path)) if File.exists?(log_path)
           else
             puts("latest_log=(missing)")
           end
@@ -417,7 +456,7 @@ module Bootstrap
       nil
     end
 
-    private def self.slugify(value : String) : String
+    private def slugify(value : String) : String
       value.gsub(/[^A-Za-z0-9]+/, "_").gsub(/^_+|_+$/, "").downcase
     end
 

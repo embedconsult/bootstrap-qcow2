@@ -9,6 +9,7 @@ require "process"
 require "uri"
 require "./build_plan"
 require "./build_plan_utils"
+require "./build_plan_overrides"
 require "./cli"
 require "./process_runner"
 require "./alpine_setup"
@@ -48,6 +49,9 @@ module Bootstrap
     DEFAULT_ROOTFS_SEED    = "Alpine"
     DEFAULT_ROOTFS_BRANCH  = "v3.23"
     DEFAULT_ROOTFS_VERSION = "3.23.2"
+    DEFAULT_HOST_WORKDIR   = Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR]
+    DEFAULT_BRANCH         = DEFAULT_ROOTFS_BRANCH
+    DEFAULT_BASE_VERSION   = DEFAULT_ROOTFS_VERSION
     DEFAULT_LLVM_VER       = "18.1.7"
     DEFAULT_LIBRESSL       = "3.8.2"
     DEFAULT_BUSYBOX        = "1.36.1"
@@ -76,6 +80,12 @@ module Bootstrap
     DEFAULT_NAMESERVER = "8.8.8.8"
 
     getter workspace : SysrootWorkspace
+    getter host_workdir : Path
+    getter branch : String
+    getter base_version : String
+    getter outer_rootfs_dir : Path
+    getter inner_rootfs_dir : Path
+    getter inner_rootfs_workspace_dir : Path
     getter architecture : String
     getter seed : String
 
@@ -114,7 +124,13 @@ module Bootstrap
     # allow for generating multiple BuildPhase entries modified for the same PackageSpec
     # used in different phases.
     record PhaseSpec,
-      phase : BuildPhase,
+      name : String,
+      description : String,
+      workspace : String,
+      environment : String,
+      install_prefix : String,
+      destdir : String? = nil,
+      env : Hash(String, String) = {} of String => String,
       package_allowlist : Array(String)? = nil,
       pre_steps : Array(BuildStep) = [] of BuildStep,
       extra_steps : Array(BuildStep) = [] of BuildStep,
@@ -123,9 +139,40 @@ module Bootstrap
       patch_overrides : Hash(String, Array(String)) = {} of String => Array(String)
 
     # Create a sysroot builder in workspace.
-    def initialize(@workspace : SysrootWorkspace = SysrootWorkspace.new,
+    def initialize(@workspace : SysrootWorkspace = SysrootWorkspace.new(host_workdir: DEFAULT_HOST_WORKDIR),
                    @architecture : String = DEFAULT_ARCH,
-                   @seed : String = DEFAULT_ROOTFS_SEED)
+                   @seed : String = DEFAULT_ROOTFS_SEED,
+                   @branch : String = DEFAULT_BRANCH,
+                   @base_version : String = DEFAULT_BASE_VERSION,
+                   @base_rootfs_path : Path? = nil,
+                   @use_system_tar_for_sources : Bool = false,
+                   @use_system_tar_for_rootfs : Bool = false,
+                   @preserve_ownership_for_sources : Bool = false,
+                   @preserve_ownership_for_rootfs : Bool = false,
+                   @owner_uid : Int32? = nil,
+                   @owner_gid : Int32? = nil)
+      @host_workdir = @workspace.host_workdir || DEFAULT_HOST_WORKDIR
+      @outer_rootfs_dir = Path["/"]
+      @inner_rootfs_dir = Path["/"]
+      @inner_rootfs_workspace_dir = SysrootWorkspace::ROOTFS_WORKSPACE_PATH
+    end
+
+    def sources_dir : Path
+      @workspace.sources_dir
+    end
+
+    def cache_dir : Path
+      @workspace.cache_dir
+    end
+
+    def checksum_dir : Path
+      cache_dir / "checksums"
+    end
+
+    def rootfs_ready? : Bool
+      workspace = SysrootWorkspace.new(host_workdir: @host_workdir)
+      plan_path = workspace.log_path / SysrootBuildState::PLAN_FILE
+      File.exists?(plan_path)
     end
 
     # Build a PackageSpec pointing at the base rootfs tarball for the configured
@@ -141,6 +188,11 @@ module Bootstrap
       else
         raise "Not currently defined seed: #{@seed}"
       end
+    end
+
+    # Alias used by callers that still reference the base rootfs spec name.
+    def base_rootfs_spec : PackageSpec
+      seed_rootfs_spec
     end
 
     # Declarative list of upstream sources that should populate the sysroot.
@@ -404,6 +456,46 @@ module Bootstrap
       body.strip.split(/\s+/).first
     end
 
+    # Download a package tarball (if missing) into the source cache and verify
+    # its checksum before returning the cached path.
+    def download_and_verify(pkg : PackageSpec) : Path
+      FileUtils.mkdir_p(sources_dir)
+      target = sources_dir / pkg.filename
+      attempts = 3
+      attempts.times do |idx|
+        begin
+          if File.exists?(target)
+            if File.size(target) > 0 && verify(pkg, target)
+              return target
+            else
+              File.delete(target)
+            end
+          end
+
+          Log.debug { "Downloading #{pkg.name} #{pkg.version} from #{pkg.url}" }
+          download_with_redirects(pkg.url, target)
+          raise "Empty download for #{pkg.name}" if File.size(target) == 0
+          verify(pkg, target)
+          return target
+        rescue error
+          File.delete(target) if File.exists?(target)
+          raise error if idx == attempts - 1
+          Log.warn { "Retrying #{pkg.name} after error: #{error.message}" }
+          sleep 2.seconds
+        end
+      end
+      target
+    end
+
+    # Download all URLs defined for the package (primary + extras).
+    def download_all(pkg : PackageSpec) : Array(Path)
+      pkg.all_urls.map_with_index do |uri, idx|
+        checksum_uri = idx.zero? ? pkg.checksum_url : URI.parse("#{uri}.sha256") rescue nil
+        logical = idx.zero? ? pkg : pkg_with_url(pkg, uri, checksum_uri)
+        download_and_verify(logical)
+      end
+    end
+
     # Return the base version after resolving the local override.
     private def resolved_base_version : String
       @resolved_base_version ||= @base_version
@@ -476,6 +568,7 @@ module Bootstrap
 
     # Persist checksum entries for a package.
     def write_checksum(pkg : PackageSpec, sha : String, crc : String) : Nil
+      FileUtils.mkdir_p(checksum_dir)
       File.write(checksum_dir / "#{pkg.filename}.sha256", sha + "\n")
       File.write(checksum_dir / "#{pkg.filename}.crc32", crc + "\n")
     end
@@ -1265,7 +1358,7 @@ module Bootstrap
       prepare_workspace
       build_state = SysrootBuildState.new(workspace: @workspace)
       plan_json = plan.to_pretty_json
-      plan_path = build_state.plan_path_path
+      plan_path = build_state.plan_path
       FileUtils.mkdir_p(plan_path.parent)
       File.write(plan_path, plan_json)
       ensure_state_file(build_state, plan_path)
@@ -1275,7 +1368,7 @@ module Bootstrap
     # Ensure the workspace layout + marker exist, returning the workspace.
     def prepare_workspace : SysrootWorkspace
       @workspace = SysrootWorkspace.create(@host_workdir)
-      @outer_rootfs_dir = @workspace.outer_rootfs_path
+      @outer_rootfs_dir = @workspace.outer_rootfs_path.not_nil!
       @inner_rootfs_dir = @workspace.inner_rootfs_path
       @inner_rootfs_workspace_dir = @workspace.inner_workspace_path
       @workspace
@@ -1283,8 +1376,7 @@ module Bootstrap
 
     private def ensure_state_file(build_state : SysrootBuildState, plan_path : Path) : Nil
       return if build_state.state_exists?
-      build_state.plan_path = build_state.rootfs_plan_path
-      build_state.plan_digest = SysrootBuildState.digest_for?(plan_path.to_s)
+      build_state.plan_digest = SysrootBuildState.digest_for?(plan_path)
       build_state.ensure_state_file
     end
 
@@ -1740,7 +1832,7 @@ module Bootstrap
       chroot_path = builder.generate_chroot
       build_state = SysrootBuildState.new(workspace: builder.workspace)
       puts "Prepared sysroot workspace at #{chroot_path}"
-      puts "Wrote build plan at #{build_state.plan_path_path}"
+      puts "Wrote build plan at #{build_state.plan_path}"
       0
     end
 
@@ -1753,7 +1845,7 @@ module Bootstrap
           SysrootWorkspace.create(SysrootBuilder::DEFAULT_HOST_WORKDIR)
         end
       build_state = SysrootBuildState.new(workspace: workspace)
-      output = build_state.plan_path_path.to_s
+      output = build_state.plan_path.to_s
       workspace_root = Bootstrap::BuildPlanUtils::DEFAULT_WORKSPACE_ROOT
       force = false
       write_overrides = false
