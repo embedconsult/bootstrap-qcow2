@@ -1346,8 +1346,7 @@ module Bootstrap
       [BuildStep.new(
         name: pkg.name,
         strategy: pkg.strategy,
-        # workdir: workdir_for(pkg, spec),
-        workdir: "TODO",
+        workdir: workdir,
         configure_flags: configure_flags_for(pkg, spec),
         patches: patches_for(pkg, spec),
         env: env,
@@ -1356,8 +1355,25 @@ module Bootstrap
       )]
     end
 
+    # Return the workspace directory that should be used for building *package*.
     def workdir_for(package : PackageSpec, phase : PhaseSpec) : String
-      "TODO"
+      File.join(phase.phase.workdir, source_dir_for(package))
+    end
+
+    # Resolve the extracted source directory name for a package.
+    private def source_dir_for(package : PackageSpec) : String
+      if build_directory = package.build_directory
+        return build_directory
+      end
+      filename = package.filename
+      base = filename
+      [".tar.gz", ".tgz", ".tar.xz", ".tar.bz2", ".tar"].each do |ext|
+        next unless base.ends_with?(ext)
+        base = base[0, base.size - ext.size]
+        break
+      end
+      return base unless base.empty?
+      "#{package.name}-#{package.version}"
     end
 
     # Resolve the package build directory.
