@@ -86,16 +86,15 @@ describe Bootstrap::SysrootBuilder do
     with_temp_workdir do |_dir|
       builder = Bootstrap::SysrootBuilder.new
       host_workdir = builder.host_workdir
-      host_workspace = Bootstrap::SysrootWorkspace.workspace_from(Bootstrap::SysrootWorkspace::Namespace::Host, host_workdir).to_s
       seed_workspace = Bootstrap::SysrootWorkspace.workspace_from(Bootstrap::SysrootWorkspace::Namespace::Seed, host_workdir).to_s
-      rootfs_workspace = Bootstrap::SysrootWorkspace.workspace_from(Bootstrap::SysrootWorkspace::Namespace::BQ2, host_workdir).to_s
+      bq2_workspace = Bootstrap::SysrootWorkspace.workspace_from(Bootstrap::SysrootWorkspace::Namespace::BQ2, host_workdir).to_s
       phases = builder.phase_specs.to_h { |spec| {spec.phase.name, spec.phase} }
-      phases["host-setup"].workdir.should eq host_workspace
+      phases["host-setup"].workdir.should eq "/"
       phases["sysroot-from-alpine"].workdir.should eq seed_workspace
       phases["rootfs-from-sysroot"].workdir.should eq seed_workspace
-      phases["system-from-sysroot"].workdir.should eq rootfs_workspace
-      phases["tools-from-system"].workdir.should eq rootfs_workspace
-      phases["finalize-rootfs"].workdir.should eq rootfs_workspace
+      phases["system-from-sysroot"].workdir.should eq bq2_workspace
+      phases["tools-from-system"].workdir.should eq bq2_workspace
+      phases["finalize-rootfs"].workdir.should eq bq2_workspace
     end
   end
 

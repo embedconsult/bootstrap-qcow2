@@ -597,16 +597,16 @@ module Bootstrap
     # Phase namespaces:
     # - host: runs on the host before entering any namespace.
     # - seed: runs in the Alpine seed rootfs (host tools).
-    # - rootfs: runs inside the workspace rootfs, prefers /usr/bin, and relies on
+    # - bq2: runs inside the bq2 rootfs, prefers /usr/bin, and relies on
     #   musl's /etc/ld-musl-<arch>.path for runtime lookup.
     def phase_specs : Array(PhaseSpec)
       sysroot_prefix = "/#{SysrootWorkspace::SYSROOT_DIR_NAME}"
       rootfs_tarball = "#{@workspace.workspace_path}/bq2-rootfs-#{bootstrap_source_version}.tar.gz"
       host_workdir = @workspace.host_workdir.not_nil!
-      host_workspace_root = SysrootWorkspace.workspace_from(SysrootWorkspace::Namespace::Host, host_workdir).to_s
-      seed_workspace_root = SysrootWorkspace.workspace_from(SysrootWorkspace::Namespace::Seed, host_workdir).to_s
-      rootfs_workspace_root = SysrootWorkspace.workspace_from(SysrootWorkspace::Namespace::BQ2, host_workdir).to_s
-      bq2_rootfs_root = SysrootWorkspace.bq2_rootfs_from(SysrootWorkspace::Namespace::Seed, host_workdir).to_s
+      workspace_from_host = SysrootWorkspace.workspace_from(SysrootWorkspace::Namespace::Host, host_workdir).to_s
+      workspace_from_seed = SysrootWorkspace.workspace_from(SysrootWorkspace::Namespace::Seed, host_workdir).to_s
+      workspace_from_bq2 = SysrootWorkspace.workspace_from(SysrootWorkspace::Namespace::BQ2, host_workdir).to_s
+      bq2_from_seed = SysrootWorkspace.bq2_rootfs_from(SysrootWorkspace::Namespace::Seed, host_workdir).to_s
       sysroot_triple = sysroot_target_triple
       sysroot_env = sysroot_phase_env(sysroot_prefix)
       rootfs_env = rootfs_phase_env(sysroot_prefix)
@@ -648,7 +648,7 @@ module Bootstrap
           BuildPhase.new(
             name: "host-setup",
             description: "Prepare cached sources and seed the rootfs from the host.",
-            workdir: host_workspace_root,
+            workdir: "/",
             namespace: "host",
             install_prefix: "/",
             destdir: nil,
@@ -661,7 +661,7 @@ module Bootstrap
           BuildPhase.new(
             name: "sysroot-from-alpine",
             description: "Build a self-contained sysroot using Alpine-hosted tools.",
-            workdir: seed_workspace_root,
+            workdir: workspace_from_seed,
             namespace: "seed",
             install_prefix: sysroot_prefix,
             destdir: nil,
@@ -730,10 +730,10 @@ module Bootstrap
           BuildPhase.new(
             name: "rootfs-from-sysroot",
             description: "Build a minimal rootfs using the newly built sysroot toolchain.",
-            workdir: seed_workspace_root,
+            workdir: workspace_from_seed,
             namespace: "seed",
             install_prefix: "/usr",
-            destdir: bq2_rootfs_root,
+            destdir: bq2_from_seed,
             env: rootfs_env,
           ),
           package_allowlist: ["musl", "busybox", "linux-headers"],
@@ -772,8 +772,8 @@ module Bootstrap
           BuildPhase.new(
             name: "system-from-sysroot",
             description: "Rebuild sysroot packages into /usr inside the new rootfs (prefix-free).",
-            workdir: rootfs_workspace_root,
-            namespace: "rootfs",
+            workdir: workspace_from_bq2,
+            namespace: "bq2",
             install_prefix: "/usr",
             destdir: nil,
             env: rootfs_env,
@@ -836,8 +836,8 @@ module Bootstrap
           BuildPhase.new(
             name: "tools-from-system",
             description: "Build additional developer tools inside the new rootfs.",
-            workdir: rootfs_workspace_root,
-            namespace: "rootfs",
+            workdir: workspace_from_bq2,
+            namespace: "bq2",
             install_prefix: "/usr",
             destdir: nil,
             env: rootfs_env,
@@ -861,8 +861,8 @@ module Bootstrap
           BuildPhase.new(
             name: "finalize-rootfs",
             description: "Strip the sysroot prefix and emit a prefix-free rootfs tarball.",
-            workdir: rootfs_workspace_root,
-            namespace: "rootfs",
+            workdir: workspace_from_bq2,
+            namespace: "bq2",
             install_prefix: "/usr",
             destdir: nil,
             env: rootfs_phase_env(sysroot_prefix),

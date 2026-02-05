@@ -132,7 +132,7 @@ module Bootstrap
                        state : SysrootBuildState? = nil,
                        resume : Bool = true,
                        state_path : Path? = nil) : Nil
-      if phase.namespace == "rootfs" && !allow_outside_rootfs
+      if phase.namespace == "bq2" && !allow_outside_rootfs
         raise "Refusing to run #{phase.name} outside the rootfs" unless inside_rootfs?
       end
       Log.info { "Executing phase #{phase.name} (namespace=#{phase.namespace})" }
@@ -285,8 +285,8 @@ module Bootstrap
     private def self.default_phase(plan : BuildPlan) : String
       return plan.phases.first.name if plan.phases.size == 1
       if inside_rootfs?
-        rootfs_phase = plan.phases.find { |phase| phase.namespace == "rootfs" }
-        return rootfs_phase.name if rootfs_phase
+        bq2_phase = plan.phases.find { |phase| phase.namespace == "bq2" }
+        return bq2_phase.name if bq2_phase
       end
       plan.phases.first.name
     end

@@ -141,7 +141,7 @@ describe Bootstrap::SysrootRunner do
     steps = [Bootstrap::BuildStep.new(name: "step", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
     plan = Bootstrap::BuildPlan.new([
       Bootstrap::BuildPhase.new(name: "one", description: "a", workdir: "/workspace", namespace: "seed", install_prefix: "/opt/sysroot", steps: steps),
-      Bootstrap::BuildPhase.new(name: "two", description: "b", workdir: "/workspace", namespace: "rootfs", install_prefix: "/usr", steps: steps),
+      Bootstrap::BuildPhase.new(name: "two", description: "b", workdir: "/workspace", namespace: "bq2", install_prefix: "/usr", steps: steps),
     ])
 
     previous = ENV["BQ2_ROOTFS_MARKER"]?
@@ -164,7 +164,7 @@ describe Bootstrap::SysrootRunner do
     steps = [Bootstrap::BuildStep.new(name: "step", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
     plan = Bootstrap::BuildPlan.new([
       Bootstrap::BuildPhase.new(name: "one", description: "a", workdir: "/workspace", namespace: "seed", install_prefix: "/opt/sysroot", steps: steps),
-      Bootstrap::BuildPhase.new(name: "two", description: "b", workdir: "/workspace", namespace: "rootfs", install_prefix: "/usr", steps: steps),
+      Bootstrap::BuildPhase.new(name: "two", description: "b", workdir: "/workspace", namespace: "bq2", install_prefix: "/usr", steps: steps),
     ])
 
     with_tempdir do |dir|
@@ -194,7 +194,7 @@ describe Bootstrap::SysrootRunner do
         name: "rootfs-phase",
         description: "rootfs phase",
         workdir: "/workspace",
-        namespace: "rootfs",
+        namespace: "bq2",
         install_prefix: "/usr",
         steps: [] of Bootstrap::BuildStep,
       )
