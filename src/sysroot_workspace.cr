@@ -37,6 +37,11 @@ module Bootstrap
       Host
       Seed
       BQ2
+
+      # Return the namespace name as a lowercase underscore string.
+      def label : String
+        to_s.underscore
+      end
     end
     PROBE_PATHS_FOR_MARKER = [
       {namespace: Namespace::Host, path: Path["#{DEFAULT_HOST_WORKDIR}/#{SEED_DIR_NAME}/#{BQ2_DIR_NAME}/#{ROOTFS_MARKER_NAME}"]},
@@ -119,13 +124,16 @@ module Bootstrap
 
     def enter_seed_rootfs_namespace : Nil
       raise "Expected host namespace" unless @namespace == Namespace::Host
-      SysrootNamespace.enter_rootfs
+      rootfs = seed_rootfs_path || raise "Missing seed rootfs path"
+      SysrootNamespace.enter_rootfs(rootfs.to_s)
       update_namespace(Namespace::Seed)
     end
 
     def enter_bq2_rootfs_namespace : Nil
-      raise "Expected seed namespace" unless @namespace == Namespace::Seed
-      SysrootNamespace.enter_rootfs
+      unless @namespace == Namespace::Seed || @namespace == Namespace::Host
+        raise "Expected host or seed namespace"
+      end
+      SysrootNamespace.enter_rootfs(bq2_rootfs_path.to_s)
       update_namespace(Namespace::BQ2)
     end
 

@@ -651,7 +651,7 @@ module Bootstrap
           BuildPhase.new(
             name: "host-setup",
             description: "Prepare cached sources and seed the rootfs from the host.",
-            namespace: "host",
+            namespace: SysrootWorkspace::Namespace::Host.label,
             # install_prefix is unused in host-setup; steps provide explicit paths.
             install_prefix: "/",
             destdir: nil,
@@ -667,7 +667,7 @@ module Bootstrap
           BuildPhase.new(
             name: "sysroot-from-alpine",
             description: "Build a self-contained sysroot using Alpine-hosted tools.",
-            namespace: "seed",
+            namespace: SysrootWorkspace::Namespace::Seed.label,
             install_prefix: sysroot_prefix,
             destdir: nil,
             env: sysroot_env,
@@ -738,7 +738,7 @@ module Bootstrap
           BuildPhase.new(
             name: "rootfs-from-sysroot",
             description: "Build a minimal rootfs using the newly built sysroot toolchain.",
-            namespace: "seed",
+            namespace: SysrootWorkspace::Namespace::Seed.label,
             install_prefix: "/usr",
             destdir: bq2_from_seed,
             env: rootfs_env,
@@ -776,7 +776,7 @@ module Bootstrap
           BuildPhase.new(
             name: "system-from-sysroot",
             description: "Rebuild sysroot packages into /usr inside the new rootfs (prefix-free).",
-            namespace: "seed",
+            namespace: SysrootWorkspace::Namespace::Seed.label,
             install_prefix: "/usr",
             destdir: bq2_from_seed,
             env: rootfs_env,
@@ -837,7 +837,7 @@ module Bootstrap
           BuildPhase.new(
             name: "tools-from-system",
             description: "Build additional developer tools inside the new rootfs.",
-            namespace: "bq2",
+            namespace: SysrootWorkspace::Namespace::BQ2.label,
             install_prefix: "/usr",
             destdir: nil,
             env: bq2_phase_env,
@@ -864,7 +864,7 @@ module Bootstrap
           BuildPhase.new(
             name: "finalize-rootfs",
             description: "Strip the sysroot prefix and emit a prefix-free rootfs tarball.",
-            namespace: "seed",
+            namespace: SysrootWorkspace::Namespace::Seed.label,
             install_prefix: "/usr",
             destdir: bq2_from_seed,
             env: rootfs_phase_env(sysroot_prefix),

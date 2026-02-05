@@ -116,6 +116,7 @@ module Bootstrap
           state.mark_current_phase(phase_entry.name)
           save_state(state, state_save_path)
         end
+        enter_phase_namespace(phase_entry, workspace) if workspace && namespace_switch_required?(phase_entry, workspace)
         run_phase(phase_entry, runner, report_dir: report_dir, state: state, resume: resume, state_path: state_save_path)
         if state
           state.mark_current_phase(phases[idx + 1]?.try(&.name))
@@ -251,8 +252,19 @@ module Bootstrap
       end
 
       state = SysrootBuildState.load_or_init(workspace)
+      plan = BuildPlan.parse(File.read(state.plan_path))
+      resolved_plan = BuildPlan.new(plan.phases_for_current_namespace(workspace), plan.format_version)
+      resolved_plan = apply_overrides(resolved_plan, state.overrides_path.to_s, true, workspace)
+      next_phase, next_step = next_incomplete_step(resolved_plan, state)
       puts "plan_path=#{state.plan_path}"
       puts "state_path=#{state.state_path}"
+      puts "current_phase=#{state.progress.current_phase}" if state.progress.current_phase
+      if next_phase
+        puts "next_phase=#{next_phase}"
+        puts "next_step=#{next_step}" if next_step
+      else
+        puts "next_phase=complete"
+      end
       if (failure = state.progress.last_failure)
         puts "last_failure=#{failure.phase}/#{failure.step}"
       end
@@ -284,18 +296,51 @@ module Bootstrap
     end
 
     private def self.default_phase(plan : BuildPlan) : String
-      return plan.phases.first.name if plan.phases.size == 1
-      if inside_rootfs?
-        bq2_phase = plan.phases.find { |phase| phase.namespace == "bq2" }
-        return bq2_phase.name if bq2_phase
-      end
-      plan.phases.first.name
+      "all"
     end
 
     private def self.inside_rootfs? : Bool
       marker = ENV["BQ2_ROOTFS_MARKER"]?
       return File.exists?(marker) if marker
       File.exists?(Path["/#{SysrootWorkspace::ROOTFS_MARKER_NAME}"])
+    end
+
+    # Return the namespace label for the current workspace.
+    private def self.namespace_name(workspace : SysrootWorkspace) : String
+      workspace.namespace.label
+    end
+
+    # Return true when the phase should execute in a different namespace.
+    private def self.namespace_switch_required?(phase : BuildPhase, workspace : SysrootWorkspace) : Bool
+      requested = SysrootWorkspace::Namespace.parse(phase.namespace)
+      requested != workspace.namespace
+    end
+
+    # Enter the requested phase namespace, if needed.
+    private def self.enter_phase_namespace(phase : BuildPhase, workspace : SysrootWorkspace) : Nil
+      requested = SysrootWorkspace::Namespace.parse(phase.namespace)
+      case requested
+      in .host?
+        raise "Cannot enter host namespace from #{namespace_name(workspace)}" unless workspace.namespace.host?
+      in .seed?
+        if workspace.namespace.host?
+          workspace.enter_seed_rootfs_namespace
+        elsif workspace.namespace.seed?
+          # Already in seed namespace.
+        else
+          raise "Cannot enter seed namespace from #{namespace_name(workspace)}"
+        end
+      in .bq2?
+        if workspace.namespace.host?
+          workspace.enter_bq2_rootfs_namespace
+        elsif workspace.namespace.seed?
+          workspace.enter_bq2_rootfs_namespace
+        elsif workspace.namespace.bq2?
+          # Already in bq2 namespace.
+        else
+          raise "Cannot enter bq2 namespace from #{namespace_name(workspace)}"
+        end
+      end
     end
 
     private def self.filter_phases_by_state(phases : Array(BuildPhase), state : SysrootBuildState) : Array(BuildPhase)
@@ -339,6 +384,17 @@ module Bootstrap
       end
       raise "No matching packages found in selected phases: #{packages.join(", ")}" if selected.empty?
       selected
+    end
+
+    # Return the next incomplete phase and step for the provided plan/state.
+    private def self.next_incomplete_step(plan : BuildPlan, state : SysrootBuildState) : Tuple(String?, String?)
+      plan.phases.each do |phase|
+        phase.steps.each do |step|
+          next if state.completed?(phase.name, step.name)
+          return {phase.name, step.name}
+        end
+      end
+      {nil, nil}
     end
 
     private def self.prepare_destdirs(phases : Array(BuildPhase))
