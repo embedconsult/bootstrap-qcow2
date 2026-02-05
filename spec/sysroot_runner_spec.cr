@@ -234,7 +234,7 @@ describe Bootstrap::SysrootRunner do
         Bootstrap::BuildPhase.new(
           name: "rootfs",
           description: "rootfs phase",
-          namespace: "test",
+          namespace: "host",
           install_prefix: "/usr",
           destdir: destdir.to_s,
           steps: [] of Bootstrap::BuildStep,
@@ -354,7 +354,7 @@ describe Bootstrap::SysrootRunner do
         Bootstrap::BuildPhase.new(
           name: "one",
           description: "a",
-          namespace: "test",
+          namespace: "host",
           install_prefix: "/opt/sysroot",
           steps: [
             Bootstrap::BuildStep.new(name: "a", strategy: "autotools", workdir: "/a", configure_flags: [] of String, patches: [] of String),
@@ -398,7 +398,7 @@ describe Bootstrap::SysrootRunner do
         Bootstrap::BuildPhase.new(
           name: "one",
           description: "a",
-          namespace: "test",
+          namespace: "host",
           install_prefix: "/opt/sysroot",
           steps: [
             Bootstrap::BuildStep.new(name: "a", strategy: "autotools", workdir: "/a", configure_flags: [] of String, patches: [] of String),

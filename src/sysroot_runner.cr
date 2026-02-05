@@ -306,32 +306,22 @@ module Bootstrap
 
     # Return the namespace label for the current workspace.
     private def self.namespace_name(workspace : SysrootWorkspace) : String
-      case workspace.namespace
-      in .host?
-        "host"
-      in .seed?
-        "seed"
-      in .bq2?
-        "bq2"
-      end
+      workspace.namespace.label
     end
 
     # Return true when the phase should execute in a different namespace.
     private def self.namespace_switch_required?(phase : BuildPhase, workspace : SysrootWorkspace) : Bool
-      case phase.namespace
-      when "host", "seed", "bq2"
-        phase.namespace != namespace_name(workspace)
-      else
-        false
-      end
+      requested = SysrootWorkspace::Namespace.parse(phase.namespace)
+      requested != workspace.namespace
     end
 
     # Enter the requested phase namespace, if needed.
     private def self.enter_phase_namespace(phase : BuildPhase, workspace : SysrootWorkspace) : Nil
-      case phase.namespace
-      when "host"
+      requested = SysrootWorkspace::Namespace.parse(phase.namespace)
+      case requested
+      in .host?
         raise "Cannot enter host namespace from #{namespace_name(workspace)}" unless workspace.namespace.host?
-      when "seed"
+      in .seed?
         if workspace.namespace.host?
           workspace.enter_seed_rootfs_namespace
         elsif workspace.namespace.seed?
@@ -339,9 +329,8 @@ module Bootstrap
         else
           raise "Cannot enter seed namespace from #{namespace_name(workspace)}"
         end
-      when "bq2"
+      in .bq2?
         if workspace.namespace.host?
-          workspace.enter_seed_rootfs_namespace
           workspace.enter_bq2_rootfs_namespace
         elsif workspace.namespace.seed?
           workspace.enter_bq2_rootfs_namespace
@@ -350,8 +339,6 @@ module Bootstrap
         else
           raise "Cannot enter bq2 namespace from #{namespace_name(workspace)}"
         end
-      else
-        raise "Unknown phase namespace #{phase.namespace}"
       end
     end
 
