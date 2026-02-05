@@ -83,7 +83,7 @@ module Bootstrap
         return if fallback_for_unhandled_compression?
         File.open(@archive) do |file|
           io = maybe_gzip(file)
-	  Fiber.yield
+          Fiber.yield
           TarReader.new(io, @destination, @preserve_ownership, @owner_uid, @owner_gid, @guard_paths).extract_all
         end
       end
@@ -386,7 +386,7 @@ module Bootstrap
           end
         end
         File.chmod(path, mode)
-	Fiber.yield
+        Fiber.yield
       end
 
       # Ensure the parent path is a directory, removing conflicting entries.
