@@ -733,7 +733,7 @@ module Bootstrap
           },
         ),
         # Inputs: sysroot toolchain, seed rootfs environment.
-        # Outputs: minimal bq2 rootfs tree (busybox + musl) plus sysroot copy.
+        # Outputs: minimal bq2 rootfs tree (busybox + musl).
         PhaseSpec.new(
           BuildPhase.new(
             name: "rootfs-from-sysroot",
@@ -768,26 +768,20 @@ module Bootstrap
               {"/etc/ssl/certs/ca-certificates.crt", rootfs_ca_bundle_content},
               {"/.bq2-rootfs", "bq2-rootfs\n"},
             ]),
-            build_step(
-              name: "sysroot",
-              strategy: "copy-tree",
-              workdir: sysroot_prefix,
-              install_prefix: sysroot_prefix,
-            ),
           ].flatten,
         ),
-        # Inputs: minimal bq2 rootfs, sysroot toolchain.
-        # Outputs: prefix-free /usr system packages in the bq2 rootfs.
+        # Inputs: minimal bq2 rootfs, sysroot toolchain in the seed rootfs.
+        # Outputs: prefix-free /usr system packages staged into the bq2 rootfs.
         PhaseSpec.new(
           BuildPhase.new(
             name: "system-from-sysroot",
             description: "Rebuild sysroot packages into /usr inside the new rootfs (prefix-free).",
-            namespace: "bq2",
+            namespace: "seed",
             install_prefix: "/usr",
-            destdir: nil,
+            destdir: bq2_from_seed,
             env: rootfs_env,
           ),
-          workdir: workspace_from_bq2,
+          workdir: workspace_from_seed,
           package_allowlist: nil,
           env_overrides: {
             "libxml2" => libxml2_env,
@@ -837,18 +831,18 @@ module Bootstrap
             {"bq2", "/usr/bin/pkg-config"},
           ]),
         ),
-        # Inputs: prefix-free system rootfs.
+        # Inputs: prefix-free system rootfs staged in the bq2 rootfs.
         # Outputs: developer tooling added to /usr in the bq2 rootfs.
         PhaseSpec.new(
           BuildPhase.new(
             name: "tools-from-system",
             description: "Build additional developer tools inside the new rootfs.",
-            namespace: "bq2",
+            namespace: "seed",
             install_prefix: "/usr",
-            destdir: nil,
+            destdir: bq2_from_seed,
             env: rootfs_env,
           ),
-          workdir: workspace_from_bq2,
+          workdir: workspace_from_seed,
           package_allowlist: nil,
           env_overrides: {
             "fossil" => {
@@ -864,18 +858,18 @@ module Bootstrap
             },
           },
         ),
-        # Inputs: full bq2 rootfs with sysroot prefix still present.
+        # Inputs: full bq2 rootfs staged in the seed namespace.
         # Outputs: sysroot prefix removed, finalized rootfs tarball emitted.
         PhaseSpec.new(
           BuildPhase.new(
             name: "finalize-rootfs",
             description: "Strip the sysroot prefix and emit a prefix-free rootfs tarball.",
-            namespace: "bq2",
+            namespace: "seed",
             install_prefix: "/usr",
-            destdir: nil,
+            destdir: bq2_from_seed,
             env: rootfs_phase_env(sysroot_prefix),
           ),
-          workdir: workspace_from_bq2,
+          workdir: workspace_from_seed,
           package_allowlist: [] of String,
           extra_steps: [
             build_step(
