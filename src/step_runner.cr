@@ -12,6 +12,7 @@ require "./build_plan"
 require "./process_runner"
 require "./alpine_setup"
 require "./sysroot_workspace"
+require "./patch_applier"
 require "./tarball"
 
 module Bootstrap
@@ -347,25 +348,21 @@ module Bootstrap
 
     # Apply patch files before invoking build commands.
     private def apply_patches(patches : Array(String))
+      return if patches.empty?
+      applier = PatchApplier.new
       patches.each do |patch|
         Log.info { "Applying patch #{patch}" }
-        dry_run = ["patch", "-p1", "--forward", "-N", "--dry-run", "-i", patch]
-        dry_status = run_cmd_status(dry_run)
-        if dry_status.success?
-          argv = ["patch", "-p1", "--forward", "-N", "-i", patch]
-          status = run_cmd_status(argv)
-          raise CommandFailedError.new(argv, status.exit_code, "Patch failed (#{status.exit_code}): #{patch}") unless status.success?
-          next
-        end
-
-        reverse_dry_run = ["patch", "-p1", "--reverse", "--dry-run", "-i", patch]
-        reverse_status = run_cmd_status(reverse_dry_run)
-        if reverse_status.success?
+        result = applier.apply(patch)
+        if result.already_applied?
           Log.info { "Patch already applied; skipping #{patch}" }
-          next
+        else
+          result.applied_files.each do |path|
+            Log.info { "Applied #{patch} to #{path}" }
+          end
+          result.skipped_files.each do |path|
+            Log.info { "Skipping already-applied hunk in #{patch} for #{path}" }
+          end
         end
-
-        raise CommandFailedError.new(dry_run, dry_status.exit_code, "Patch failed (#{dry_status.exit_code}): #{patch}")
       end
     end
 

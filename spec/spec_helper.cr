@@ -10,6 +10,7 @@ require "../src/sysroot_all_resume"
 require "../src/sysroot_namespace"
 require "../src/sysroot_runner"
 require "../src/tarball"
+require "../src/patch_applier"
 # require "../src/hello-efi"
 require "../src/inproc_llvm"
 
