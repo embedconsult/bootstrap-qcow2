@@ -237,10 +237,11 @@ module Bootstrap
     # Apply hunks to *lines* in the given *direction*.
     private def apply_hunks(lines : Array(String), file_patch : FilePatch, direction : Direction) : Array(String)
       updated = lines.dup
+      offset = 0
 
       file_patch.hunks.each do |hunk|
         start = direction == Direction::Forward ? hunk.old_start : hunk.new_start
-        index = start - 1
+        index = start - 1 + offset
         index = 0 if index < 0
         hunk.lines.each do |hunk_line|
           case hunk_line.kind
@@ -267,6 +268,9 @@ module Bootstrap
             raise PatchApplyError.new(file_patch.display_path, "Unsupported hunk line: #{hunk_line.kind}")
           end
         end
+
+        delta = direction == Direction::Forward ? hunk.new_count - hunk.old_count : hunk.old_count - hunk.new_count
+        offset += delta
       end
 
       updated
