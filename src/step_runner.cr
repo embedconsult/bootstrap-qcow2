@@ -409,7 +409,13 @@ module Bootstrap
     private def download_with_redirects(url : String, target : Path, max_redirects : Int32 = 10) : Nil
       response = request_with_redirects("GET", url, max_redirects: max_redirects)
       FileUtils.mkdir_p(target.parent)
-      File.open(target, "w") { |io| IO.copy(response.body_io, io) }
+      if body_io = response.body_io?
+        File.open(target, "w") { |io| IO.copy(body_io, io) }
+        return
+      end
+      body = response.body
+      raise "Empty response body for #{url}" if body.empty?
+      File.write(target, body)
     end
 
     private def request_with_redirects(method : String, url : String, max_redirects : Int32) : HTTP::Client::Response
