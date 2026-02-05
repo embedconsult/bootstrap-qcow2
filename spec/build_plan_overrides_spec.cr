@@ -7,7 +7,6 @@ describe Bootstrap::BuildPlanOverrides do
       Bootstrap::BuildPhase.new(
         name: "one",
         description: "phase",
-        workdir: "/workspace",
         namespace: "test",
         install_prefix: "/opt/sysroot",
         steps: [
@@ -33,7 +32,6 @@ describe Bootstrap::BuildPlanOverrides do
       Bootstrap::BuildPhase.new(
         name: "one",
         description: "phase",
-        workdir: "/workspace",
         namespace: "test",
         install_prefix: "/opt/sysroot",
         env: {"PATH" => "/bin"} of String => String,
@@ -70,7 +68,6 @@ describe Bootstrap::BuildPlanOverrides do
       Bootstrap::BuildPhase.new(
         name: "one",
         description: "phase",
-        workdir: "/workspace",
         namespace: "test",
         install_prefix: "/opt/sysroot",
         steps: [
@@ -104,7 +101,6 @@ describe Bootstrap::BuildPlanOverrides do
       Bootstrap::BuildPhase.new(
         name: "one",
         description: "phase",
-        workdir: "/workspace",
         namespace: "test",
         install_prefix: "/opt/sysroot",
         steps: [
@@ -123,7 +119,6 @@ describe Bootstrap::BuildPlanOverrides do
       Bootstrap::BuildPhase.new(
         name: "one",
         description: "phase",
-        workdir: "/workspace",
         namespace: "test",
         install_prefix: "/opt/sysroot",
         steps: [
@@ -145,7 +140,7 @@ describe Bootstrap::BuildPlanOverrides do
 
   it "raises when overrides reference an unknown phase" do
     plan = Bootstrap::BuildPlan.new([
-      Bootstrap::BuildPhase.new(name: "one", description: "phase", workdir: "/workspace", namespace: "test", install_prefix: "/opt/sysroot"),
+      Bootstrap::BuildPhase.new(name: "one", description: "phase", namespace: "test", install_prefix: "/opt/sysroot"),
     ])
 
     overrides = Bootstrap::BuildPlanOverrides.new(

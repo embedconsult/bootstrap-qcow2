@@ -4,21 +4,19 @@ require "../src/sysroot_all_resume"
 private def write_plan(path : Path) : Bootstrap::BuildPlan
   phases = [
     Bootstrap::BuildPhase.new(
-      "phase-a",
-      "Phase A",
-      "/workspace",
-      "env",
-      "/opt/sysroot",
+      name: "phase-a",
+      description: "Phase A",
+      namespace: "env",
+      install_prefix: "/opt/sysroot",
       steps: [
         Bootstrap::BuildStep.new("step-a", "noop", "/workspace/phase-a", [] of String, [] of String),
       ],
     ),
     Bootstrap::BuildPhase.new(
-      "phase-b",
-      "Phase B",
-      "/workspace",
-      "env",
-      "/opt/sysroot",
+      name: "phase-b",
+      description: "Phase B",
+      namespace: "env",
+      install_prefix: "/opt/sysroot",
       steps: [
         Bootstrap::BuildStep.new("step-b", "noop", "/workspace/phase-b", [] of String, [] of String),
       ],

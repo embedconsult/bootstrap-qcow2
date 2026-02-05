@@ -95,8 +95,6 @@ module Bootstrap
     getter name : String
     # Human-readable description shown in logs.
     getter description : String
-    # Canonical workdir root for plan paths.
-    getter workdir : String
     # Namespace tag used to decide where this phase is allowed to execute.
     getter namespace : String
     # Install prefix used by build strategies that honor configure/CMake prefixes.
@@ -112,7 +110,6 @@ module Bootstrap
     # defaults.
     def initialize(@name : String,
                    @description : String,
-                   @workdir : String,
                    @namespace : String,
                    @install_prefix : String,
                    @destdir : String? = nil,

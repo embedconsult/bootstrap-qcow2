@@ -88,8 +88,8 @@ describe Bootstrap::SysrootBuilder do
       host_workdir = builder.host_workdir
       seed_workspace = Bootstrap::SysrootWorkspace.workspace_from(Bootstrap::SysrootWorkspace::Namespace::Seed, host_workdir).to_s
       bq2_workspace = Bootstrap::SysrootWorkspace.workspace_from(Bootstrap::SysrootWorkspace::Namespace::BQ2, host_workdir).to_s
-      phases = builder.phase_specs.to_h { |spec| {spec.phase.name, spec.phase} }
-      phases["host-setup"].workdir.should eq "/"
+      phases = builder.phase_specs.to_h { |spec| {spec.phase.name, spec} }
+      phases["host-setup"].workdir.should be_nil
       phases["sysroot-from-alpine"].workdir.should eq seed_workspace
       phases["rootfs-from-sysroot"].workdir.should eq seed_workspace
       phases["system-from-sysroot"].workdir.should eq bq2_workspace

@@ -111,6 +111,7 @@ module Bootstrap
     # used in different phases.
     record PhaseSpec,
       phase : BuildPhase,
+      workdir : String?,
       package_allowlist : Array(String)? = nil,
       pre_steps : Array(BuildStep) = [] of BuildStep,
       extra_steps : Array(BuildStep) = [] of BuildStep,
@@ -603,7 +604,6 @@ module Bootstrap
       sysroot_prefix = "/#{SysrootWorkspace::SYSROOT_DIR_NAME}"
       rootfs_tarball = "#{@workspace.workspace_path}/bq2-rootfs-#{bootstrap_source_version}.tar.gz"
       host_workdir = @workspace.host_workdir.not_nil!
-      workspace_from_host = SysrootWorkspace.workspace_from(SysrootWorkspace::Namespace::Host, host_workdir).to_s
       workspace_from_seed = SysrootWorkspace.workspace_from(SysrootWorkspace::Namespace::Seed, host_workdir).to_s
       workspace_from_bq2 = SysrootWorkspace.workspace_from(SysrootWorkspace::Namespace::BQ2, host_workdir).to_s
       bq2_from_seed = SysrootWorkspace.bq2_rootfs_from(SysrootWorkspace::Namespace::Seed, host_workdir).to_s
@@ -648,12 +648,13 @@ module Bootstrap
           BuildPhase.new(
             name: "host-setup",
             description: "Prepare cached sources and seed the rootfs from the host.",
-            workdir: "/",
             namespace: "host",
+            # install_prefix is unused in host-setup; steps provide explicit paths.
             install_prefix: "/",
             destdir: nil,
             env: host_setup_env,
           ),
+          workdir: nil,
           package_allowlist: [] of String,
           extra_steps: host_setup_steps,
         ),
@@ -661,12 +662,12 @@ module Bootstrap
           BuildPhase.new(
             name: "sysroot-from-alpine",
             description: "Build a self-contained sysroot using Alpine-hosted tools.",
-            workdir: workspace_from_seed,
             namespace: "seed",
             install_prefix: sysroot_prefix,
             destdir: nil,
             env: sysroot_env,
           ),
+          workdir: workspace_from_seed,
           pre_steps: [
             write_file_step(
               "alpine-resolv-conf",
@@ -730,12 +731,12 @@ module Bootstrap
           BuildPhase.new(
             name: "rootfs-from-sysroot",
             description: "Build a minimal rootfs using the newly built sysroot toolchain.",
-            workdir: workspace_from_seed,
             namespace: "seed",
             install_prefix: "/usr",
             destdir: bq2_from_seed,
             env: rootfs_env,
           ),
+          workdir: workspace_from_seed,
           package_allowlist: ["musl", "busybox", "linux-headers"],
           env_overrides: {
             "busybox" => {
@@ -772,12 +773,12 @@ module Bootstrap
           BuildPhase.new(
             name: "system-from-sysroot",
             description: "Rebuild sysroot packages into /usr inside the new rootfs (prefix-free).",
-            workdir: workspace_from_bq2,
             namespace: "bq2",
             install_prefix: "/usr",
             destdir: nil,
             env: rootfs_env,
           ),
+          workdir: workspace_from_bq2,
           package_allowlist: nil,
           env_overrides: {
             "libxml2" => libxml2_env,
@@ -836,12 +837,12 @@ module Bootstrap
           BuildPhase.new(
             name: "tools-from-system",
             description: "Build additional developer tools inside the new rootfs.",
-            workdir: workspace_from_bq2,
             namespace: "bq2",
             install_prefix: "/usr",
             destdir: nil,
             env: rootfs_env,
           ),
+          workdir: workspace_from_bq2,
           package_allowlist: nil,
           env_overrides: {
             "fossil" => {
@@ -861,12 +862,12 @@ module Bootstrap
           BuildPhase.new(
             name: "finalize-rootfs",
             description: "Strip the sysroot prefix and emit a prefix-free rootfs tarball.",
-            workdir: workspace_from_bq2,
             namespace: "bq2",
             install_prefix: "/usr",
             destdir: nil,
             env: rootfs_phase_env(sysroot_prefix),
           ),
+          workdir: workspace_from_bq2,
           package_allowlist: [] of String,
           extra_steps: [
             build_step(
@@ -1074,7 +1075,6 @@ module Bootstrap
       BuildPhase.new(
         name: spec.phase.name,
         description: spec.phase.description,
-        workdir: spec.phase.workdir,
         namespace: spec.phase.namespace,
         install_prefix: spec.phase.install_prefix,
         destdir: spec.phase.destdir,
@@ -1186,7 +1186,9 @@ module Bootstrap
 
     # Return the workspace directory that should be used for building *package*.
     def workdir_for(package : PackageSpec, phase : PhaseSpec) : String
-      File.join(phase.phase.workdir, source_dir_for(package))
+      base = phase.workdir
+      raise "Missing workdir for phase #{phase.phase.name}" unless base
+      File.join(base, source_dir_for(package))
     end
 
     # Resolve the extracted source directory name for a package.

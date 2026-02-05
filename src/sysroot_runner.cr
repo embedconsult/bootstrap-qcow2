@@ -304,7 +304,6 @@ module Bootstrap
         BuildPhase.new(
           name: phase.name,
           description: phase.description,
-          workdir: phase.workdir,
           namespace: phase.namespace,
           install_prefix: phase.install_prefix,
           destdir: phase.destdir,
@@ -330,7 +329,6 @@ module Bootstrap
         BuildPhase.new(
           name: phase.name,
           description: phase.description,
-          workdir: phase.workdir,
           namespace: phase.namespace,
           install_prefix: phase.install_prefix,
           destdir: phase.destdir,
@@ -400,7 +398,6 @@ module Bootstrap
         "phase"          => {
           "name"           => phase.name,
           "namespace"      => phase.namespace,
-          "workdir"        => phase.workdir,
           "install_prefix" => phase.install_prefix,
           "destdir"        => phase.destdir,
           "env"            => phase.env,
