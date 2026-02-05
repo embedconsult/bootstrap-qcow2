@@ -1,7 +1,6 @@
 require "file_utils"
 require "path"
 require "./sysroot_namespace"
-require "./string_ext"
 
 module Bootstrap
   # Rootfs workspace helpers anchored on the .bq2-rootfs marker.
@@ -38,11 +37,6 @@ module Bootstrap
       Host
       Seed
       BQ2
-
-      # Return the namespace name as a lowercase underscore string.
-      def label : String
-        to_s.underscore
-      end
     end
     PROBE_PATHS_FOR_MARKER = [
       {namespace: Namespace::Host, path: Path["#{DEFAULT_HOST_WORKDIR}/#{SEED_DIR_NAME}/#{BQ2_DIR_NAME}/#{ROOTFS_MARKER_NAME}"]},
