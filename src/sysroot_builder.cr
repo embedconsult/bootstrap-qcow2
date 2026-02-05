@@ -153,7 +153,7 @@ module Bootstrap
 
     # Path to the workspace directory inside the inner rootfs.
     def inner_rootfs_workspace_dir : Path
-      @workspace.bq2_rootfs_path
+      @workspace.workspace_path
     end
 
     # Build a PackageSpec pointing at the base rootfs tarball for the configured
