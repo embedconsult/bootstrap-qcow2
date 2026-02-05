@@ -28,13 +28,15 @@ jobs:
       - name: Run specs
         run: crystal spec
 
-      - name: Build minimal chroot and exercise it
+      - name: Build sysroot workspace and plan
         run: |
-          shards build
-          shards build
           ./bin/bq2 --install
-          ./bin/sysroot-builder --workspace /tmp/sysroot-ci --output /tmp/sysroot.tar.gz --arch x86_64 --branch v3.23 --base-version 3.23.2
-          mkdir -p /tmp/sysroot
-          tar -xzf /tmp/sysroot.tar.gz -C /tmp/sysroot
-          sudo "$(command -v crystal)" eval 'Process.chroot("/tmp/sysroot"); Dir.cd("/"); File.write("/workspace/hello.txt", "ok")'
-          test -f /tmp/sysroot/workspace/hello.txt
+          ./bin/sysroot-builder --arch x86_64
+          test -f data/sysroot/seed-rootfs/bq2-rootfs/var/lib/sysroot-build-plan.json
+          tar -czf /tmp/sysroot-workspace.tar.gz -C data/sysroot seed-rootfs/bq2-rootfs
+
+      - name: Upload sysroot workspace artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sysroot-workspace
+          path: /tmp/sysroot-workspace.tar.gz
