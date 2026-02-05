@@ -116,19 +116,8 @@ module Bootstrap
           state.mark_current_phase(phase_entry.name)
           save_state(state, state_save_path)
         end
-        if workspace && namespace_switch_required?(phase_entry, workspace)
-          state = run_phase_in_namespace(
-            phase_entry,
-            runner,
-            report_dir: report_dir,
-            state: state,
-            resume: resume,
-            state_path: state_save_path,
-            workspace: workspace,
-          )
-        else
-          run_phase(phase_entry, runner, report_dir: report_dir, state: state, resume: resume, state_path: state_save_path)
-        end
+        enter_phase_namespace(phase_entry, workspace) if workspace && namespace_switch_required?(phase_entry, workspace)
+        run_phase(phase_entry, runner, report_dir: report_dir, state: state, resume: resume, state_path: state_save_path)
         if state
           state.mark_current_phase(phases[idx + 1]?.try(&.name))
           save_state(state, state_save_path)
@@ -335,28 +324,6 @@ module Bootstrap
       else
         false
       end
-    end
-
-    # Run a phase in a child process after entering the requested namespace.
-    private def self.run_phase_in_namespace(phase : BuildPhase,
-                                            runner,
-                                            report_dir : String?,
-                                            state : SysrootBuildState?,
-                                            resume : Bool,
-                                            state_path : Path?,
-                                            workspace : SysrootWorkspace) : SysrootBuildState?
-      process = Process.fork do
-        enter_phase_namespace(phase, workspace)
-        run_phase(phase, runner, report_dir: report_dir, state: state, resume: resume, state_path: state_path)
-        Process.exit(0)
-      rescue ex
-        Log.error { "Failed to run #{phase.name} in namespace #{phase.namespace}: #{ex.message}" }
-        Process.exit(1)
-      end
-      status = process.not_nil!.wait
-      raise "Phase #{phase.name} failed in namespace #{phase.namespace}" unless status.success?
-      return state unless state && state_path
-      SysrootBuildState.load(workspace, state_path)
     end
 
     # Enter the requested phase namespace, if needed.
