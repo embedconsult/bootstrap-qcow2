@@ -66,8 +66,8 @@ module Bootstrap
       BuildPhase.new(
         name: phase.name,
         description: phase.description,
-        workspace: phase.workspace,
-        environment: phase.environment,
+        workdir: phase.workdir,
+        namespace: phase.namespace,
         install_prefix: install_prefix,
         destdir: destdir,
         env: env,

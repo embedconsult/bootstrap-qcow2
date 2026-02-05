@@ -91,19 +91,29 @@ module Bootstrap
   struct BuildPhase
     include JSON::Serializable
 
+    # Phase identifier used by the runner (e.g., "sysroot-from-alpine").
     getter name : String
+    # Human-readable description shown in logs.
     getter description : String
-    getter environment : String
+    # Canonical workdir root for plan paths.
+    getter workdir : String
+    # Namespace tag used to decide where this phase is allowed to execute.
+    getter namespace : String
+    # Install prefix used by build strategies that honor configure/CMake prefixes.
     getter install_prefix : String
+    # Optional DESTDIR staging root (used for rootfs assembly).
     getter destdir : String?
+    # Default environment variables applied to every step in the phase.
     getter env : Hash(String, String)
+    # Ordered list of build steps for this phase.
     getter steps : Array(BuildStep)
 
     # Creates a build phase containing steps plus shared install/environment
     # defaults.
     def initialize(@name : String,
                    @description : String,
-                   @environment : String,
+                   @workdir : String,
+                   @namespace : String,
                    @install_prefix : String,
                    @destdir : String? = nil,
                    @env : Hash(String, String) = {} of String => String,
@@ -153,74 +163,16 @@ module Bootstrap
       matching
     end
 
-    # Return phases that are valid for the provided workspace namespace
+    # Return phases that are valid for the provided workspace namespace.
     def phases_for_current_namespace(workspace : SysrootWorkspace) : Array(BuildPhase)
-      candidate_phases = @phases.dup
-      if workspace.namespace.seed?
-        candidate_phases.reject! { |phase| phase.environment.starts_with?("host-") }
-      end
-      if workspace.namespace.bq2?
-        candidate_phases.reject! { |phase| phase.environment.starts_with?("seed-") }
-      end
-      candidate_phases
-    end
-  end
-end
-
-private def self.apply_overrides(plan : BuildPlan, path : String) : BuildPlan
-  return plan unless File.exists?(path)
-  Log.info { "Applying build plan overrides from #{path}" }
-  overrides = BuildPlanOverrides.from_json(File.read(path))
-  overrides.apply(plan)
-end
-
-# Ensure report directories exist for phases that stage into a destdir
-# rootfs. The build plan and overrides are treated as immutable and must
-# be staged by the builder or plan writer rather than by sysroot-runner.
-private def self.stage_report_dirs_for_destdirs(plan : BuildPlan, workspace : SysrootWorkspace) : Nil
-  rootfs_workspace = SysrootWorkspace::ROOTFS_WORKSPACE_PATH.to_s
-  plan.phases.each do |phase|
-    next unless destdir = phase.destdir
-    destdir_path = Path[destdir]
-    if workspace.host_workdir
-      destdir_string = destdir_path.to_s
-      if destdir_string == rootfs_workspace || destdir_string.starts_with?(rootfs_workspace + "/")
-        suffix = destdir_string[rootfs_workspace.size..-1] || ""
-        suffix = suffix.lstrip('/')
-        destdir_path = workspace.rootfs_workspace_path / suffix
+      case workspace.namespace
+      in .host?
+        @phases
+      in .seed?
+        @phases.reject { |phase| phase.namespace == "host" }
+      in .bq2?
+        @phases.reject { |phase| phase.namespace == "host" || phase.namespace == "seed" }
       end
     end
-    report_stage = destdir_path / SysrootBuildState.rootfs_report_dir.lchop('/')
-    FileUtils.mkdir_p(report_stage)
   end
-rescue ex
-  Log.warn { "Failed to stage iteration report directories into destdir rootfs: #{ex.message}" }
-end
-
-private def self.filter_phases_by_packages(phases : Array(BuildPhase), packages : Array(String)) : Array(BuildPhase)
-  matched = Set(String).new
-  phases.each do |phase|
-    phase.steps.each do |step|
-      matched << step.name if packages.includes?(step.name)
-    end
-  end
-  missing = packages.uniq.reject { |name| matched.includes?(name) }
-  raise "Requested package(s) not found in selected phases: #{missing.join(", ")}" unless missing.empty?
-
-  selected = phases.compact_map do |phase|
-    steps = phase.steps.select { |step| packages.includes?(step.name) }
-    next nil if steps.empty?
-    BuildPhase.new(
-      name: phase.name,
-      description: phase.description,
-      workspace: phase.workspace,
-      environment: phase.environment,
-      install_prefix: phase.install_prefix,
-      destdir: phase.destdir,
-      env: phase.env,
-      steps: steps,
-    )
-  end
-  raise "No matching packages found in selected phases: #{packages.join(", ")}" if selected.empty?
-  selected
 end

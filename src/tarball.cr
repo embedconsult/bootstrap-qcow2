@@ -1,4 +1,3 @@
-require "compress/gzip"
 require "digest/crc32"
 require "file_utils"
 require "log"
