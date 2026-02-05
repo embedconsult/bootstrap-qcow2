@@ -644,6 +644,9 @@ module Bootstrap
                   end
       musl_ld_path = "/etc/ld-musl-#{musl_arch}.path"
       [
+        # Inputs: host repo workspace, source tarballs cache, seed rootfs spec.
+        # Outputs: populated workspace sources, seed rootfs filesystem tree,
+        #          build plan metadata under the workspace.
         PhaseSpec.new(
           BuildPhase.new(
             name: "host-setup",
@@ -658,6 +661,8 @@ module Bootstrap
           package_allowlist: [] of String,
           extra_steps: host_setup_steps,
         ),
+        # Inputs: seed rootfs from host-setup, downloaded sources.
+        # Outputs: /opt/sysroot toolchain prefix (compiler, libc, build tools).
         PhaseSpec.new(
           BuildPhase.new(
             name: "sysroot-from-alpine",
@@ -727,6 +732,8 @@ module Bootstrap
             ],
           },
         ),
+        # Inputs: sysroot toolchain, seed rootfs environment.
+        # Outputs: minimal bq2 rootfs tree (busybox + musl) plus sysroot copy.
         PhaseSpec.new(
           BuildPhase.new(
             name: "rootfs-from-sysroot",
@@ -769,6 +776,8 @@ module Bootstrap
             ),
           ].flatten,
         ),
+        # Inputs: minimal bq2 rootfs, sysroot toolchain.
+        # Outputs: prefix-free /usr system packages in the bq2 rootfs.
         PhaseSpec.new(
           BuildPhase.new(
             name: "system-from-sysroot",
@@ -828,6 +837,8 @@ module Bootstrap
             {"bq2", "/usr/bin/pkg-config"},
           ]),
         ),
+        # Inputs: prefix-free system rootfs.
+        # Outputs: developer tooling added to /usr in the bq2 rootfs.
         PhaseSpec.new(
           BuildPhase.new(
             name: "tools-from-system",
@@ -853,6 +864,8 @@ module Bootstrap
             },
           },
         ),
+        # Inputs: full bq2 rootfs with sysroot prefix still present.
+        # Outputs: sysroot prefix removed, finalized rootfs tarball emitted.
         PhaseSpec.new(
           BuildPhase.new(
             name: "finalize-rootfs",
