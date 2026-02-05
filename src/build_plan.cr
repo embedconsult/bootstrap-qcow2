@@ -35,6 +35,10 @@ module Bootstrap
     getter build_directory : String?
 
     # Describes a single downloadable source archive.
+    #
+    # `build_directory` names the extracted directory (for archives that unpack
+    # to a nonstandard top-level name) so the builder can resolve a stable
+    # workspace path.
     def initialize(@name : String,
                    @version : String,
                    @url : String,

@@ -1048,18 +1048,21 @@ module Bootstrap
         build_step(
           name: "download-sources",
           strategy: "download-sources",
-          sources: package_sources,
+          sources: package_sources + rootfs_sources,
           destdir: sources_dir.to_s,
         ),
         build_step(
           name: "populate-seed",
           strategy: "populate-seed",
           sources: rootfs_sources,
+          workdir: sources_dir.to_s,
+          destdir: @workspace.seed_rootfs_path.not_nil!.to_s,
         ),
         build_step(
           name: "extract-sources",
           strategy: "extract-sources",
           extract_sources: extract_sources,
+          workdir: sources_dir.to_s,
           destdir: @workspace.workspace_path.to_s,
         ),
       ]

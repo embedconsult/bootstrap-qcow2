@@ -302,8 +302,9 @@ module Bootstrap
     def extract_sources(step : BuildStep) : Nil
       sources = step.extract_sources || raise "extract-sources requires step.extract_sources"
       destination = step.destdir ? Path[step.destdir.not_nil!] : Path["."]
+      source_root = step.workdir ? Path[step.workdir.not_nil!] : sources_dir
       sources.each do |spec|
-        archive = sources_dir / spec.filename
+        archive = source_root / spec.filename
         raise "Missing source tarball #{archive}" unless File.exists?(archive)
         Log.info { "Extracting #{archive} into #{destination}" }
         Tarball.extract(archive, destination, preserve_ownership: false, owner_uid: nil, owner_gid: nil)
@@ -316,10 +317,12 @@ module Bootstrap
       raise "populate-seed expects at least one source" if sources.empty?
       workspace = @workspace || raise "populate-seed requires a workspace"
       seed_rootfs = workspace.seed_rootfs_path || raise "populate-seed requires seed rootfs path"
-      archive = sources_dir / sources.first.filename
+      source_root = step.workdir ? Path[step.workdir.not_nil!] : sources_dir
+      destination = step.destdir ? Path[step.destdir.not_nil!] : seed_rootfs
+      archive = source_root / sources.first.filename
       raise "Missing seed rootfs tarball #{archive}" unless File.exists?(archive)
-      Log.info { "Populating seed rootfs from #{archive} into #{seed_rootfs}" }
-      Tarball.extract(archive, seed_rootfs, preserve_ownership: false, owner_uid: nil, owner_gid: nil)
+      Log.info { "Populating seed rootfs from #{archive} into #{destination}" }
+      Tarball.extract(archive, destination, preserve_ownership: false, owner_uid: nil, owner_gid: nil)
     end
 
     # Many release tarballs include pre-generated autotools artifacts
