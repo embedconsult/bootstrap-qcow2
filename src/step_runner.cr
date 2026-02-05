@@ -360,7 +360,7 @@ module Bootstrap
         if response.status_code.in?({301, 302, 303, 307, 308})
           location = response.headers["Location"]?
           raise "Redirect missing Location header for #{uri}" unless location
-          return download_with_redirects(URI.parse(location), target, limit - 1)
+          return download_with_redirects(resolve_redirect(uri, location), target, limit - 1)
         end
         raise "Failed to download #{uri}: HTTP #{response.status_code}" unless response.success?
         File.open(target, "wb") do |file|
@@ -377,13 +377,19 @@ module Bootstrap
         if response.status_code.in?({301, 302, 303, 307, 308})
           location = response.headers["Location"]?
           raise "Redirect missing Location header for #{uri}" unless location
-          return fetch_string_with_redirects(URI.parse(location), limit - 1)
+          return fetch_string_with_redirects(resolve_redirect(uri, location), limit - 1)
         end
         return nil unless response.success?
         IO.copy(response.body_io, buffer)
         success = true
       end
       success ? buffer.to_s : nil
+    end
+
+    private def resolve_redirect(uri : URI, location : String) : URI
+      target = URI.parse(location)
+      return target unless target.scheme.nil? || target.host.nil?
+      uri.resolve(target)
     end
 
     private def sources_dir : Path
