@@ -42,17 +42,16 @@ module Bootstrap
     CLONE_NEWUSER = 0x10000000
     CLONE_NEWNET  = 0x40000000
 
-    MS_BIND        =  4096_u64
-    MS_REC         = 16384_u64
-    MS_RDONLY      = (1_u64 << 0)
-    MS_NOSUID      = (1_u64 << 1)
-    MS_NODEV       = (1_u64 << 2)
-    MS_NOEXEC      = (1_u64 << 3)
-    MS_REMOUNT     = (1_u64 << 5)
-    MS_PRIVATE     = (1_u64 << 18)
-    MNT_DETACH     = 2
-    DEFAULT_PATH   = "/opt/sysroot/bin:/opt/sysroot/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
-    DEFAULT_ROOTFS = SysrootWorkspace::DEFAULT_HOST_WORKDIR / SysrootWorkspace::OUTER_ROOTFS_DIR
+    MS_BIND      =  4096_u64
+    MS_REC       = 16384_u64
+    MS_RDONLY    = (1_u64 << 0)
+    MS_NOSUID    = (1_u64 << 1)
+    MS_NODEV     = (1_u64 << 2)
+    MS_NOEXEC    = (1_u64 << 3)
+    MS_REMOUNT   = (1_u64 << 5)
+    MS_PRIVATE   = (1_u64 << 18)
+    MNT_DETACH   = 2
+    DEFAULT_PATH = "/opt/sysroot/bin:/opt/sysroot/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
 
     class NamespaceError < RuntimeError
     end
@@ -89,7 +88,7 @@ module Bootstrap
 
     # Enter the rootfs namespace and exec the requested command.
     private def self.run_namespace(args : Array(String)) : Int32
-      rootfs = DEFAULT_ROOTFS.to_s
+      rootfs = "#{SysrootWorkspace::DEFAULT_HOST_WORKDIR}/#{SysrootWorkspace::SEED_DIR_NAME}"
       extra_binds = [] of Tuple(Path, Path)
       command = [] of String
       codex_mode = false
@@ -122,7 +121,7 @@ module Bootstrap
           "/bin/sh",
           "--login",
           "-c",
-          "/work/bin/codex --add-dir /var --add-dir /opt --add-dir #{SysrootWorkspace::ROOTFS_WORKSPACE_PATH} -C /work/bootstrap-qcow2 -s workspace-write",
+          "/work/bin/codex --add-dir /var --add-dir /opt --add-dir /workspace -C /work/bootstrap-qcow2 -s workspace-write",
         ]
         unless remaining.empty?
           command[-1] = [command[-1], remaining.join(" ")].join(" ")
