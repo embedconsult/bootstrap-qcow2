@@ -47,15 +47,19 @@ module Bootstrap
     getter host_workdir : Path?
     getter seed_rootfs_path : Path?
     getter sysroot_path : Path?
-    getter bq2_rootfs_path : Path = Path["/"]
-    getter marker_path : Path = Path["/"]
-    getter workspace_path : Path = Path["/"]
-    getter log_path : Path = Path["/"]
+    getter bq2_rootfs_path : Path
+    getter marker_path : Path
+    getter workspace_path : Path
+    getter log_path : Path
     getter namespace : Namespace
     @extra_binds : Array(Tuple(Path, Path))
 
     def initialize(@host_workdir : Path? = nil,
                    @extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path))
+      @bq2_rootfs_path = Path["/"]
+      @marker_path = Path["/"]
+      @workspace_path = Path["/"]
+      @log_path = Path["/"]
       if @host_workdir.nil?
         found_marker = PROBE_PATHS_FOR_MARKER.find { |s| File.exists?(s[:path]) }
         raise "Missing BQ2 rootfs marker at one of these paths: #{PROBE_PATHS_FOR_MARKER}" if found_marker.nil?
