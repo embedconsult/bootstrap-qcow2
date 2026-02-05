@@ -16,6 +16,7 @@ module Bootstrap
                      force_system_tar : Bool = false,
                      guard_paths : Array(Path) = [] of Path) : Nil
       FileUtils.mkdir_p(destination)
+      Fiber.yield
       return run_system_tar_extract(path, destination, preserve_ownership, owner_uid, owner_gid, guard_paths) if force_system_tar
       Extractor.new(path, destination, preserve_ownership, owner_uid, owner_gid, guard_paths).run
     end
@@ -82,6 +83,7 @@ module Bootstrap
         return if fallback_for_unhandled_compression?
         File.open(@archive) do |file|
           io = maybe_gzip(file)
+	  Fiber.yield
           TarReader.new(io, @destination, @preserve_ownership, @owner_uid, @owner_gid, @guard_paths).extract_all
         end
       end
@@ -384,6 +386,7 @@ module Bootstrap
           end
         end
         File.chmod(path, mode)
+	Fiber.yield
       end
 
       # Ensure the parent path is a directory, removing conflicting entries.

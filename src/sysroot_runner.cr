@@ -207,6 +207,7 @@ module Bootstrap
       plan_path = build_state.plan_path.to_s
       overrides_path = build_state.overrides_path.to_s
       report_dir = report ? build_state.report_dir.to_s : nil
+      Log.info { "Running plan #{plan_path} with overrides #{overrides_path} (namespace=#{workspace.namespace})" }
 
       step_runner = StepRunner.new(workspace: workspace)
       run_plan(
