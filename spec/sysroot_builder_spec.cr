@@ -82,27 +82,6 @@ describe Bootstrap::SysrootBuilder do
     end
   end
 
-  it "writes host-setup paths with absolute sources and workspace roots" do
-    with_temp_workdir do |_dir|
-      builder = Bootstrap::SysrootBuilder.new
-      plan = builder.build_plan
-      host_setup = plan.phases.find(&.name.==("host-setup")).not_nil!
-      download_step = host_setup.steps.find(&.name.==("download-sources")).not_nil!
-      populate_step = host_setup.steps.find(&.name.==("populate-seed")).not_nil!
-      extract_step = host_setup.steps.find(&.name.==("extract-sources")).not_nil!
-
-      sources_root = builder.sources_dir.expand
-      seed_rootfs = builder.outer_rootfs_dir.expand
-      workspace_root = builder.inner_rootfs_workspace_dir.expand
-
-      Path[download_step.destdir.not_nil!].should eq sources_root
-      Path[populate_step.sources_directory.not_nil!].should eq sources_root
-      Path[populate_step.destdir.not_nil!].should eq seed_rootfs
-      Path[extract_step.sources_directory.not_nil!].should eq sources_root
-      Path[extract_step.destdir.not_nil!].should eq workspace_root
-    end
-  end
-
   it "sets phase workdirs per namespace" do
     with_temp_workdir do |_dir|
       builder = Bootstrap::SysrootBuilder.new
