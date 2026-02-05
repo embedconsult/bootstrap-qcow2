@@ -92,7 +92,8 @@ describe Bootstrap::SysrootBuilder do
       phases["sysroot-from-alpine"].workdir.should eq seed_workspace
       phases["rootfs-from-sysroot"].workdir.should eq seed_workspace
       phases["system-from-sysroot"].workdir.should eq seed_workspace
-      phases["tools-from-system"].workdir.should eq seed_workspace
+      bq2_workspace = Bootstrap::SysrootWorkspace.workspace_from(Bootstrap::SysrootWorkspace::Namespace::BQ2, host_workdir).to_s
+      phases["tools-from-system"].workdir.should eq bq2_workspace
       phases["finalize-rootfs"].workdir.should eq seed_workspace
     end
   end
@@ -160,7 +161,7 @@ describe Bootstrap::SysrootBuilder do
       ]
 
       finalize_phase = plan.phases.find(&.name.==("finalize-rootfs")).not_nil!
-      finalize_phase.steps.map(&.name).should eq ["strip-sysroot", "musl-ld-path-final", "rootfs-tarball"]
+      finalize_phase.steps.map(&.name).should eq ["musl-ld-path-final", "rootfs-tarball"]
     end
   end
 

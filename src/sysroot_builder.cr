@@ -837,12 +837,12 @@ module Bootstrap
           BuildPhase.new(
             name: "tools-from-system",
             description: "Build additional developer tools inside the new rootfs.",
-            namespace: "seed",
+            namespace: "bq2",
             install_prefix: "/usr",
-            destdir: bq2_from_seed,
-            env: rootfs_env,
+            destdir: nil,
+            env: bq2_phase_env,
           ),
-          workdir: workspace_from_seed,
+          workdir: workspace_from_bq2,
           package_allowlist: nil,
           env_overrides: {
             "fossil" => {
@@ -859,7 +859,7 @@ module Bootstrap
           },
         ),
         # Inputs: full bq2 rootfs staged in the seed namespace.
-        # Outputs: sysroot prefix removed, finalized rootfs tarball emitted.
+        # Outputs: finalized rootfs tarball emitted.
         PhaseSpec.new(
           BuildPhase.new(
             name: "finalize-rootfs",
@@ -872,12 +872,6 @@ module Bootstrap
           workdir: workspace_from_seed,
           package_allowlist: [] of String,
           extra_steps: [
-            build_step(
-              name: "strip-sysroot",
-              strategy: "remove-tree",
-              workdir: "/",
-              install_prefix: sysroot_prefix,
-            ),
             write_file_step("musl-ld-path-final", musl_ld_path, "/lib:/usr/lib\n"),
             build_step(
               name: "rootfs-tarball",
@@ -994,6 +988,19 @@ module Bootstrap
         "CXX"  => "/usr/bin/clang++",
         # TODO: determine if this should be here.
         "LD_LIBRARY_PATH" => "#{sysroot_prefix}/lib",
+      }
+    end
+
+    # Return environment variables for the prefix-free toolchain in the bq2 rootfs.
+    private def bq2_phase_env : Hash(String, String)
+      {
+        "PATH"   => "/usr/bin:/bin:/usr/sbin:/sbin",
+        "CC"     => "clang",
+        "CXX"    => "clang++",
+        "AR"     => "llvm-ar",
+        "NM"     => "llvm-nm",
+        "RANLIB" => "llvm-ranlib",
+        "STRIP"  => "llvm-strip",
       }
     end
 
