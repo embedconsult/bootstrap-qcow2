@@ -1046,26 +1046,29 @@ module Bootstrap
       extract_sources = extract_source_specs(packages)
       rootfs_sources = package_source_specs([seed_rootfs_spec])
       rootfs_extract = extract_source_specs([seed_rootfs_spec], include_build_directory: false)
+      sources_root = sources_dir.expand
+      seed_rootfs = @workspace.seed_rootfs_path.not_nil!.expand
+      workspace_root = @workspace.workspace_path.expand
       [
         build_step(
           name: "download-sources",
           strategy: "download-sources",
           sources: package_sources + rootfs_sources,
-          destdir: sources_dir.to_s,
+          destdir: sources_root.to_s,
         ),
         build_step(
           name: "populate-seed",
           strategy: "populate-seed",
           extract_sources: rootfs_extract,
-          sources_directory: sources_dir.to_s,
-          destdir: @workspace.seed_rootfs_path.not_nil!.to_s,
+          sources_directory: sources_root.to_s,
+          destdir: seed_rootfs.to_s,
         ),
         build_step(
           name: "extract-sources",
           strategy: "extract-sources",
           extract_sources: extract_sources,
-          sources_directory: sources_dir.to_s,
-          destdir: @workspace.workspace_path.to_s,
+          sources_directory: sources_root.to_s,
+          destdir: workspace_root.to_s,
         ),
       ]
     end
