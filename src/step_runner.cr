@@ -12,11 +12,8 @@ require "./build_plan"
 require "./process_runner"
 require "./alpine_setup"
 require "./sysroot_workspace"
-<<<<<<< codex/review-refactor-direction-since-tag-0.2.1
 require "./patch_applier"
-=======
 require "./tarball"
->>>>>>> revamp-of-my-fixes
 
 module Bootstrap
   # Raised when a command fails during a StepRunner invocation.
