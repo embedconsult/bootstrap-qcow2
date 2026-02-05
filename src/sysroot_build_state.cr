@@ -83,9 +83,9 @@ module Bootstrap
         state = SysrootBuildState.new(workspace: workspace)
       end
 
-      plan_digest = digest_for?(state.plan_path_path)
-      overrides_path_path = overrides_path || state.overrides_path_path
-      overrides_digest = overrides_path_path ? digest_for?(overrides_path_path) : nil
+      plan_digest = digest_for?(state.plan_path)
+      resolved_overrides_path = overrides_path || state.overrides_path
+      overrides_digest = resolved_overrides_path ? digest_for?(resolved_overrides_path) : nil
 
       changed = false
       if state.plan_digest && plan_digest && state.plan_digest != plan_digest
@@ -117,23 +117,23 @@ module Bootstrap
     end
 
     # Resolve the plan path into the active namespace.
-    def plan_path_path : Path
+    def plan_path : Path
       @workspace.log_path / PLAN_FILE
     end
 
     # Resolve overrides path into the active namespace.
-    def overrides_path_path : Path
+    def overrides_path : Path
       @workspace.log_path / OVERRIDES_FILE
     end
 
     # Resolve report directory path into the active namespace.
-    def report_dir_path : Path
+    def report_dir : Path
       @workspace.log_path / REPORT_DIR_NAME
     end
 
     # Returns true when the build plan file exists for this workspace.
     def plan_exists? : Bool
-      File.exists?(plan_path_path)
+      File.exists?(plan_path)
     end
 
     # Returns true when the build state file exists for this workspace.
@@ -207,7 +207,7 @@ module Bootstrap
 
     # Return the selected build phases from the current plan.
     def selected_phases(requested : String = "all") : Array(BuildPhase)
-      plan = BuildPlan.parse(File.read(plan_path_path))
+      plan = BuildPlan.parse(File.read(plan_path))
       plan.selected_phases(requested)
     end
 

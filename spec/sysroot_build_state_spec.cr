@@ -18,12 +18,12 @@ describe Bootstrap::SysrootBuildState do
     with_tempdir do |dir|
       workspace = Bootstrap::SysrootWorkspace.new(host_workdir: dir)
       state = Bootstrap::SysrootBuildState.load_or_init(workspace)
-      state.plan_path_path.should eq workspace.log_path / Bootstrap::SysrootBuildState::PLAN_FILE
-      state.overrides_path_path.should eq workspace.log_path / Bootstrap::SysrootBuildState::OVERRIDES_FILE
-      state.report_dir_path.should eq workspace.log_path / Bootstrap::SysrootBuildState::REPORT_DIR_NAME
+      state.plan_path.should eq workspace.log_path / Bootstrap::SysrootBuildState::PLAN_FILE
+      state.overrides_path.should eq workspace.log_path / Bootstrap::SysrootBuildState::OVERRIDES_FILE
+      state.report_dir.should eq workspace.log_path / Bootstrap::SysrootBuildState::REPORT_DIR_NAME
       state.save
       loaded = Bootstrap::SysrootBuildState.load(workspace)
-      loaded.plan_path_path.should eq workspace.log_path / Bootstrap::SysrootBuildState::PLAN_FILE
+      loaded.plan_path.should eq workspace.log_path / Bootstrap::SysrootBuildState::PLAN_FILE
     end
   ensure
     # tempdir cleanup handled by helper

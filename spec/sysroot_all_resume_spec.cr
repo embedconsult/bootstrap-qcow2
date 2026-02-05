@@ -70,7 +70,7 @@ describe Bootstrap::SysrootAllResume do
     with_temp_workdir do |_dir|
       workspace = Bootstrap::SysrootWorkspace.create(Path[Bootstrap::SysrootWorkspace::DEFAULT_HOST_WORKDIR])
       build_state = Bootstrap::SysrootBuildState.new(workspace: workspace)
-      plan_path = build_state.plan_path_path
+      plan_path = build_state.plan_path
       write_plan(plan_path)
 
       decision = resume_for(workspace).decide
@@ -83,7 +83,7 @@ describe Bootstrap::SysrootAllResume do
     with_temp_workdir do |_dir|
       workspace = Bootstrap::SysrootWorkspace.create(Path[Bootstrap::SysrootWorkspace::DEFAULT_HOST_WORKDIR])
       build_state = Bootstrap::SysrootBuildState.new(workspace: workspace)
-      plan_path = build_state.plan_path_path
+      plan_path = build_state.plan_path
       plan = write_plan(plan_path)
       state_path = build_state.state_path
       write_state(state_path, workspace, plan_path, plan, [{"phase-a", "step-a"}])
@@ -99,7 +99,7 @@ describe Bootstrap::SysrootAllResume do
     with_temp_workdir do |_dir|
       workspace = Bootstrap::SysrootWorkspace.create(Path[Bootstrap::SysrootWorkspace::DEFAULT_HOST_WORKDIR])
       build_state = Bootstrap::SysrootBuildState.new(workspace: workspace)
-      plan_path = build_state.plan_path_path
+      plan_path = build_state.plan_path
       plan = write_plan(plan_path)
       state_path = build_state.state_path
       write_state(state_path, workspace, plan_path, plan, [{"phase-a", "step-a"}, {"phase-b", "step-b"}])
@@ -113,7 +113,7 @@ describe Bootstrap::SysrootAllResume do
     with_temp_workdir do |_dir|
       workspace = Bootstrap::SysrootWorkspace.create(Path[Bootstrap::SysrootWorkspace::DEFAULT_HOST_WORKDIR])
       build_state = Bootstrap::SysrootBuildState.new(workspace: workspace)
-      plan_path = build_state.plan_path_path
+      plan_path = build_state.plan_path
       plan = write_plan(plan_path)
       state_path = build_state.state_path
       state = write_state(state_path, workspace, plan_path, plan, [{"phase-a", "step-a"}])
@@ -132,7 +132,7 @@ describe Bootstrap::SysrootAllResume do
       workspace = Bootstrap::SysrootWorkspace.create(Path[Bootstrap::SysrootWorkspace::DEFAULT_HOST_WORKDIR])
       build_state = Bootstrap::SysrootBuildState.new(workspace: workspace)
       state_path = build_state.state_path
-      plan_path = build_state.plan_path_path
+      plan_path = build_state.plan_path
       write_state(state_path, workspace, plan_path, Bootstrap::BuildPlan.new([] of Bootstrap::BuildPhase), [] of Tuple(String, String))
       File.delete(plan_path) if File.exists?(plan_path)
 
