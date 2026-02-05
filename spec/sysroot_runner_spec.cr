@@ -71,7 +71,7 @@ describe Bootstrap::SysrootRunner do
     end
   end
 
-  it "loads a plan file and executes only the default phase" do
+  it "loads a plan file and executes all phases by default" do
     phase_a_steps = [Bootstrap::BuildStep.new(name: "file-a", strategy: "autotools", workdir: "/opt", configure_flags: [] of String, patches: [] of String)]
     phase_b_steps = [Bootstrap::BuildStep.new(name: "file-b", strategy: "autotools", workdir: "/var", configure_flags: [] of String, patches: [] of String)]
     plan = Bootstrap::BuildPlan.new([
@@ -101,9 +101,8 @@ describe Bootstrap::SysrootRunner do
       File.write(plan_path, plan.to_json)
 
       Bootstrap::SysrootRunner.run_plan(plan_path.to_s, runner)
-      runner.calls.size.should eq 1
-      runner.calls.first[:workdir].should eq "/opt"
-      runner.calls.first[:name].should eq "file-a"
+      runner.calls.size.should eq 2
+      runner.calls.map(&.[:name]).should eq ["file-a", "file-b"]
     end
   end
 
@@ -133,11 +132,11 @@ describe Bootstrap::SysrootRunner do
     runner.calls.first[:phase].should eq "two"
   end
 
-  it "defaults to the first phase when not running inside the rootfs" do
+  it "defaults to all phases when not running inside the rootfs" do
     steps = [Bootstrap::BuildStep.new(name: "step", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
     plan = Bootstrap::BuildPlan.new([
-      Bootstrap::BuildPhase.new(name: "one", description: "a", namespace: "seed", install_prefix: "/opt/sysroot", steps: steps),
-      Bootstrap::BuildPhase.new(name: "two", description: "b", namespace: "bq2", install_prefix: "/usr", steps: steps),
+      Bootstrap::BuildPhase.new(name: "one", description: "a", namespace: "test", install_prefix: "/opt/sysroot", steps: steps),
+      Bootstrap::BuildPhase.new(name: "two", description: "b", namespace: "test", install_prefix: "/usr", steps: steps),
     ])
 
     previous = ENV["BQ2_ROOTFS_MARKER"]?
@@ -145,8 +144,8 @@ describe Bootstrap::SysrootRunner do
     begin
       runner = RecordingRunner.new
       Bootstrap::SysrootRunner.run_plan(plan, runner)
-      runner.calls.size.should eq 1
-      runner.calls.first[:phase].should eq "one"
+      runner.calls.size.should eq 2
+      runner.calls.map(&.[:phase]).should eq ["one", "two"]
     ensure
       if previous
         ENV["BQ2_ROOTFS_MARKER"] = previous
@@ -156,11 +155,11 @@ describe Bootstrap::SysrootRunner do
     end
   end
 
-  it "defaults to the first rootfs phase when running inside the rootfs" do
+  it "defaults to all rootfs phases when running inside the rootfs" do
     steps = [Bootstrap::BuildStep.new(name: "step", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
     plan = Bootstrap::BuildPlan.new([
-      Bootstrap::BuildPhase.new(name: "one", description: "a", namespace: "seed", install_prefix: "/opt/sysroot", steps: steps),
       Bootstrap::BuildPhase.new(name: "two", description: "b", namespace: "bq2", install_prefix: "/usr", steps: steps),
+      Bootstrap::BuildPhase.new(name: "three", description: "c", namespace: "bq2", install_prefix: "/usr", steps: steps),
     ])
 
     with_tempdir do |dir|
@@ -171,8 +170,8 @@ describe Bootstrap::SysrootRunner do
       begin
         runner = RecordingRunner.new
         Bootstrap::SysrootRunner.run_plan(plan, runner)
-        runner.calls.size.should eq 1
-        runner.calls.first[:phase].should eq "two"
+        runner.calls.size.should eq 2
+        runner.calls.map(&.[:phase]).should eq ["two", "three"]
       ensure
         if previous
           ENV["BQ2_ROOTFS_MARKER"] = previous

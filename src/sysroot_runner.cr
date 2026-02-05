@@ -250,8 +250,19 @@ module Bootstrap
       end
 
       state = SysrootBuildState.load_or_init(workspace)
+      plan = BuildPlan.parse(File.read(state.plan_path))
+      resolved_plan = BuildPlan.new(plan.phases_for_current_namespace(workspace), plan.format_version)
+      resolved_plan = apply_overrides(resolved_plan, state.overrides_path.to_s, true, workspace)
+      next_phase, next_step = next_incomplete_step(resolved_plan, state)
       puts "plan_path=#{state.plan_path}"
       puts "state_path=#{state.state_path}"
+      puts "current_phase=#{state.progress.current_phase}" if state.progress.current_phase
+      if next_phase
+        puts "next_phase=#{next_phase}"
+        puts "next_step=#{next_step}" if next_step
+      else
+        puts "next_phase=complete"
+      end
       if (failure = state.progress.last_failure)
         puts "last_failure=#{failure.phase}/#{failure.step}"
       end
@@ -283,12 +294,7 @@ module Bootstrap
     end
 
     private def self.default_phase(plan : BuildPlan) : String
-      return plan.phases.first.name if plan.phases.size == 1
-      if inside_rootfs?
-        bq2_phase = plan.phases.find { |phase| phase.namespace == "bq2" }
-        return bq2_phase.name if bq2_phase
-      end
-      plan.phases.first.name
+      "all"
     end
 
     private def self.inside_rootfs? : Bool
@@ -338,6 +344,17 @@ module Bootstrap
       end
       raise "No matching packages found in selected phases: #{packages.join(", ")}" if selected.empty?
       selected
+    end
+
+    # Return the next incomplete phase and step for the provided plan/state.
+    private def self.next_incomplete_step(plan : BuildPlan, state : SysrootBuildState) : Tuple(String?, String?)
+      plan.phases.each do |phase|
+        phase.steps.each do |step|
+          next if state.completed?(phase.name, step.name)
+          return {phase.name, step.name}
+        end
+      end
+      {nil, nil}
     end
 
     private def self.prepare_destdirs(phases : Array(BuildPhase))
