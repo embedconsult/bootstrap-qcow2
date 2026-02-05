@@ -198,7 +198,9 @@ describe Bootstrap::SysrootRunner do
       ENV["BQ2_ROOTFS"] = "0"
 
       begin
-        Bootstrap::SysrootRunner.run_phase(phase, runner, report_dir: nil).should be_nil
+        expect_raises(Exception, /Refusing to run/) do
+          Bootstrap::SysrootRunner.run_phase(phase, runner, report_dir: nil)
+        end
       ensure
         if previous
           ENV["BQ2_ROOTFS"] = previous
