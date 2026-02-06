@@ -104,8 +104,6 @@ module Bootstrap
         phases = filter_phases_by_state(phases, state)
       end
 
-      prepare_destdirs(phases)
-
       if dry_run
         print_dry_run(phases)
         return
@@ -138,6 +136,9 @@ module Bootstrap
       end
       Log.info { "Executing phase #{phase.name} (namespace=#{phase.namespace})" }
       Log.info { "**** #{phase.description} ****" }
+      if destdir = phase.destdir
+        prepare_destdir(destdir)
+      end
       run_steps(phase, phase.steps, runner, report_dir: report_dir, state: state, resume: resume, state_path: state_path)
       Log.info { "Completed phase #{phase.name}" }
     end
@@ -397,25 +398,9 @@ module Bootstrap
       {nil, nil}
     end
 
-    private def self.prepare_destdirs(phases : Array(BuildPhase))
-      phases.each do |phase|
-        next unless destdir = phase.destdir
-        prepare_destdir(destdir)
-      end
-    end
-
-    # Creates a minimal directory skeleton for `DESTDIR` installs. The intent is
-    # to keep packages with hard-coded expectations (e.g., `/usr/bin`) from
-    # failing when the destdir tree is initially empty.
+    # Ensure the DESTDIR root exists before running installs that expect it.
     private def self.prepare_destdir(destdir : String)
       FileUtils.mkdir_p(destdir)
-      %w[bin dev etc lib opt proc sys tmp usr var workspace].each do |subdir|
-        FileUtils.mkdir_p(File.join(destdir, subdir))
-      end
-      FileUtils.mkdir_p(File.join(destdir, "usr/bin"))
-      FileUtils.mkdir_p(File.join(destdir, "usr/sbin"))
-      FileUtils.mkdir_p(File.join(destdir, "usr/lib"))
-      FileUtils.mkdir_p(File.join(destdir, "var/lib"))
     end
 
     private def self.print_dry_run(phases : Array(BuildPhase)) : Nil
