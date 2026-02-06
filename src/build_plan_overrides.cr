@@ -195,10 +195,12 @@ module Bootstrap
     # Compute overrides for a single step, returning nil if no changes exist.
     private def self.diff_step(phase_name : String, base_step : BuildStep, target_step : BuildStep) : StepOverride?
       if base_step.sources != target_step.sources
-        raise "Target plan modifies source specs in phase #{phase_name} step #{base_step.name}; overrides cannot represent source changes"
+        detail = diff_source_specs(base_step.sources, target_step.sources)
+        raise "Target plan modifies source specs in phase #{phase_name} step #{base_step.name}: #{detail}; overrides cannot represent source changes"
       end
       if base_step.extract_sources != target_step.extract_sources
-        raise "Target plan modifies extract specs in phase #{phase_name} step #{base_step.name}; overrides cannot represent source changes"
+        detail = diff_extract_specs(base_step.extract_sources, target_step.extract_sources)
+        raise "Target plan modifies extract specs in phase #{phase_name} step #{base_step.name}: #{detail}; overrides cannot represent extract changes"
       end
       if base_step.packages != target_step.packages
         raise "Target plan modifies package specs in phase #{phase_name} step #{base_step.name}; overrides cannot represent package changes"
@@ -247,6 +249,71 @@ module Bootstrap
         return {replace: nil, append: target[base.size..] || [] of String}
       end
       {replace: target, append: [] of String}
+    end
+
+    private def self.diff_source_specs(base_sources : Array(SourceSpec)?,
+                                       target_sources : Array(SourceSpec)?) : String
+      base_list = base_sources || [] of SourceSpec
+      target_list = target_sources || [] of SourceSpec
+      base_names = base_list.map(&.name)
+      target_names = target_list.map(&.name)
+      added = target_names - base_names
+      removed = base_names - target_names
+      changed = [] of String
+      base_map = base_list.to_h { |spec| {spec.name, spec} }
+      target_map = target_list.to_h { |spec| {spec.name, spec} }
+      base_names.each do |name|
+        next unless target_map.has_key?(name)
+        base = base_map[name]
+        target = target_map[name]
+        next if base == target
+        fields = [] of String
+        fields << "version" if base.version != target.version
+        fields << "url" if base.url != target.url
+        fields << "filename" if base.filename != target.filename
+        fields << "checksum_url" if base.checksum_url != target.checksum_url
+        fields << "sha256" if base.sha256 != target.sha256
+        fields << "build_directory" if base.build_directory != target.build_directory
+        suffix = fields.empty? ? "" : "(#{fields.join(",")})"
+        changed << "#{name}#{suffix}"
+      end
+      details = [] of String
+      details << "added=#{added.join(",")}" unless added.empty?
+      details << "removed=#{removed.join(",")}" unless removed.empty?
+      details << "changed=#{changed.join(",")}" unless changed.empty?
+      return "no details available" if details.empty?
+      details.join("; ")
+    end
+
+    private def self.diff_extract_specs(base_specs : Array(ExtractSpec)?,
+                                        target_specs : Array(ExtractSpec)?) : String
+      base_list = base_specs || [] of ExtractSpec
+      target_list = target_specs || [] of ExtractSpec
+      base_names = base_list.map(&.name)
+      target_names = target_list.map(&.name)
+      added = target_names - base_names
+      removed = base_names - target_names
+      changed = [] of String
+      base_map = base_list.to_h { |spec| {spec.name, spec} }
+      target_map = target_list.to_h { |spec| {spec.name, spec} }
+      base_names.each do |name|
+        next unless target_map.has_key?(name)
+        base = base_map[name]
+        target = target_map[name]
+        next if base == target
+        fields = [] of String
+        fields << "version" if base.version != target.version
+        fields << "filename" if base.filename != target.filename
+        fields << "build_directory" if base.build_directory != target.build_directory
+        suffix = fields.empty? ? "" : "(#{fields.join(",")})"
+        changed << "#{name}#{suffix}"
+      end
+      details = [] of String
+      details << "added=#{added.join(",")}" unless added.empty?
+      details << "removed=#{removed.join(",")}" unless removed.empty?
+      details << "changed=#{changed.join(",")}" unless changed.empty?
+      return "no details available" if details.empty?
+      details.join("; ")
     end
 
     # Compute env additions/changes, raising if keys are removed.
