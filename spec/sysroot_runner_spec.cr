@@ -237,11 +237,31 @@ describe Bootstrap::SysrootRunner do
           namespace: "host",
           install_prefix: "/usr",
           destdir: destdir.to_s,
-          steps: [] of Bootstrap::BuildStep,
+          steps: [
+            Bootstrap::BuildStep.new(
+              name: "usr-bin-placeholder",
+              strategy: "write-file",
+              workdir: nil,
+              install_prefix: "/usr/bin/.keep",
+              content: "placeholder\n",
+              configure_flags: [] of String,
+              patches: [] of String,
+            ),
+            Bootstrap::BuildStep.new(
+              name: "var-lib-placeholder",
+              strategy: "write-file",
+              workdir: nil,
+              install_prefix: "/var/lib/.keep",
+              content: "placeholder\n",
+              configure_flags: [] of String,
+              patches: [] of String,
+            ),
+          ],
         ),
       ])
 
-      runner = RecordingRunner.new
+      workspace = Bootstrap::SysrootWorkspace.create(host_workdir: destdir / "work")
+      runner = Bootstrap::StepRunner.new(workspace: workspace)
       Bootstrap::SysrootRunner.run_plan(plan, runner, phase: "all")
 
       File.directory?(destdir).should be_true

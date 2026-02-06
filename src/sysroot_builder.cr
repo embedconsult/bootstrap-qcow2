@@ -5,6 +5,7 @@ require "path"
 require "process"
 require "uri"
 require "./build_plan"
+require "./build_plan_overrides"
 require "./cli"
 require "./process_runner"
 require "./alpine_setup"
@@ -1419,6 +1420,7 @@ module Bootstrap
     def self.help_entries : Array(Tuple(String, String))
       [
         {"sysroot-builder", "Create workspace and build plan"},
+        {"sysroot-builder-overrides", "Write overrides that match the current plan changes"},
       ]
     end
 
@@ -1427,6 +1429,8 @@ module Bootstrap
       case command_name
       when "sysroot-builder"
         run_builder(args)
+      when "sysroot-builder-overrides"
+        run_builder_overrides(args)
       else
         raise "Unknown sysroot builder command #{command_name}"
       end
@@ -1450,6 +1454,58 @@ module Bootstrap
       plan_path = builder.write_plan
       puts "Prepared sysroot workspace at #{builder.workspace.host_workdir}"
       puts "Wrote build plan at #{plan_path}"
+      0
+    end
+
+    # Emit a build plan overrides file capturing differences between the
+    # on-disk plan and the current in-code plan.
+    private def self.run_builder_overrides(args : Array(String)) : Int32
+      architecture = DEFAULT_ARCH
+      seed = DEFAULT_ROOTFS_SEED
+      host_workdir : Path? = nil
+      parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-builder-overrides [options]") do |p|
+        p.on("-a ARCH", "--arch=ARCH", "Target architecture (default: #{architecture})") { |val| architecture = val }
+        p.on("-s SEED", "--seed=SEED", "Seed to use for initial rootfs (default: #{seed})") { |val| seed = val }
+        p.on("--workdir=PATH", "Starting path for looking for build plan (default: #{SysrootWorkspace::DEFAULT_HOST_WORKDIR})") { |path| host_workdir = Path[path] }
+      end
+      return CLI.print_help(parser) if help
+
+      begin
+        workspace = SysrootWorkspace.new(host_workdir: host_workdir)
+      rescue ex
+        STDERR.puts "No valid workspace found, build out the workspace first with `bq2 sysroot-builder`: #{ex.message}"
+        return -1
+      end
+
+      plan_path = workspace.log_path / SysrootBuildState::PLAN_FILE
+      unless File.exists?(plan_path)
+        STDERR.puts "No build plan found at #{plan_path}, run `bq2 sysroot-builder` first"
+        return -1
+      end
+
+      build_state_path = workspace.log_path / SysrootBuildState::STATE_FILE
+      build_state = if File.exists?(build_state_path)
+                      SysrootBuildState.load(workspace, build_state_path)
+                    else
+                      SysrootBuildState.new(workspace: workspace)
+                    end
+
+      base_plan = BuildPlan.parse(File.read(plan_path))
+      builder = SysrootBuilder.new(workspace: workspace, architecture: architecture, seed: seed)
+      target_plan = builder.build_plan
+      overrides = BuildPlanOverrides.from_diff(base_plan, target_plan)
+
+      overrides_path = workspace.log_path / SysrootBuildState::OVERRIDES_FILE
+      FileUtils.mkdir_p(overrides_path.parent)
+      File.write(overrides_path, overrides.to_pretty_json)
+
+      build_state.plan_digest = SysrootBuildState.digest_for?(plan_path)
+      build_state.overrides_digest = SysrootBuildState.digest_for?(overrides_path)
+      build_state.touch
+      build_state.save(build_state_path)
+
+      puts "Wrote build plan overrides to #{overrides_path}"
+      puts "Overrides phases=#{overrides.phases.size}"
       0
     end
   end
