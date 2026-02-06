@@ -57,6 +57,7 @@ module Bootstrap
                       phase : String? = nil,
                       packages : Array(String) = [] of String,
                       report_dir : String? = nil,
+                      report : Bool = true,
                       dry_run : Bool = false,
                       dry_run_io : IO? = nil,
                       resume : Bool = true,
@@ -71,6 +72,7 @@ module Bootstrap
         phase: phase,
         packages: packages,
         report_dir: report_dir,
+        report: report,
         dry_run: dry_run,
         dry_run_io: dry_run_io,
         resume: resume,
@@ -86,6 +88,7 @@ module Bootstrap
                       phase : String? = nil,
                       packages : Array(String) = [] of String,
                       report_dir : String? = nil,
+                      report : Bool = true,
                       dry_run : Bool = false,
                       dry_run_io : IO? = nil,
                       resume : Bool = true,
@@ -98,6 +101,7 @@ module Bootstrap
         phase: phase,
         packages: packages,
         report_dir: report_dir,
+        report: report,
         dry_run: dry_run,
         dry_run_io: dry_run_io,
         resume: resume,
@@ -113,6 +117,7 @@ module Bootstrap
                       phase : String? = nil,
                       packages : Array(String) = [] of String,
                       report_dir : String? = nil,
+                      report : Bool = true,
                       dry_run : Bool = false,
                       dry_run_io : IO? = nil,
                       resume : Bool = true,
@@ -146,7 +151,7 @@ module Bootstrap
           state.mark_current_phase(phase_entry.name)
         end
         enter_phase_namespace(phase_entry, workspace) if workspace && namespace_switch_required?(phase_entry, workspace)
-        run_phase(phase_entry, runner, report_dir: report_dir, state: state, resume: resume)
+        run_phase(phase_entry, runner, report_dir: report_dir, report: report, state: state, resume: resume)
         if state
           state.mark_current_phase(phases[idx + 1]?.try(&.name))
         end
@@ -157,6 +162,7 @@ module Bootstrap
     def self.run_phase(phase : BuildPhase,
                        runner,
                        report_dir : String?,
+                       report : Bool = true,
                        allow_outside_rootfs : Bool = false,
                        state : SysrootBuildState? = nil,
                        resume : Bool = true) : Nil
@@ -168,7 +174,7 @@ module Bootstrap
       if destdir = phase.destdir
         prepare_destdir(destdir)
       end
-      run_steps(phase, phase.steps, runner, report_dir: report_dir, state: state, resume: resume)
+      run_steps(phase, phase.steps, runner, report_dir: report_dir, report: report, state: state, resume: resume)
       Log.info { "Completed phase #{phase.name}" }
     end
 
@@ -177,9 +183,11 @@ module Bootstrap
                        steps : Array(BuildStep),
                        runner,
                        report_dir : String?,
+                       report : Bool = true,
                        state : SysrootBuildState? = nil,
                        resume : Bool = true) : Nil
       Log.info { "Executing #{steps.size} build steps" }
+      effective_report_dir = report ? resolve_report_dir(report_dir, state) : nil
       steps.each do |step|
         if resume && state && state.completed?(phase.name, step.name)
           Log.info { "Skipping previously completed #{phase.name}/#{step.name}" }
@@ -192,7 +200,7 @@ module Bootstrap
             state.mark_success(phase.name, step.name)
           end
         rescue ex
-          report_path = report_dir ? write_failure_report(report_dir, phase, step, ex) : nil
+          report_path = effective_report_dir ? write_failure_report(effective_report_dir, phase, step, ex) : nil
           if state
             state.mark_failure(phase.name, step.name, ex.message, report_path)
           end
@@ -237,7 +245,6 @@ module Bootstrap
         .load_or_init(invalidate_on_overrides: invalidate_overrides)
       plan_path = build_state.plan_path.to_s
       overrides_path = build_state.overrides_path.to_s
-      report_dir = report ? build_state.report_dir.to_s : nil
       Log.info { "Running plan #{plan_path} with overrides #{overrides_path} (namespace=#{workspace.namespace})" }
       if resume && build_state.overrides_changed? && !invalidate_overrides
         Log.warn { "Overrides changed; completed steps are preserved. Re-run affected steps, pass --invalidate-overrides, or clear the state." }
@@ -249,7 +256,8 @@ module Bootstrap
         step_runner,
         phase: start_phase == DEFAULT_PHASE ? nil : start_phase,
         packages: packages,
-        report_dir: report_dir,
+        report_dir: nil,
+        report: report,
         dry_run: dry_run,
         resume: resume,
         overrides_path: overrides_path,
@@ -288,6 +296,7 @@ module Bootstrap
       next_phase, next_step = state.next_incomplete_step(resolved_plan)
       puts "plan_path=#{state.plan_path}"
       puts "state_path=#{state.state_path}"
+      puts "report_dir=#{state.report_dir}"
       puts "current_phase=#{state.progress.current_phase}" if state.progress.current_phase
       if next_phase
         puts "next_phase=#{next_phase}"
@@ -297,6 +306,9 @@ module Bootstrap
       end
       if (failure = state.progress.last_failure)
         puts "last_failure=#{failure.phase}/#{failure.step}"
+        if (report_path = failure.report_path)
+          puts "last_failure_report=#{report_path}"
+        end
       end
       0
     end
@@ -474,6 +486,13 @@ module Bootstrap
 
     private def self.slugify(value : String) : String
       value.gsub(/[^A-Za-z0-9]+/, "_").gsub(/^_+|_+$/, "").downcase
+    end
+
+    # Resolve the report directory for the active namespace or use a provided override.
+    private def self.resolve_report_dir(report_dir : String?, state : SysrootBuildState?) : String?
+      return report_dir if report_dir
+      return nil unless state
+      state.report_dir.to_s
     end
   end
 end
