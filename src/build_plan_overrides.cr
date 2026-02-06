@@ -92,6 +92,8 @@ module Bootstrap
       install_prefix = override.install_prefix || step.install_prefix
       destdir = override.destdir || step.destdir
       env = merge_env(step.env, override.env)
+      sources = override.sources || step.sources
+      extract_sources = override.extract_sources || step.extract_sources
       configure_flags = (override.configure_flags || step.configure_flags) + override.configure_flags_add
       patches = (override.patches || step.patches) + override.patches_add
       clean_build = override.clean_build.nil? ? step.clean_build : override.clean_build.not_nil!
@@ -106,8 +108,8 @@ module Bootstrap
         env: env,
         build_dir: build_dir,
         clean_build: clean_build,
-        sources: step.sources,
-        extract_sources: step.extract_sources,
+        sources: sources,
+        extract_sources: extract_sources,
         packages: step.packages,
         content: step.content,
       )
@@ -194,14 +196,8 @@ module Bootstrap
 
     # Compute overrides for a single step, returning nil if no changes exist.
     private def self.diff_step(phase_name : String, base_step : BuildStep, target_step : BuildStep) : StepOverride?
-      if base_step.sources != target_step.sources
-        detail = diff_source_specs(base_step.sources, target_step.sources)
-        raise "Target plan modifies source specs in phase #{phase_name} step #{base_step.name}: #{detail}; overrides cannot represent source changes"
-      end
-      if base_step.extract_sources != target_step.extract_sources
-        detail = diff_extract_specs(base_step.extract_sources, target_step.extract_sources)
-        raise "Target plan modifies extract specs in phase #{phase_name} step #{base_step.name}: #{detail}; overrides cannot represent extract changes"
-      end
+      sources = base_step.sources == target_step.sources ? nil : target_step.sources
+      extract_sources = base_step.extract_sources == target_step.extract_sources ? nil : target_step.extract_sources
       if base_step.packages != target_step.packages
         raise "Target plan modifies package specs in phase #{phase_name} step #{base_step.name}; overrides cannot represent package changes"
       end
@@ -222,6 +218,8 @@ module Bootstrap
                     destdir.nil? &&
                     env.nil? &&
                     clean_build.nil? &&
+                    sources.nil? &&
+                    extract_sources.nil? &&
                     configure_flags_override[:replace].nil? &&
                     configure_flags_override[:append].empty? &&
                     patches_override[:replace].nil? &&
@@ -234,6 +232,8 @@ module Bootstrap
         destdir: destdir,
         env: env,
         clean_build: clean_build,
+        sources: sources,
+        extract_sources: extract_sources,
         configure_flags: configure_flags_override[:replace],
         configure_flags_add: configure_flags_override[:append],
         patches: patches_override[:replace],
@@ -249,71 +249,6 @@ module Bootstrap
         return {replace: nil, append: target[base.size..] || [] of String}
       end
       {replace: target, append: [] of String}
-    end
-
-    private def self.diff_source_specs(base_sources : Array(SourceSpec)?,
-                                       target_sources : Array(SourceSpec)?) : String
-      base_list = base_sources || [] of SourceSpec
-      target_list = target_sources || [] of SourceSpec
-      base_names = base_list.map(&.name)
-      target_names = target_list.map(&.name)
-      added = target_names - base_names
-      removed = base_names - target_names
-      changed = [] of String
-      base_map = base_list.to_h { |spec| {spec.name, spec} }
-      target_map = target_list.to_h { |spec| {spec.name, spec} }
-      base_names.each do |name|
-        next unless target_map.has_key?(name)
-        base = base_map[name]
-        target = target_map[name]
-        next if base == target
-        fields = [] of String
-        fields << "version" if base.version != target.version
-        fields << "url" if base.url != target.url
-        fields << "filename" if base.filename != target.filename
-        fields << "checksum_url" if base.checksum_url != target.checksum_url
-        fields << "sha256" if base.sha256 != target.sha256
-        fields << "build_directory" if base.build_directory != target.build_directory
-        suffix = fields.empty? ? "" : "(#{fields.join(",")})"
-        changed << "#{name}#{suffix}"
-      end
-      details = [] of String
-      details << "added=#{added.join(",")}" unless added.empty?
-      details << "removed=#{removed.join(",")}" unless removed.empty?
-      details << "changed=#{changed.join(",")}" unless changed.empty?
-      return "no details available" if details.empty?
-      details.join("; ")
-    end
-
-    private def self.diff_extract_specs(base_specs : Array(ExtractSpec)?,
-                                        target_specs : Array(ExtractSpec)?) : String
-      base_list = base_specs || [] of ExtractSpec
-      target_list = target_specs || [] of ExtractSpec
-      base_names = base_list.map(&.name)
-      target_names = target_list.map(&.name)
-      added = target_names - base_names
-      removed = base_names - target_names
-      changed = [] of String
-      base_map = base_list.to_h { |spec| {spec.name, spec} }
-      target_map = target_list.to_h { |spec| {spec.name, spec} }
-      base_names.each do |name|
-        next unless target_map.has_key?(name)
-        base = base_map[name]
-        target = target_map[name]
-        next if base == target
-        fields = [] of String
-        fields << "version" if base.version != target.version
-        fields << "filename" if base.filename != target.filename
-        fields << "build_directory" if base.build_directory != target.build_directory
-        suffix = fields.empty? ? "" : "(#{fields.join(",")})"
-        changed << "#{name}#{suffix}"
-      end
-      details = [] of String
-      details << "added=#{added.join(",")}" unless added.empty?
-      details << "removed=#{removed.join(",")}" unless removed.empty?
-      details << "changed=#{changed.join(",")}" unless changed.empty?
-      return "no details available" if details.empty?
-      details.join("; ")
     end
 
     # Compute env additions/changes, raising if keys are removed.
@@ -362,6 +297,8 @@ module Bootstrap
     getter destdir : String?
     getter env : Hash(String, String)?
     getter clean_build : Bool?
+    getter sources : Array(SourceSpec)?
+    getter extract_sources : Array(ExtractSpec)?
     # Replace configure flags entirely for a step.
     getter configure_flags : Array(String)?
     # Replace patches entirely for a step.
@@ -377,6 +314,8 @@ module Bootstrap
                    @destdir : String? = nil,
                    @env : Hash(String, String)? = nil,
                    @clean_build : Bool? = nil,
+                   @sources : Array(SourceSpec)? = nil,
+                   @extract_sources : Array(ExtractSpec)? = nil,
                    @configure_flags : Array(String)? = nil,
                    @patches : Array(String)? = nil,
                    @configure_flags_add : Array(String) = [] of String,
