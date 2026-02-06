@@ -60,8 +60,14 @@ module Bootstrap
     @extra_binds : Array(Tuple(Path, Path))
 
     def initialize(@host_workdir : Path? = nil,
-                   @extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path))
-      if @host_workdir.nil?
+                   @extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path),
+                   namespace_override : Namespace? = nil)
+      if namespace_override
+        @namespace = namespace_override
+        if @host_workdir.nil? && @namespace == Namespace::Host
+          @host_workdir = Path["#{DEFAULT_HOST_WORKDIR}"]
+        end
+      elsif @host_workdir.nil?
         found_marker = PROBE_PATHS_FOR_MARKER.find { |s| File.exists?(s[:path]) }
         raise "Missing BQ2 rootfs marker at one of these paths: #{PROBE_PATHS_FOR_MARKER}" if found_marker.nil?
         marker_match = found_marker.not_nil!

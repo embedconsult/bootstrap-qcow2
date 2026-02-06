@@ -1492,7 +1492,13 @@ module Bootstrap
                     end
 
       base_plan = BuildPlan.parse(File.read(plan_path))
-      builder = SysrootBuilder.new(workspace: workspace, architecture: architecture, seed: seed)
+      plan_namespace = plan_namespace_for_overrides(base_plan, workspace)
+      builder_workspace = workspace
+      if plan_namespace != workspace.namespace
+        host_workdir = workspace.host_workdir || raise "Missing host workdir for overrides workspace"
+        builder_workspace = SysrootWorkspace.new(host_workdir: host_workdir, namespace_override: plan_namespace)
+      end
+      builder = SysrootBuilder.new(workspace: builder_workspace, architecture: architecture, seed: seed)
       target_plan = builder.build_plan
       overrides = BuildPlanOverrides.from_diff(base_plan, target_plan)
 
@@ -1508,6 +1514,27 @@ module Bootstrap
       puts "Wrote build plan overrides to #{overrides_path}"
       puts "Overrides phases=#{overrides.phases.size}"
       0
+    end
+
+    private def self.plan_namespace_for_overrides(plan : BuildPlan,
+                                                  workspace : SysrootWorkspace) : SysrootWorkspace::Namespace
+      host_workdir = workspace.host_workdir
+      host_prefix = host_workdir ? host_workdir.to_s : nil
+      seed_prefix = "/#{SysrootWorkspace::BQ2_DIR_NAME}/"
+      bq2_prefix = "/#{SysrootWorkspace::WORKSPACE_DIR_NAME}/"
+      paths = [] of String
+      plan.phases.each do |phase|
+        phase.steps.each do |step|
+          paths << step.workdir if step.workdir
+          paths.concat(step.patches)
+        end
+      end
+      if host_prefix && paths.any? { |path| path.starts_with?(host_prefix) }
+        return SysrootWorkspace::Namespace::Host
+      end
+      return SysrootWorkspace::Namespace::Seed if paths.any? { |path| path.starts_with?(seed_prefix) }
+      return SysrootWorkspace::Namespace::BQ2 if paths.any? { |path| path.starts_with?(bq2_prefix) }
+      workspace.namespace
     end
   end
 end
