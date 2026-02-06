@@ -29,7 +29,7 @@ describe Bootstrap::SysrootBuildState do
     # tempdir cleanup handled by helper
   end
 
-  it "clears completed steps when overrides content changes" do
+  it "keeps completed steps when overrides content changes" do
     with_tempdir do |dir|
       workspace = Bootstrap::SysrootWorkspace.new(host_workdir: dir)
       plan_path = workspace.log_path / Bootstrap::SysrootBuildState::PLAN_FILE
@@ -47,9 +47,9 @@ describe Bootstrap::SysrootBuildState do
       File.write(overrides_path, %({"phases":{"phase-a":{"steps":{}}}}))
 
       reloaded = Bootstrap::SysrootBuildState.load_or_init(workspace, state_path, overrides_path: overrides_path)
-      reloaded.completed?("phase-a", "musl").should be_false
-      reloaded.invalidated_at.should_not be_nil
-      reloaded.invalidation_reason.should_not be_nil
+      reloaded.completed?("phase-a", "musl").should be_true
+      reloaded.invalidated_at.should be_nil
+      reloaded.invalidation_reason.should be_nil
     end
   end
 end

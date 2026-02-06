@@ -87,13 +87,7 @@ module Bootstrap
       resolved_overrides_path = overrides_path || state.overrides_path
       overrides_digest = resolved_overrides_path ? digest_for?(resolved_overrides_path) : nil
 
-      changed = false
-      if state.plan_digest && plan_digest && state.plan_digest != plan_digest
-        changed = true
-      end
-      if state.overrides_digest && overrides_digest && state.overrides_digest != overrides_digest
-        changed = true
-      end
+      changed = state.plan_digest && plan_digest && state.plan_digest != plan_digest
 
       state.plan_digest = plan_digest
       state.overrides_digest = overrides_digest
@@ -104,7 +98,7 @@ module Bootstrap
         state.progress.last_success = nil
         state.progress.last_failure = nil
         state.invalidated_at = Time.utc.to_s
-        state.invalidation_reason = "Build plan/overrides changed"
+        state.invalidation_reason = "Build plan changed"
       end
 
       state.save(state_path)
