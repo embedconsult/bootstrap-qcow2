@@ -271,7 +271,6 @@ module Bootstrap
           strategy: "cmake-project",
           configure_flags: llvm_configure_flags(sysroot_triple),
           patches: [
-            "#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/smallvector-include-cstdint.patch",
             "#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/cmake-guard-cxx-compiler-id.patch",
             "#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/disable-python-required.patch",
             "#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/flow-sensitive-html-logger-prebuilt.patch",
