@@ -99,4 +99,35 @@ describe Bootstrap::PatchApplier do
       File.read(dir.join("hello.txt")).should eq("line0\nline1\nline2-shifted\n")
     end
   end
+
+  it "handles multi-file patches without diff --git headers" do
+    with_tempdir do |dir|
+      File.write(dir.join("first.txt"), "alpha\nbeta\n")
+      File.write(dir.join("second.txt"), "one\ntwo\n")
+      patch_text = [
+        "--- a/first.txt",
+        "+++ b/first.txt",
+        "@@ -1,2 +1,2 @@",
+        " alpha",
+        "-beta",
+        "+beta-updated",
+        "--- a/second.txt",
+        "+++ b/second.txt",
+        "@@ -1,2 +1,2 @@",
+        " one",
+        "-two",
+        "+two-updated",
+        "",
+      ].join("\n")
+      patch_path = dir.join("change.patch")
+      File.write(patch_path, patch_text)
+
+      applier = Bootstrap::PatchApplier.new(dir)
+      result = applier.apply(patch_path.to_s)
+      result.applied_files.should contain("first.txt")
+      result.applied_files.should contain("second.txt")
+      File.read(dir.join("first.txt")).should eq("alpha\nbeta-updated\n")
+      File.read(dir.join("second.txt")).should eq("one\ntwo-updated\n")
+    end
+  end
 end

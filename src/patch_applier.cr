@@ -173,6 +173,7 @@ module Bootstrap
       while index < lines.size
         line = lines[index]
         break if line.starts_with?("diff --git ") || line.starts_with?("@@ ")
+        break if file_header_line?(line)
         if line.starts_with?("\\")
           index += 1
           next
@@ -187,6 +188,13 @@ module Bootstrap
       end
 
       {Hunk.new(old_start, old_count, new_start, new_count, hunk_lines), index}
+    end
+
+    private def file_header_line?(line : String) : Bool
+      return false unless line.starts_with?("--- ") || line.starts_with?("+++ ")
+      token = line[4..]?.to_s
+      path = token.split(/\s+/).first? || ""
+      path.starts_with?("a/") || path.starts_with?("b/") || path == "/dev/null"
     end
 
     private def parse_file_patch(lines : Array(String),
