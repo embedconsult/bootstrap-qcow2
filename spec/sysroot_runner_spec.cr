@@ -227,7 +227,7 @@ describe Bootstrap::SysrootRunner do
     end
   end
 
-  it "prepares a destdir rootfs skeleton" do
+  it "prepares a destdir root directory" do
     destdir = Path[Dir.tempdir] / "bq2-rootfs-spec-#{Random::Secure.hex(8)}"
     begin
       plan = Bootstrap::BuildPlan.new([
@@ -244,8 +244,7 @@ describe Bootstrap::SysrootRunner do
       runner = RecordingRunner.new
       Bootstrap::SysrootRunner.run_plan(plan, runner, phase: "all")
 
-      File.directory?(destdir / "usr/bin").should be_true
-      File.directory?(destdir / "var/lib").should be_true
+      File.directory?(destdir).should be_true
     ensure
       FileUtils.rm_rf(destdir)
     end

@@ -136,6 +136,9 @@ module Bootstrap
       end
       Log.info { "Executing phase #{phase.name} (namespace=#{phase.namespace})" }
       Log.info { "**** #{phase.description} ****" }
+      if destdir = phase.destdir
+        prepare_destdir(destdir)
+      end
       run_steps(phase, phase.steps, runner, report_dir: report_dir, state: state, resume: resume, state_path: state_path)
       Log.info { "Completed phase #{phase.name}" }
     end
@@ -393,6 +396,11 @@ module Bootstrap
         end
       end
       {nil, nil}
+    end
+
+    # Ensure the DESTDIR root exists before running installs that expect it.
+    private def self.prepare_destdir(destdir : String)
+      FileUtils.mkdir_p(destdir)
     end
 
     private def self.print_dry_run(phases : Array(BuildPhase)) : Nil
