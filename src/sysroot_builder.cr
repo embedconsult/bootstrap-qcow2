@@ -714,6 +714,7 @@ module Bootstrap
               "CXX"               => "#{sysroot_prefix}/bin/clang++ --target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -stdlib=libc++",
               "LDFLAGS"           => "-L#{sysroot_prefix}/lib/#{sysroot_triple} -L#{sysroot_prefix}/lib",
               "LIBRARY_PATH"      => "#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
+              "LD_LIBRARY_PATH"   => "#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
             },
             "bootstrap-qcow2" => {
               "CRYSTAL"         => "/usr/bin/crystal",
