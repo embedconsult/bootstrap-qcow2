@@ -116,39 +116,26 @@ module Bootstrap
 
       while index < lines.size
         line = lines[index]
-        unless line.starts_with?("diff --git ")
+        if line.starts_with?("diff --git ")
+          old_path, new_path = parse_diff_paths(line)
+          file_patch = FilePatch.new(old_path, new_path, [] of Hunk)
           index += 1
+          index = parse_file_patch(lines, index, file_patch, stop_on_plain_header: false)
+          file_patches << file_patch
           next
         end
 
-        old_path, new_path = parse_diff_paths(line)
-        file_patch = FilePatch.new(old_path, new_path, [] of Hunk)
-        index += 1
-
-        while index < lines.size
-          header = lines[index]
-          break if header.starts_with?("diff --git ")
-
-          if header.starts_with?("--- ")
-            file_patch.old_path = extract_path(header, "--- ")
-            index += 1
-            if index < lines.size && lines[index].starts_with?("+++ ")
-              file_patch.new_path = extract_path(lines[index], "+++ ")
-              index += 1
-            end
-            next
-          end
-
-          if header.starts_with?("@@ ")
-            hunk, index = parse_hunk(lines, index)
-            file_patch.hunks << hunk
-            next
-          end
-
-          index += 1
+        if plain_header?(lines, index)
+          old_path = extract_path(line, "--- ")
+          new_path = extract_path(lines[index + 1], "+++ ")
+          file_patch = FilePatch.new(old_path, new_path, [] of Hunk)
+          index += 2
+          index = parse_file_patch(lines, index, file_patch, stop_on_plain_header: true)
+          file_patches << file_patch
+          next
         end
 
-        file_patches << file_patch
+        index += 1
       end
 
       file_patches
@@ -200,6 +187,44 @@ module Bootstrap
       end
 
       {Hunk.new(old_start, old_count, new_start, new_count, hunk_lines), index}
+    end
+
+    private def parse_file_patch(lines : Array(String),
+                                 start_index : Int32,
+                                 file_patch : FilePatch,
+                                 stop_on_plain_header : Bool) : Int32
+      index = start_index
+
+      while index < lines.size
+        header = lines[index]
+        break if header.starts_with?("diff --git ")
+        break if stop_on_plain_header && plain_header?(lines, index)
+
+        if header.starts_with?("--- ")
+          file_patch.old_path = extract_path(header, "--- ")
+          index += 1
+          if index < lines.size && lines[index].starts_with?("+++ ")
+            file_patch.new_path = extract_path(lines[index], "+++ ")
+            index += 1
+          end
+          next
+        end
+
+        if header.starts_with?("@@ ")
+          hunk, index = parse_hunk(lines, index)
+          file_patch.hunks << hunk
+          next
+        end
+
+        index += 1
+      end
+
+      index
+    end
+
+    private def plain_header?(lines : Array(String), index : Int32) : Bool
+      return false unless index + 1 < lines.size
+      lines[index].starts_with?("--- ") && lines[index + 1].starts_with?("+++ ")
     end
 
     # Apply a file patch, returning whether it was applied or skipped.

@@ -53,4 +53,27 @@ describe Bootstrap::PatchApplier do
       File.read(dir.join("new.txt")).should eq("hello\nworld")
     end
   end
+
+  it "applies patches without diff --git headers" do
+    with_tempdir do |dir|
+      File.write(dir.join("hello.txt"), "line1\nline2\n")
+      patch_text = [
+        "--- a/hello.txt",
+        "+++ b/hello.txt",
+        "@@ -1,2 +1,2 @@",
+        " line1",
+        "-line2",
+        "+line2-updated",
+        "",
+      ].join("\n")
+      patch_path = dir.join("change.patch")
+      File.write(patch_path, patch_text)
+
+      applier = Bootstrap::PatchApplier.new(dir)
+      result = applier.apply(patch_path.to_s)
+      result.applied_files.should eq(["hello.txt"])
+      result.skipped_files.should be_empty
+      File.read(dir.join("hello.txt")).should eq("line1\nline2-updated\n")
+    end
+  end
 end
