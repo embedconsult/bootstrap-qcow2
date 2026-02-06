@@ -58,6 +58,7 @@ module Bootstrap
                       packages : Array(String) = [] of String,
                       report_dir : String? = nil,
                       dry_run : Bool = false,
+                      dry_run_io : IO? = nil,
                       resume : Bool = true,
                       state : SysrootBuildState? = nil,
                       overrides_path : String? = nil,
@@ -71,6 +72,7 @@ module Bootstrap
         packages: packages,
         report_dir: report_dir,
         dry_run: dry_run,
+        dry_run_io: dry_run_io,
         resume: resume,
         state: state,
         overrides_path: overrides_path,
@@ -85,6 +87,7 @@ module Bootstrap
                       packages : Array(String) = [] of String,
                       report_dir : String? = nil,
                       dry_run : Bool = false,
+                      dry_run_io : IO? = nil,
                       resume : Bool = true,
                       overrides_path : String? = nil,
                       use_default_overrides : Bool = true,
@@ -96,6 +99,7 @@ module Bootstrap
         packages: packages,
         report_dir: report_dir,
         dry_run: dry_run,
+        dry_run_io: dry_run_io,
         resume: resume,
         state: state,
         overrides_path: overrides_path,
@@ -110,6 +114,7 @@ module Bootstrap
                       packages : Array(String) = [] of String,
                       report_dir : String? = nil,
                       dry_run : Bool = false,
+                      dry_run_io : IO? = nil,
                       resume : Bool = true,
                       state : SysrootBuildState? = nil,
                       overrides_path : String? = nil,
@@ -132,7 +137,7 @@ module Bootstrap
       end
 
       if dry_run
-        print_dry_run(phases)
+        print_dry_run(phases, dry_run_io || STDOUT)
         return
       end
 
@@ -401,14 +406,14 @@ module Bootstrap
       FileUtils.mkdir_p(destdir)
     end
 
-    private def self.print_dry_run(phases : Array(BuildPhase)) : Nil
+    private def self.print_dry_run(phases : Array(BuildPhase), io : IO) : Nil
       phases.each do |phase|
         phase.steps.each do |step|
           payload = {
             "phase" => phase,
             "step"  => step,
           }
-          puts payload.to_pretty_json
+          io.puts payload.to_pretty_json
         end
       end
     end

@@ -363,7 +363,8 @@ describe Bootstrap::SysrootRunner do
     ])
 
     runner = RecordingRunner.new
-    Bootstrap::SysrootRunner.run_plan(plan, runner, dry_run: true, report_dir: nil)
+    output = IO::Memory.new
+    Bootstrap::SysrootRunner.run_plan(plan, runner, dry_run: true, dry_run_io: output, report_dir: nil)
     runner.calls.should be_empty
   end
 
