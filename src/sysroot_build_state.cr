@@ -27,7 +27,7 @@ module Bootstrap
     getter format_version : Int32 = FORMAT_VERSION
 
     @[JSON::Field(ignore: true)]
-    @workspace : SysrootWorkspace = SysrootWorkspace.new(host_workdir: Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR])
+    @workspace : SysrootWorkspace = SysrootWorkspace.new
 
     @[JSON::Field(ignore: true)]
     @plan : BuildPlan? = nil
