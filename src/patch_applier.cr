@@ -268,6 +268,7 @@ module Bootstrap
         start = direction == Direction::Forward ? hunk.old_start : hunk.new_start
         index = start - 1 + offset
         index = 0 if index < 0
+        index = locate_hunk_index(updated, file_patch, hunk, direction, index)
         hunk.lines.each do |hunk_line|
           case hunk_line.kind
           when ' '
@@ -299,6 +300,44 @@ module Bootstrap
       end
 
       updated
+    end
+
+    # Locate the starting index for *hunk* or raise when no match exists.
+    private def locate_hunk_index(lines : Array(String),
+                                  file_patch : FilePatch,
+                                  hunk : Hunk,
+                                  direction : Direction,
+                                  preferred_index : Int32) : Int32
+      return preferred_index if hunk_applies_at?(lines, hunk, direction, preferred_index)
+      (0..lines.size).each do |index|
+        return index if hunk_applies_at?(lines, hunk, direction, index)
+      end
+      raise PatchApplyError.new(file_patch.display_path, "Unable to locate hunk in target file")
+    end
+
+    # Return true when *hunk* matches *lines* at *start_index* for *direction*.
+    private def hunk_applies_at?(lines : Array(String), hunk : Hunk, direction : Direction, start_index : Int32) : Bool
+      index = start_index
+      hunk.lines.each do |hunk_line|
+        case hunk_line.kind
+        when ' '
+          return false unless lines[index]? == hunk_line.text
+          index += 1
+        when '-'
+          if direction == Direction::Forward
+            return false unless lines[index]? == hunk_line.text
+            index += 1
+          end
+        when '+'
+          if direction == Direction::Reverse
+            return false unless lines[index]? == hunk_line.text
+            index += 1
+          end
+        else
+          return false
+        end
+      end
+      true
     end
 
     # Assert that *lines* contains *expected* at *index*.

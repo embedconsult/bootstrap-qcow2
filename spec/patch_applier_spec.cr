@@ -76,4 +76,27 @@ describe Bootstrap::PatchApplier do
       File.read(dir.join("hello.txt")).should eq("line1\nline2-updated\n")
     end
   end
+
+  it "applies hunks even when line numbers are shifted" do
+    with_tempdir do |dir|
+      File.write(dir.join("hello.txt"), "line0\nline1\nline2\n")
+      patch_text = [
+        "diff --git a/hello.txt b/hello.txt",
+        "--- a/hello.txt",
+        "+++ b/hello.txt",
+        "@@ -1,2 +1,2 @@",
+        " line1",
+        "-line2",
+        "+line2-shifted",
+        "",
+      ].join("\n")
+      patch_path = dir.join("change.patch")
+      File.write(patch_path, patch_text)
+
+      applier = Bootstrap::PatchApplier.new(dir)
+      result = applier.apply(patch_path.to_s)
+      result.applied_files.should eq(["hello.txt"])
+      File.read(dir.join("hello.txt")).should eq("line0\nline1\nline2-shifted\n")
+    end
+  end
 end
