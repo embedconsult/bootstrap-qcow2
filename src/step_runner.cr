@@ -502,23 +502,15 @@ module Bootstrap
     private def effective_env(phase : BuildPhase, step : BuildStep) : Hash(String, String)
       merged = phase.env.dup
       step.env.each { |key, value| merged[key] = value }
-      ensure_sysroot_ld_library_path(merged)
-    end
-
-    private def ensure_sysroot_ld_library_path(env : Hash(String, String)) : Hash(String, String)
       sysroot_bin = "/opt/sysroot/bin"
       sysroot_lib = "/opt/sysroot/lib"
-      path = env["PATH"]?
-      return env unless path && path.includes?(sysroot_bin)
-      current = env["LD_LIBRARY_PATH"]?
-      if current
-        parts = current.split(':')
-        return env if parts.includes?(sysroot_lib)
-        env["LD_LIBRARY_PATH"] = "#{current}:#{sysroot_lib}"
-      else
-        env["LD_LIBRARY_PATH"] = sysroot_lib
+      if (path = merged["PATH"]?) && path.includes?(sysroot_bin)
+        current = merged["LD_LIBRARY_PATH"]?
+        unless current && current.split(':').includes?(sysroot_lib)
+          Log.warn { "PATH includes #{sysroot_bin} without #{sysroot_lib} in LD_LIBRARY_PATH; check plan env for #{phase.name}/#{step.name}" }
+        end
       end
-      env
+      merged
     end
 
     # Returns true when a string environment value should be treated as true.
