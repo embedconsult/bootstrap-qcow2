@@ -28,8 +28,10 @@ module Bootstrap
 
     @[JSON::Field(ignore: true)]
     @workspace : SysrootWorkspace = SysrootWorkspace.new(host_workdir: Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR])
+
     @[JSON::Field(ignore: true)]
-    @state_path_override : Path? = nil
+    @plan : BuildPlan? = nil
+
     # Identifier for the prepared rootfs. This changes whenever the rootfs is
     # regenerated from scratch.
     getter rootfs_id : String
@@ -46,8 +48,9 @@ module Bootstrap
     # SHA256 digest (hex) of the overrides file used to produce this state.
     property overrides_digest : String?
 
+    # true when the overrides digest changed since the last load.
     @[JSON::Field(ignore: true)]
-    @overrides_changed : Bool = false
+    property overrides_changed : Bool = false
 
     # Timestamp (UTC, ISO8601) for the most recent state invalidation.
     property invalidated_at : String?
@@ -58,7 +61,7 @@ module Bootstrap
     # Runner progress tracked per phase/package.
     getter progress : Progress = Progress.new
 
-    def initialize(@workspace : SysrootWorkspace = SysrootWorkspace.new(host_workdir: Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR]),
+    def initialize(@workspace : SysrootWorkspace = SysrootWorkspace.new,
                    @rootfs_id : String = Random::Secure.hex(8),
                    @created_at : String = Time.utc.to_s,
                    @updated_at : String? = nil,
@@ -67,26 +70,22 @@ module Bootstrap
                    @invalidated_at : String? = nil,
                    @invalidation_reason : String? = nil,
                    @progress : Progress = Progress.new,
-                   @format_version : Int32 = FORMAT_VERSION)
-    end
-
-    # Load state from a JSON file.
-    def self.load(workspace : SysrootWorkspace, state_path : Path = workspace.log_path / STATE_FILE) : SysrootBuildState
-      SysrootBuildState.new(workspace: workspace).load(state_path)
-    end
-
-    # Load or initialize a state file with plan/override digest reconciliation.
-    def self.load_or_init(workspace : SysrootWorkspace,
-                          state_path : Path = workspace.log_path / STATE_FILE,
-                          overrides_path : Path? = nil,
-                          invalidate_on_overrides : Bool = false) : SysrootBuildState
-      SysrootBuildState.new(workspace: workspace)
-        .load_or_init(state_path, overrides_path: overrides_path, invalidate_on_overrides: invalidate_on_overrides)
+                   @format_version : Int32 = FORMAT_VERSION,
+                   invalidate_on_overrides : Bool = false)
+      @workspace ||= SysrootWorkspace.new
+      load_plan
+      apply_overrides
+      previous_state = on_disk_state
+      @plan_digest = on_disk_plan_digest
+      @overrides_digest = on_disk_overrides_digest
+      @progress = previous_state.progress
+      # TODO: There is some case where progress should be cleared, but it can be manual for now
+      # invalidate_progress!("Overrides changed; cleared completed steps")
     end
 
     # Current rootfs-relative state path
     def state_path : Path
-      @state_path_override || (@workspace.log_path / STATE_FILE)
+      @workspace.log_path / STATE_FILE
     end
 
     # Resolve the plan path into the active namespace.
@@ -114,57 +113,14 @@ module Bootstrap
       File.exists?(state_path)
     end
 
-    # Returns true when the overrides digest changed since the last load.
-    def overrides_changed? : Bool
-      @overrides_changed
-    end
-
-    # Load state from a JSON file into a new instance.
-    def load(state_path : Path = self.state_path) : SysrootBuildState
-      state = SysrootBuildState.from_json(File.read(state_path))
-      state.assign_workspace(@workspace)
-      state.set_state_path_override(state_path)
-      state
-    end
-
-    # Load or initialize a state file with plan/override digest reconciliation.
-    def load_or_init(state_path : Path = self.state_path,
-                     overrides_path : Path? = nil,
-                     invalidate_on_overrides : Bool = false) : SysrootBuildState
-      state = File.exists?(state_path) ? load(state_path) : self
-      state.set_state_path_override(state_path)
-      state.reconcile_digests(overrides_path: overrides_path, invalidate_on_overrides: invalidate_on_overrides)
-      state.save(state_path)
-      state
-    end
-
     # Load the build plan JSON from disk.
-    def load_plan(plan_path : Path = self.plan_path) : BuildPlan
-      BuildPlan.parse(File.read(plan_path))
+    def load_plan! : BuildPlan
+      @plan = on_disk_plan || BuildPlan.new
     end
 
-    # Resolve the build plan for the current workspace and overrides.
-    def resolved_plan(overrides_path : Path? = nil,
-                      use_default_overrides : Bool = true,
-                      workspace : SysrootWorkspace? = @workspace) : BuildPlan
-      resolve_plan(load_plan, overrides_path: overrides_path, use_default_overrides: use_default_overrides, workspace: workspace)
-    end
-
-    # Apply workspace scoping and overrides to an existing plan.
-    def resolve_plan(plan : BuildPlan,
-                     overrides_path : Path? = nil,
-                     use_default_overrides : Bool = true,
-                     workspace : SysrootWorkspace? = @workspace) : BuildPlan
-      resolved_plan = plan
-      if workspace
-        resolved_plan = BuildPlan.new(resolved_plan.phases_for_current_namespace(workspace), resolved_plan.format_version)
-      end
-      apply_overrides(resolved_plan, overrides_path: overrides_path, use_default_overrides: use_default_overrides, workspace: workspace)
-    end
-
-    # Return the next incomplete phase/step for a given plan or phase list.
-    def next_incomplete_step(phases : Array(BuildPhase)) : Tuple(String?, String?)
-      phases.each do |phase|
+    # Return the next incomplete phase/step for the plan.
+    def next_incomplete_step : Tuple(String?, String?)
+      @plan.phases.each do |phase|
         phase.steps.each do |step|
           next if completed?(phase.name, step.name)
           return {phase.name, step.name}
@@ -173,12 +129,28 @@ module Bootstrap
       {nil, nil}
     end
 
-    def next_incomplete_step(plan : BuildPlan) : Tuple(String?, String?)
-      next_incomplete_step(plan.phases)
+    def on_disk_state : SysrootBuildState?
+      state_exists? ? SysrootBuildState.from_json(File.read(state_path)) : nil
+    end
+
+    def on_disk_plan : BuildPlan?
+      plan_exists? ? BuildPlan.from_json(File.read(plan_path)) : nil
+    end
+
+    def on_disk_overrides : BuildPlanOverrides?
+      override_exists? ? BuildPlanOverrides.from_json(File.read(overrides_path)) : nil
+    end
+
+    def on_disk_plan_digest : String?
+      self.class.digest_for?(plan_path)
+    end
+
+    def on_disk_overrides_digest : String?
+      self.class.digest_for?(overrides_path)
     end
 
     # Return the SHA256 hex digest for *path*, or nil when the file is missing.
-    def self.digest_for?(path : Path) : String?
+    private def self.digest_for?(path : Path) : String?
       return nil unless File.exists?(path)
       digest = Digest::SHA256.new
       File.open(path) do |file|
@@ -212,7 +184,6 @@ module Bootstrap
       end
       @progress.last_success = StepRef.new(phase: phase_name, step: step_name, occurred_at: Time.utc.to_s)
       touch
-      save
     end
 
     # Record that *step_name* failed within *phase_name*.
@@ -226,81 +197,40 @@ module Bootstrap
         report_path: report_path
       )
       touch
-      save
     end
 
     # Update the current phase tracking marker.
     def mark_current_phase(phase_name : String?) : Nil
       @progress.current_phase = phase_name
       touch
-      save
     end
 
     # Update `updated_at` to the current UTC time.
     def touch : Nil
       @updated_at = Time.utc.to_s
+      save
     end
 
     # Return the selected build phases from the current plan.
     def selected_phases(requested : String = "all") : Array(BuildPhase)
-      plan = BuildPlan.parse(File.read(plan_path))
-      plan.selected_phases(requested)
+      @plan.selected_phases(requested)
     end
 
-    def assign_workspace(workspace : SysrootWorkspace) : Nil
-      @workspace = workspace
-    end
-
-    protected def set_state_path_override(state_path : Path?) : Nil
-      return unless state_path
-      @state_path_override = state_path if state_path.absolute?
-    end
-
-    protected def reconcile_digests(overrides_path : Path? = nil,
-                                    invalidate_on_overrides : Bool = false) : Nil
-      plan_digest = self.class.digest_for?(plan_path)
-      resolved_overrides_path = overrides_path || self.overrides_path
-      overrides_digest = resolved_overrides_path ? self.class.digest_for?(resolved_overrides_path) : nil
-
-      plan_changed = !!(@plan_digest && plan_digest && @plan_digest != plan_digest)
-      overrides_changed = !!(@overrides_digest && overrides_digest && @overrides_digest != overrides_digest)
-
-      @plan_digest = plan_digest
-      @overrides_digest = overrides_digest
-      @overrides_changed = overrides_changed
-
-      return if @progress.completed_steps.empty?
-
-      if overrides_changed && invalidate_on_overrides
-        invalidate_progress!("Overrides changed; cleared completed steps")
-        return
-      end
-
-      invalidate_progress!("Build plan changed") if plan_changed
-    end
-
-    private def invalidate_progress!(reason : String) : Nil
+    def invalidate_progress!(reason : String) : Nil
       @progress.completed_steps.clear
       @progress.current_phase = nil
       @progress.last_success = nil
       @progress.last_failure = nil
       @invalidated_at = Time.utc.to_s
       @invalidation_reason = reason
+      touch
     end
 
-    private def apply_overrides(plan : BuildPlan,
-                                overrides_path : Path? = nil,
-                                use_default_overrides : Bool = true,
-                                workspace : SysrootWorkspace? = @workspace) : BuildPlan
-      return plan unless overrides_path || use_default_overrides
-      path = overrides_path
-      if path.nil? && use_default_overrides && workspace
-        path = workspace.log_path / OVERRIDES_FILE
-      end
-      return plan unless path && File.exists?(path)
-      Log.info { "Applying build plan overrides from #{path}" }
-      overrides = BuildPlanOverrides.from_json(File.read(path))
-      overrides.apply(plan)
+    private def apply_overrides
+      return unless overrides_path && overrides_exists?
+      Log.info { "Applying build plan overrides from #{overrides_path}" }
+      overrides = BuildPlanOverrides.from_json(File.read(overrides_path))
+      overrides.apply(@plan)
     end
 
     # Minimal step reference used for progress tracking.

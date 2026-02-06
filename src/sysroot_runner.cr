@@ -56,7 +56,6 @@ module Bootstrap
                       runner,
                       phase : String? = nil,
                       packages : Array(String) = [] of String,
-                      report_dir : String? = nil,
                       report : Bool = true,
                       dry_run : Bool = false,
                       dry_run_io : IO? = nil,
@@ -65,13 +64,12 @@ module Bootstrap
                       overrides_path : String? = nil,
                       use_default_overrides : Bool = true,
                       workspace : SysrootWorkspace? = nil) : Nil
-      state_for_plan = state || SysrootBuildState.new(workspace: workspace || SysrootWorkspace.new(host_workdir: Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR]))
+      state ||= SysrootBuildstate.new(workspace: workspace)
       plan = state_for_plan.load_plan(Path[plan_path])
       run_plan(plan,
         runner,
         phase: phase,
         packages: packages,
-        report_dir: report_dir,
         report: report,
         dry_run: dry_run,
         dry_run_io: dry_run_io,
@@ -87,7 +85,6 @@ module Bootstrap
                       runner,
                       phase : String? = nil,
                       packages : Array(String) = [] of String,
-                      report_dir : String? = nil,
                       report : Bool = true,
                       dry_run : Bool = false,
                       dry_run_io : IO? = nil,
@@ -100,7 +97,6 @@ module Bootstrap
         runner,
         phase: phase,
         packages: packages,
-        report_dir: report_dir,
         report: report,
         dry_run: dry_run,
         dry_run_io: dry_run_io,
@@ -116,7 +112,6 @@ module Bootstrap
                       runner,
                       phase : String? = nil,
                       packages : Array(String) = [] of String,
-                      report_dir : String? = nil,
                       report : Bool = true,
                       dry_run : Bool = false,
                       dry_run_io : IO? = nil,
@@ -151,7 +146,7 @@ module Bootstrap
           state.mark_current_phase(phase_entry.name)
         end
         enter_phase_namespace(phase_entry, workspace) if workspace && namespace_switch_required?(phase_entry, workspace)
-        run_phase(phase_entry, runner, report_dir: report_dir, report: report, state: state, resume: resume)
+        run_phase(phase_entry, runner, report: report, state: state, resume: resume)
         if state
           state.mark_current_phase(phases[idx + 1]?.try(&.name))
         end
@@ -161,7 +156,6 @@ module Bootstrap
     # Run a single phase from the plan.
     def self.run_phase(phase : BuildPhase,
                        runner,
-                       report_dir : String?,
                        report : Bool = true,
                        allow_outside_rootfs : Bool = false,
                        state : SysrootBuildState? = nil,
@@ -174,7 +168,7 @@ module Bootstrap
       if destdir = phase.destdir
         prepare_destdir(destdir)
       end
-      run_steps(phase, phase.steps, runner, report_dir: report_dir, report: report, state: state, resume: resume)
+      run_steps(phase, phase.steps, runner, report: report, state: state, resume: resume)
       Log.info { "Completed phase #{phase.name}" }
     end
 
@@ -182,7 +176,6 @@ module Bootstrap
     def self.run_steps(phase : BuildPhase,
                        steps : Array(BuildStep),
                        runner,
-                       report_dir : String?,
                        report : Bool = true,
                        state : SysrootBuildState? = nil,
                        resume : Bool = true) : Nil
