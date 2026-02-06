@@ -1492,14 +1492,9 @@ module Bootstrap
                     end
 
       base_plan = BuildPlan.parse(File.read(plan_path))
-      plan_namespace = plan_namespace_for_overrides(base_plan, workspace)
-      builder_workspace = workspace
-      if plan_namespace != workspace.namespace
-        host_workdir = workspace.host_workdir || raise "Missing host workdir for overrides workspace"
-        builder_workspace = SysrootWorkspace.new(host_workdir: host_workdir, namespace_override: plan_namespace)
-      end
-      builder = SysrootBuilder.new(workspace: builder_workspace, architecture: architecture, seed: seed)
-      target_plan = builder.build_plan
+      host_workdir = workspace.host_workdir
+      raise "Missing host workdir for overrides workspace" unless host_workdir
+      target_plan = target_plan_for_overrides(base_plan, host_workdir.not_nil!, architecture, seed)
       overrides = BuildPlanOverrides.from_diff(base_plan, target_plan)
 
       overrides_path = workspace.log_path / SysrootBuildState::OVERRIDES_FILE
@@ -1516,25 +1511,117 @@ module Bootstrap
       0
     end
 
-    private def self.plan_namespace_for_overrides(plan : BuildPlan,
-                                                  workspace : SysrootWorkspace) : SysrootWorkspace::Namespace
-      host_workdir = workspace.host_workdir
-      host_prefix = host_workdir ? host_workdir.to_s : nil
-      seed_prefix = "/#{SysrootWorkspace::BQ2_DIR_NAME}/"
-      bq2_prefix = "/#{SysrootWorkspace::WORKSPACE_DIR_NAME}/"
-      paths = [] of String
-      plan.phases.each do |phase|
-        phase.steps.each do |step|
-          paths << step.workdir if step.workdir
-          paths.concat(step.patches)
+    private def self.target_plan_for_overrides(base_plan : BuildPlan,
+                                               host_workdir : Path,
+                                               architecture : String,
+                                               seed : String) : BuildPlan
+      host_workspace = SysrootWorkspace.new(
+        host_workdir: host_workdir,
+        namespace_override: SysrootWorkspace::Namespace::Host,
+      )
+      host_builder = SysrootBuilder.new(workspace: host_workspace, architecture: architecture, seed: seed)
+      host_plan = host_builder.build_plan
+      host_phase_index = host_plan.phases.to_h { |phase| {phase.name, phase} }
+      seed_replacements = namespace_replacements(host_workdir, SysrootWorkspace::Namespace::Seed)
+      bq2_replacements = namespace_replacements(host_workdir, SysrootWorkspace::Namespace::BQ2)
+
+      target_phases = base_plan.phases.map do |phase|
+        target_phase = host_phase_index[phase.name]?
+        raise "Missing phase #{phase.name} in host target plan" unless target_phase
+        case phase.namespace
+        when "seed"
+          rewrite_phase_paths(target_phase, seed_replacements)
+        when "bq2"
+          rewrite_phase_paths(target_phase, bq2_replacements)
+        else
+          target_phase
         end
       end
-      if host_prefix && paths.any? { |path| path.starts_with?(host_prefix) }
-        return SysrootWorkspace::Namespace::Host
+
+      BuildPlan.new(phases: target_phases, format_version: base_plan.format_version)
+    end
+
+    private def self.namespace_replacements(host_workdir : Path,
+                                            namespace : SysrootWorkspace::Namespace) : Array(Tuple(String, String))
+      host_seed = (host_workdir / SysrootWorkspace::SEED_DIR_NAME).to_s
+      host_bq2 = (host_workdir / SysrootWorkspace::SEED_DIR_NAME / SysrootWorkspace::BQ2_DIR_NAME).to_s
+      host_workspace = (host_workdir / SysrootWorkspace::SEED_DIR_NAME / SysrootWorkspace::BQ2_DIR_NAME / SysrootWorkspace::WORKSPACE_DIR_NAME).to_s
+      host_log = (host_workdir / SysrootWorkspace::SEED_DIR_NAME / SysrootWorkspace::BQ2_DIR_NAME / SysrootWorkspace::LOG_DIR_NAME).to_s
+      host_sysroot = (host_workdir / SysrootWorkspace::SEED_DIR_NAME / SysrootWorkspace::SYSROOT_DIR_NAME).to_s
+
+      case namespace
+      when .seed?
+        seed_rootfs = "/"
+        seed_bq2 = "/#{SysrootWorkspace::BQ2_DIR_NAME}"
+        seed_workspace = "/#{SysrootWorkspace::BQ2_DIR_NAME}/#{SysrootWorkspace::WORKSPACE_DIR_NAME}"
+        seed_log = "/#{SysrootWorkspace::BQ2_DIR_NAME}/#{SysrootWorkspace::LOG_DIR_NAME}"
+        seed_sysroot = "/#{SysrootWorkspace::SYSROOT_DIR_NAME}"
+        [
+          {host_workspace, seed_workspace},
+          {host_log, seed_log},
+          {host_bq2, seed_bq2},
+          {host_sysroot, seed_sysroot},
+          {host_seed, seed_rootfs},
+        ]
+      when .bq2?
+        bq2_rootfs = "/"
+        bq2_workspace = "/#{SysrootWorkspace::WORKSPACE_DIR_NAME}"
+        bq2_log = "/#{SysrootWorkspace::LOG_DIR_NAME}"
+        bq2_sysroot = "/#{SysrootWorkspace::SYSROOT_DIR_NAME}"
+        [
+          {host_workspace, bq2_workspace},
+          {host_log, bq2_log},
+          {host_bq2, bq2_rootfs},
+          {host_sysroot, bq2_sysroot},
+          {host_seed, bq2_rootfs},
+        ]
+      else
+        [] of Tuple(String, String)
       end
-      return SysrootWorkspace::Namespace::Seed if paths.any? { |path| path.starts_with?(seed_prefix) }
-      return SysrootWorkspace::Namespace::BQ2 if paths.any? { |path| path.starts_with?(bq2_prefix) }
-      workspace.namespace
+    end
+
+    private def self.rewrite_phase_paths(phase : BuildPhase,
+                                         replacements : Array(Tuple(String, String))) : BuildPhase
+      return phase if replacements.empty?
+      steps = phase.steps.map { |step| rewrite_step_paths(step, replacements) }
+      BuildPhase.new(
+        name: phase.name,
+        description: phase.description,
+        namespace: phase.namespace,
+        install_prefix: rewrite_path(phase.install_prefix, replacements),
+        destdir: rewrite_path(phase.destdir, replacements),
+        env: phase.env,
+        steps: steps,
+      )
+    end
+
+    private def self.rewrite_step_paths(step : BuildStep,
+                                        replacements : Array(Tuple(String, String))) : BuildStep
+      BuildStep.new(
+        name: step.name,
+        strategy: step.strategy,
+        workdir: rewrite_path(step.workdir, replacements),
+        configure_flags: step.configure_flags,
+        patches: step.patches.map { |path| rewrite_path(path, replacements) },
+        install_prefix: rewrite_path(step.install_prefix, replacements),
+        destdir: rewrite_path(step.destdir, replacements),
+        env: step.env,
+        build_dir: step.build_dir,
+        clean_build: step.clean_build,
+        sources: step.sources,
+        extract_sources: step.extract_sources,
+        packages: step.packages,
+        content: step.content,
+        sources_directory: rewrite_path(step.sources_directory, replacements),
+      )
+    end
+
+    private def self.rewrite_path(path : String?, replacements : Array(Tuple(String, String))) : String?
+      return path unless path
+      replacements.each do |(from, to)|
+        return path.sub(from, to) if path.starts_with?(from)
+      end
+      path
     end
   end
 end
