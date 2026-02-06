@@ -6,7 +6,6 @@ require "random/secure"
 require "set"
 require "time"
 require "./build_plan"
-require "./build_plan_overrides"
 require "./cli"
 require "./sysroot_build_state"
 require "./sysroot_workspace"
@@ -60,11 +59,12 @@ module Bootstrap
                       report_dir : String? = nil,
                       dry_run : Bool = false,
                       resume : Bool = true,
-                      state_path : String? = nil,
+                      state : SysrootBuildState? = nil,
                       overrides_path : String? = nil,
                       use_default_overrides : Bool = true,
                       workspace : SysrootWorkspace? = nil) : Nil
-      plan = BuildPlan.parse(File.read(plan_path))
+      state_for_plan = state || SysrootBuildState.new(workspace: workspace || SysrootWorkspace.new(host_workdir: Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR]))
+      plan = state_for_plan.load_plan(Path[plan_path])
       run_plan(plan,
         runner,
         phase: phase,
@@ -72,7 +72,32 @@ module Bootstrap
         report_dir: report_dir,
         dry_run: dry_run,
         resume: resume,
-        state_path: state_path,
+        state: state,
+        overrides_path: overrides_path,
+        use_default_overrides: use_default_overrides,
+        workspace: workspace)
+    end
+
+    # Execute a build plan based on an existing build state.
+    def self.run_plan(state : SysrootBuildState,
+                      runner,
+                      phase : String? = nil,
+                      packages : Array(String) = [] of String,
+                      report_dir : String? = nil,
+                      dry_run : Bool = false,
+                      resume : Bool = true,
+                      overrides_path : String? = nil,
+                      use_default_overrides : Bool = true,
+                      workspace : SysrootWorkspace? = nil) : Nil
+      plan = state.load_plan
+      run_plan(plan,
+        runner,
+        phase: phase,
+        packages: packages,
+        report_dir: report_dir,
+        dry_run: dry_run,
+        resume: resume,
+        state: state,
         overrides_path: overrides_path,
         use_default_overrides: use_default_overrides,
         workspace: workspace)
@@ -86,20 +111,22 @@ module Bootstrap
                       report_dir : String? = nil,
                       dry_run : Bool = false,
                       resume : Bool = true,
-                      state_path : String? = nil,
+                      state : SysrootBuildState? = nil,
                       overrides_path : String? = nil,
                       use_default_overrides : Bool = true,
                       workspace : SysrootWorkspace? = nil) : Nil
-      resolved_plan = plan
-      resolved_plan = BuildPlan.new(resolved_plan.phases_for_current_namespace(workspace), resolved_plan.format_version) if workspace
-      resolved_plan = apply_overrides(resolved_plan, overrides_path, use_default_overrides, workspace)
+      state_for_plan = state || SysrootBuildState.new(workspace: workspace || SysrootWorkspace.new(host_workdir: Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR]))
+      resolved_plan = state_for_plan.resolve_plan(
+        plan,
+        overrides_path: overrides_path ? Path[overrides_path] : nil,
+        use_default_overrides: use_default_overrides,
+        workspace: workspace
+      )
 
       selected_phase = phase || default_phase(resolved_plan)
       phases = resolved_plan.selected_phases(selected_phase)
       phases = filter_phases_by_packages(phases, packages) if packages.any?
 
-      state = load_state(workspace, state_path)
-      state_save_path = state_path ? Path[state_path] : nil
       if state && resume
         phases = filter_phases_by_state(phases, state)
       end
@@ -112,13 +139,11 @@ module Bootstrap
       phases.each_with_index do |phase_entry, idx|
         if state
           state.mark_current_phase(phase_entry.name)
-          save_state(state, state_save_path)
         end
         enter_phase_namespace(phase_entry, workspace) if workspace && namespace_switch_required?(phase_entry, workspace)
-        run_phase(phase_entry, runner, report_dir: report_dir, state: state, resume: resume, state_path: state_save_path)
+        run_phase(phase_entry, runner, report_dir: report_dir, state: state, resume: resume)
         if state
           state.mark_current_phase(phases[idx + 1]?.try(&.name))
-          save_state(state, state_save_path)
         end
       end
     end
@@ -129,8 +154,7 @@ module Bootstrap
                        report_dir : String?,
                        allow_outside_rootfs : Bool = false,
                        state : SysrootBuildState? = nil,
-                       resume : Bool = true,
-                       state_path : Path? = nil) : Nil
+                       resume : Bool = true) : Nil
       if phase.namespace == "bq2" && !allow_outside_rootfs
         raise "Refusing to run #{phase.name} outside the rootfs" unless inside_rootfs?
       end
@@ -139,7 +163,7 @@ module Bootstrap
       if destdir = phase.destdir
         prepare_destdir(destdir)
       end
-      run_steps(phase, phase.steps, runner, report_dir: report_dir, state: state, resume: resume, state_path: state_path)
+      run_steps(phase, phase.steps, runner, report_dir: report_dir, state: state, resume: resume)
       Log.info { "Completed phase #{phase.name}" }
     end
 
@@ -149,8 +173,7 @@ module Bootstrap
                        runner,
                        report_dir : String?,
                        state : SysrootBuildState? = nil,
-                       resume : Bool = true,
-                       state_path : Path? = nil) : Nil
+                       resume : Bool = true) : Nil
       Log.info { "Executing #{steps.size} build steps" }
       steps.each do |step|
         if resume && state && state.completed?(phase.name, step.name)
@@ -162,13 +185,11 @@ module Bootstrap
           runner.run(phase, step)
           if state
             state.mark_success(phase.name, step.name)
-            save_state(state, state_path)
           end
         rescue ex
           report_path = report_dir ? write_failure_report(report_dir, phase, step, ex) : nil
           if state
             state.mark_failure(phase.name, step.name, ex.message, report_path)
-            save_state(state, state_path)
           end
           raise ex
         end
@@ -183,12 +204,14 @@ module Bootstrap
       report = true
       resume = true
       dry_run = false
+      invalidate_overrides = false
       host_workdir : Path? = nil
       extra_binds = [] of Tuple(Path, Path)
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-runner [options]") do |p|
         p.on("--phase NAME", "Select first build phase to run (default: auto)") { |name| start_phase = name }
         p.on("--package NAME", "Only run the named package(s) (repeatable)") { |name| packages << name }
         p.on("--no-report", "Disable failure report writing") { report = false }
+        p.on("--invalidate-overrides", "Invalidate completed steps when overrides change") { invalidate_overrides = true }
         p.on("--no-resume", "Disable resume/state tracking (useful when the default state path is not writable)") { resume = false }
         p.on("--dry-run", "Print plan entries and exit") { dry_run = true }
         p.on("--workdir=PATH", "Starting path for looking for build plan (default: #{SysrootWorkspace::DEFAULT_HOST_WORKDIR})") { |path| host_workdir = Path[path] }
@@ -205,22 +228,25 @@ module Bootstrap
         return -1
       end
 
-      build_state = SysrootBuildState.load_or_init(workspace)
+      build_state = SysrootBuildState.new(workspace: workspace)
+        .load_or_init(invalidate_on_overrides: invalidate_overrides)
       plan_path = build_state.plan_path.to_s
       overrides_path = build_state.overrides_path.to_s
       report_dir = report ? build_state.report_dir.to_s : nil
       Log.info { "Running plan #{plan_path} with overrides #{overrides_path} (namespace=#{workspace.namespace})" }
+      if resume && build_state.overrides_changed? && !invalidate_overrides
+        Log.warn { "Overrides changed; completed steps are preserved. Re-run affected steps, pass --invalidate-overrides, or clear the state." }
+      end
 
       step_runner = StepRunner.new(workspace: workspace)
       run_plan(
-        plan_path,
+        build_state,
         step_runner,
         phase: start_phase == DEFAULT_PHASE ? nil : start_phase,
         packages: packages,
         report_dir: report_dir,
         dry_run: dry_run,
         resume: resume,
-        state_path: resume ? build_state.state_path.to_s : nil,
         overrides_path: overrides_path,
         use_default_overrides: true,
         workspace: workspace
@@ -252,11 +278,9 @@ module Bootstrap
         return -1
       end
 
-      state = SysrootBuildState.load_or_init(workspace)
-      plan = BuildPlan.parse(File.read(state.plan_path))
-      resolved_plan = BuildPlan.new(plan.phases_for_current_namespace(workspace), plan.format_version)
-      resolved_plan = apply_overrides(resolved_plan, state.overrides_path.to_s, true, workspace)
-      next_phase, next_step = next_incomplete_step(resolved_plan, state)
+      state = SysrootBuildState.new(workspace: workspace).load_or_init
+      resolved_plan = state.resolved_plan(workspace: workspace)
+      next_phase, next_step = state.next_incomplete_step(resolved_plan)
       puts "plan_path=#{state.plan_path}"
       puts "state_path=#{state.state_path}"
       puts "current_phase=#{state.progress.current_phase}" if state.progress.current_phase
@@ -279,21 +303,6 @@ module Bootstrap
       return CLI.print_help(parser) if help
       STDERR.puts "sysroot-tarball is not yet wired up"
       1
-    end
-
-    private def self.apply_overrides(plan : BuildPlan,
-                                     overrides_path : String?,
-                                     use_default_overrides : Bool,
-                                     workspace : SysrootWorkspace?) : BuildPlan
-      return plan if overrides_path.nil? && !use_default_overrides
-      path = overrides_path
-      if path.nil? && use_default_overrides && workspace
-        path = (workspace.log_path / SysrootBuildState::OVERRIDES_FILE).to_s
-      end
-      return plan unless path && File.exists?(path)
-      Log.info { "Applying build plan overrides from #{path}" }
-      overrides = BuildPlanOverrides.from_json(File.read(path))
-      overrides.apply(plan)
     end
 
     private def self.default_phase(plan : BuildPlan) : String
@@ -387,17 +396,6 @@ module Bootstrap
       selected
     end
 
-    # Return the next incomplete phase and step for the provided plan/state.
-    private def self.next_incomplete_step(plan : BuildPlan, state : SysrootBuildState) : Tuple(String?, String?)
-      plan.phases.each do |phase|
-        phase.steps.each do |step|
-          next if state.completed?(phase.name, step.name)
-          return {phase.name, step.name}
-        end
-      end
-      {nil, nil}
-    end
-
     # Ensure the DESTDIR root exists before running installs that expect it.
     private def self.prepare_destdir(destdir : String)
       FileUtils.mkdir_p(destdir)
@@ -471,23 +469,6 @@ module Bootstrap
 
     private def self.slugify(value : String) : String
       value.gsub(/[^A-Za-z0-9]+/, "_").gsub(/^_+|_+$/, "").downcase
-    end
-
-    private def self.load_state(workspace : SysrootWorkspace?, state_path : String?) : SysrootBuildState?
-      return nil unless workspace
-      return SysrootBuildState.load(workspace, Path[state_path]) if state_path
-      SysrootBuildState.load_or_init(workspace)
-    rescue ex
-      Log.warn { "Failed to load state: #{ex.message}" }
-      nil
-    end
-
-    private def self.save_state(state : SysrootBuildState, state_path : Path?) : Nil
-      if state_path
-        state.save(state_path)
-      else
-        state.save
-      end
     end
   end
 end

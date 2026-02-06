@@ -48,8 +48,38 @@ describe Bootstrap::SysrootBuildState do
 
       reloaded = Bootstrap::SysrootBuildState.load_or_init(workspace, state_path, overrides_path: overrides_path)
       reloaded.completed?("phase-a", "musl").should be_true
+      reloaded.overrides_changed?.should be_true
       reloaded.invalidated_at.should be_nil
       reloaded.invalidation_reason.should be_nil
+    end
+  end
+
+  it "clears completed steps when overrides change and invalidation is enabled" do
+    with_tempdir do |dir|
+      workspace = Bootstrap::SysrootWorkspace.new(host_workdir: dir)
+      plan_path = workspace.log_path / Bootstrap::SysrootBuildState::PLAN_FILE
+      overrides_path = workspace.log_path / Bootstrap::SysrootBuildState::OVERRIDES_FILE
+      state_path = workspace.log_path / Bootstrap::SysrootBuildState::STATE_FILE
+
+      FileUtils.mkdir_p(plan_path.parent)
+      File.write(plan_path, "[]")
+      File.write(overrides_path, %({"phases":{}}))
+
+      state = Bootstrap::SysrootBuildState.load_or_init(workspace, state_path, overrides_path: overrides_path)
+      state.mark_success("phase-a", "musl")
+      state.save(state_path)
+
+      File.write(overrides_path, %({"phases":{"phase-a":{"steps":{}}}}))
+
+      reloaded = Bootstrap::SysrootBuildState.load_or_init(
+        workspace,
+        state_path,
+        overrides_path: overrides_path,
+        invalidate_on_overrides: true
+      )
+      reloaded.completed?("phase-a", "musl").should be_false
+      reloaded.invalidated_at.should_not be_nil
+      reloaded.invalidation_reason.should eq "Overrides changed; cleared completed steps"
     end
   end
 end

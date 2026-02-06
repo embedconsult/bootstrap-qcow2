@@ -392,15 +392,13 @@ describe Bootstrap::SysrootRunner do
       state_path = Path[File.tempname("bq2-state").not_nil!]
       File.delete?(state_path.to_s)
       workspace = Bootstrap::SysrootWorkspace.create(Path[dir])
-      state = Bootstrap::SysrootBuildState.load_or_init(
-        workspace,
-        state_path
-      )
+      state = Bootstrap::SysrootBuildState.new(workspace: workspace)
+        .load_or_init(state_path)
       state.mark_success("one", "a")
       state.save(state_path)
 
       runner = RecordingRunner.new
-      Bootstrap::SysrootRunner.run_plan(plan_path, runner, report_dir: nil, state_path: state_path.to_s, overrides_path: nil, use_default_overrides: false, workspace: workspace)
+      Bootstrap::SysrootRunner.run_plan(plan_path, runner, report_dir: nil, state: state, overrides_path: nil, use_default_overrides: false, workspace: workspace)
       runner.calls.map { |call| call[:name] }.should eq ["b"]
 
       updated = Bootstrap::SysrootBuildState.load(workspace, state_path)
@@ -436,15 +434,13 @@ describe Bootstrap::SysrootRunner do
       state_path = Path[File.tempname("bq2-state").not_nil!]
       File.delete?(state_path.to_s)
       workspace = Bootstrap::SysrootWorkspace.create(Path[dir])
-      state = Bootstrap::SysrootBuildState.load_or_init(
-        workspace,
-        state_path
-      )
+      state = Bootstrap::SysrootBuildState.new(workspace: workspace)
+        .load_or_init(state_path)
       state.mark_success("one", "a")
       state.save(state_path)
 
       runner = RecordingRunner.new
-      Bootstrap::SysrootRunner.run_plan(plan_path, runner, report_dir: nil, state_path: state_path.to_s, resume: false, overrides_path: nil, use_default_overrides: false, workspace: workspace)
+      Bootstrap::SysrootRunner.run_plan(plan_path, runner, report_dir: nil, state: state, resume: false, overrides_path: nil, use_default_overrides: false, workspace: workspace)
       runner.calls.map { |call| call[:name] }.should eq ["a", "b"]
     ensure
       File.delete?(state_path.to_s) if state_path
