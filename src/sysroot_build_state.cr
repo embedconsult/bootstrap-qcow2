@@ -46,8 +46,9 @@ module Bootstrap
 
     # SHA256 digest (hex) of the overrides file used to produce this state.
     #
-    # When this digest changes, the runner should treat overrides as different
-    # and should avoid skipping completed steps from a prior run.
+    # Overrides are intended for quick iteration, so we do not automatically
+    # invalidate completed steps when this digest changes. Instead, we record
+    # that overrides changed so the runner can warn about stale steps.
     property overrides_digest : String?
 
     # Absolute path to the failure report directory inside the rootfs, when enabled.
@@ -61,6 +62,9 @@ module Bootstrap
 
     # Runner progress tracked per phase/package.
     getter progress : Progress = Progress.new
+
+    @[JSON::Field(ignore: true)]
+    @overrides_changed : Bool = false
 
     def initialize(@rootfs_id : String = Random::Secure.hex(8),
                    @created_at : String = Time.utc.to_s,
@@ -93,12 +97,13 @@ module Bootstrap
     def self.load_or_init(path : String = DEFAULT_PATH,
                           plan_path : String = DEFAULT_PLAN,
                           overrides_path : String? = DEFAULT_OVERRIDES,
-                          report_dir : String? = DEFAULT_REPORTS) : SysrootBuildState
+                          report_dir : String? = DEFAULT_REPORTS,
+                          invalidate_on_overrides : Bool = false) : SysrootBuildState
       state = load?(path) || new(plan_path: plan_path, overrides_path: overrides_path, report_dir: report_dir)
       state.plan_path = plan_path
       state.overrides_path = overrides_path
       state.report_dir = report_dir
-      state.reconcile_inputs!
+      state.reconcile_inputs!(invalidate_on_overrides: invalidate_on_overrides)
       state.touch!
       state
     end
@@ -145,11 +150,18 @@ module Bootstrap
       self.updated_at = Time.utc.to_s
     end
 
+    # Returns true when the overrides digest changed during the last load.
+    def overrides_changed? : Bool
+      @overrides_changed
+    end
+
     # Ensure stored digests match the current plan/overrides files.
     #
-    # When the plan or overrides inputs change, this clears completed steps so
-    # the runner does not incorrectly skip work based on stale state.
-    def reconcile_inputs! : Nil
+    # When the plan inputs change, this clears completed steps so the runner
+    # does not incorrectly skip work based on stale state. Override changes are
+    # recorded for warning purposes but do not invalidate progress.
+    def reconcile_inputs!(invalidate_on_overrides : Bool = false) : Nil
+      @overrides_changed = false
       previous_plan = plan_digest
       previous_overrides = overrides_digest
       current_plan = digest_for?(plan_path)
@@ -160,17 +172,18 @@ module Bootstrap
 
       return if progress.completed_steps.empty?
 
-      changed = false
-      changed ||= previous_plan != current_plan
-      changed ||= previous_overrides != current_overrides
-      return unless changed
+      plan_changed = previous_plan != current_plan
+      overrides_changed = previous_overrides != current_overrides
+      @overrides_changed = overrides_changed
 
-      progress.completed_steps.clear
-      progress.current_phase = nil
-      progress.last_success = nil
-      progress.last_failure = nil
-      self.invalidated_at = Time.utc.to_s
-      self.invalidation_reason = "Build plan/overrides changed; cleared completed steps"
+      if overrides_changed && invalidate_on_overrides
+        invalidate_progress!("Overrides changed; cleared completed steps")
+        return
+      end
+
+      return unless plan_changed
+
+      invalidate_progress!("Build plan changed; cleared completed steps")
     end
 
     private def digest_for?(path : String) : String?
@@ -183,6 +196,15 @@ module Bootstrap
         end
       end
       digest.final.hexstring
+    end
+
+    private def invalidate_progress!(reason : String) : Nil
+      progress.completed_steps.clear
+      progress.current_phase = nil
+      progress.last_success = nil
+      progress.last_failure = nil
+      self.invalidated_at = Time.utc.to_s
+      self.invalidation_reason = reason
     end
 
     # Minimal step reference used for progress tracking.

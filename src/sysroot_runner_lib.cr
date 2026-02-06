@@ -178,15 +178,25 @@ module Bootstrap
                       report_dir : String? = DEFAULT_REPORT_DIR,
                       dry_run : Bool = false,
                       state_path : String? = nil,
-                      resume : Bool = true)
+                      resume : Bool = true,
+                      invalidate_overrides : Bool = false)
       raise "Missing build plan #{path}" unless File.exists?(path)
       Log.info { "Loading build plan from #{path}" }
       plan = BuildPlanReader.load(path)
       effective_overrides_path = overrides_path || (path == DEFAULT_PLAN_PATH ? DEFAULT_OVERRIDES_PATH : nil)
       plan = apply_overrides(plan, effective_overrides_path) if effective_overrides_path
       effective_state_path = state_path || (resume && path == DEFAULT_PLAN_PATH ? DEFAULT_STATE_PATH : nil)
-      state = effective_state_path ? SysrootBuildState.load_or_init(effective_state_path, plan_path: path, overrides_path: effective_overrides_path, report_dir: report_dir) : nil
+      state = effective_state_path ? SysrootBuildState.load_or_init(
+        effective_state_path,
+        plan_path: path,
+        overrides_path: effective_overrides_path,
+        report_dir: report_dir,
+        invalidate_on_overrides: invalidate_overrides
+      ) : nil
       state.try(&.save(effective_state_path.not_nil!)) if effective_state_path
+      if resume && state && state.overrides_changed? && !invalidate_overrides
+        Log.warn { "Overrides changed; completed steps are preserved. Re-run affected steps manually, use --invalidate-overrides, or clear the state to apply overrides." }
+      end
       run_plan(plan,
         runner,
         phase: phase,
