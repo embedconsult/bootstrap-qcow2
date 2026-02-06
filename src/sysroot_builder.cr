@@ -1413,7 +1413,7 @@ module Bootstrap
 
     # Return command aliases handled by the sysroot builder CLI.
     def self.aliases : Array(String)
-      [] of String
+      ["sysroot-builder-overrides"]
     end
 
     # Describe help output entries for the sysroot builder CLI.
