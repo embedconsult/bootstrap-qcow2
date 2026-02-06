@@ -92,8 +92,8 @@ module Bootstrap
                       overrides_path : String? = nil,
                       use_default_overrides : Bool = true,
                       workspace : SysrootWorkspace? = nil) : Nil
-      #plan = state.load_plan
-      #run_plan(plan,
+      # plan = state.load_plan
+      # run_plan(plan,
       #  runner,
       #  phase: phase,
       #  packages: packages,
@@ -236,12 +236,12 @@ module Bootstrap
 
       build_state = SysrootBuildState.new(workspace: workspace)
       #  .load_or_init(invalidate_on_overrides: invalidate_overrides)
-      #plan_path = build_state.plan_path.to_s
-      #overrides_path = build_state.overrides_path.to_s
-      #Log.info { "Running plan #{plan_path} with overrides #{overrides_path} (namespace=#{workspace.namespace})" }
-      #if resume && build_state.overrides_changed? && !invalidate_overrides
+      # plan_path = build_state.plan_path.to_s
+      # overrides_path = build_state.overrides_path.to_s
+      # Log.info { "Running plan #{plan_path} with overrides #{overrides_path} (namespace=#{workspace.namespace})" }
+      # if resume && build_state.overrides_changed? && !invalidate_overrides
       #  Log.warn { "Overrides changed; completed steps are preserved. Re-run affected steps, pass --invalidate-overrides, or clear the state." }
-      #end
+      # end
 
       step_runner = StepRunner.new(workspace: workspace)
       step_runner.skip_existing_sources = resume
@@ -250,11 +250,11 @@ module Bootstrap
         step_runner,
         phase: start_phase == DEFAULT_PHASE ? nil : start_phase,
         packages: packages,
-        #report_dir: nil,
+        # report_dir: nil,
         report: report,
         dry_run: dry_run,
         resume: resume,
-        #overrides_path: overrides_path,
+        # overrides_path: overrides_path,
         use_default_overrides: true,
         workspace: workspace
       )
@@ -285,25 +285,25 @@ module Bootstrap
         return -1
       end
 
-      #state = SysrootBuildState.new(workspace: workspace).load_or_init
-      #resolved_plan = state.resolved_plan(workspace: workspace)
-      #next_phase, next_step = state.next_incomplete_step(resolved_plan)
-      #puts "plan_path=#{state.plan_path}"
-      #puts "state_path=#{state.state_path}"
-      #puts "report_dir=#{state.report_dir}"
-      #puts "current_phase=#{state.progress.current_phase}" if state.progress.current_phase
-      #if next_phase
+      # state = SysrootBuildState.new(workspace: workspace).load_or_init
+      # resolved_plan = state.resolved_plan(workspace: workspace)
+      # next_phase, next_step = state.next_incomplete_step(resolved_plan)
+      # puts "plan_path=#{state.plan_path}"
+      # puts "state_path=#{state.state_path}"
+      # puts "report_dir=#{state.report_dir}"
+      # puts "current_phase=#{state.progress.current_phase}" if state.progress.current_phase
+      # if next_phase
       #  puts "next_phase=#{next_phase}"
       #  puts "next_step=#{next_step}" if next_step
-      #else
+      # else
       #  puts "next_phase=complete"
-      #end
-      #if (failure = state.progress.last_failure)
+      # end
+      # if (failure = state.progress.last_failure)
       #  puts "last_failure=#{failure.phase}/#{failure.step}"
       #  if (report_path = failure.report_path)
       #    puts "last_failure_report=#{report_path}"
       #  end
-      #end
+      # end
       0
     end
 
