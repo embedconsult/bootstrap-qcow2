@@ -251,6 +251,7 @@ module Bootstrap
       end
 
       step_runner = StepRunner.new(workspace: workspace)
+      step_runner.skip_existing_sources = resume
       run_plan(
         build_state,
         step_runner,

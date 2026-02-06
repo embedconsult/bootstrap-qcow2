@@ -38,10 +38,13 @@ module Bootstrap
   class StepRunner
     property clean_build_dirs : Bool
     property report_dir : String?
+    # When true, extract-sources skips archives that already extracted their
+    # build directories.
+    property skip_existing_sources : Bool
     getter workspace : SysrootWorkspace
     @command_log_prefix : String?
 
-    def initialize(@workspace : SysrootWorkspace, @clean_build_dirs : Bool = true)
+    def initialize(@workspace : SysrootWorkspace, @clean_build_dirs : Bool = true, @skip_existing_sources : Bool = false)
       @command_log_prefix = nil
       @report_dir = nil
     end
@@ -303,6 +306,10 @@ module Bootstrap
     end
 
     # Extract all configured package sources into the workdir.
+    #
+    # When `skip_existing_sources` is enabled, archives with an existing
+    # `build_directory` are skipped to avoid overwriting previously extracted
+    # sources during resume flows.
     def extract_sources(step : BuildStep) : Nil
       sources = step.extract_sources || raise "extract-sources requires step.extract_sources"
       destination = step.destdir ? Path[step.destdir.not_nil!] : Path["."]
@@ -310,6 +317,18 @@ module Bootstrap
       sources.each do |spec|
         archive = source_root / spec.filename
         raise "Missing source tarball #{archive}" unless File.exists?(archive)
+        if @skip_existing_sources
+          if (build_directory = spec.build_directory)
+            build_path = destination / build_directory
+            if File.exists?(build_path)
+              Log.warn do
+                "Skipping extract of #{spec.name} #{spec.version}: #{build_path} already exists; " \
+                "remove the directory to force a clean re-extract if the previous run was incomplete"
+              end
+              next
+            end
+          end
+        end
         Log.info { "Extracting #{archive} into #{destination}" }
         elapsed = ProcessRunner.run_fibered("Extracting #{spec.name}") do
           Tarball.extract(archive, destination, preserve_ownership: false, owner_uid: nil, owner_gid: nil)
