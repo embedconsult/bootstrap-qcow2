@@ -30,7 +30,10 @@ module Bootstrap
     @workspace : SysrootWorkspace = SysrootWorkspace.new
 
     @[JSON::Field(ignore: true)]
-    @plan : BuildPlan? = nil
+    property plan : BuildPlan? = nil
+
+    @[JSON::Field(ignore: true)]
+    property overrides : BuildPlanOverrides? = nil
 
     # Identifier for the prepared rootfs. This changes whenever the rootfs is
     # regenerated from scratch.
@@ -71,14 +74,19 @@ module Bootstrap
                    @invalidation_reason : String? = nil,
                    @progress : Progress = Progress.new,
                    @format_version : Int32 = FORMAT_VERSION,
+                   ignore_overrides : Bool = false,
                    invalidate_on_overrides : Bool = false)
       @workspace ||= SysrootWorkspace.new
-      load_plan
-      apply_overrides
+      load_plan!
+      unless ignore_overrides
+        apply_overrides
+        @overrides_digest = on_disk_overrides_digest
+      end
       previous_state = on_disk_state
+      unless previous_state.nil?
+        @progress = previous_state.progress.not_nil!
+      end
       @plan_digest = on_disk_plan_digest
-      @overrides_digest = on_disk_overrides_digest
-      @progress = previous_state.progress
       # TODO: There is some case where progress should be cleared, but it can be manual for now
       # invalidate_progress!("Overrides changed; cleared completed steps")
     end
@@ -108,6 +116,10 @@ module Bootstrap
       File.exists?(plan_path)
     end
 
+    def overrides_exists? : Bool
+      File.exists?(overrides_path)
+    end
+
     # Returns true when the build state file exists for this workspace.
     def state_exists? : Bool
       File.exists?(state_path)
@@ -115,7 +127,22 @@ module Bootstrap
 
     # Load the build plan JSON from disk.
     def load_plan! : BuildPlan
-      @plan = on_disk_plan || BuildPlan.new
+      @plan = on_disk_plan || BuildPlan.new([] of BuildPhase)
+    end
+
+    def save_plan : String?
+      plan_json = @plan.to_pretty_json
+      FileUtils.mkdir_p(plan_path.parent)
+      File.write(plan_path, plan_json)
+      Log.info { "Saved build plan at #{plan_path}" }
+      @plan_digest = on_disk_plan_digest
+    end
+
+    def save_overrides : String?
+      overrides_json = @overrides.to_pretty_json
+      FileUtils.mkdir_p(overrides_path.parent)
+      File.write(overrides_path, overrides_json)
+      @overrides_digest = on_disk_overrides_digest
     end
 
     # Return the next incomplete phase/step for the plan.
@@ -150,7 +177,7 @@ module Bootstrap
     end
 
     # Return the SHA256 hex digest for *path*, or nil when the file is missing.
-    private def self.digest_for?(path : Path) : String?
+    def self.digest_for?(path : Path) : String?
       return nil unless File.exists?(path)
       digest = Digest::SHA256.new
       File.open(path) do |file|
@@ -230,7 +257,8 @@ module Bootstrap
       return unless overrides_path && overrides_exists?
       Log.info { "Applying build plan overrides from #{overrides_path}" }
       overrides = BuildPlanOverrides.from_json(File.read(overrides_path))
-      overrides.apply(@plan)
+      old_plan = @plan.not_nil!
+      @plan = overrides.apply(old_plan)
     end
 
     # Minimal step reference used for progress tracking.

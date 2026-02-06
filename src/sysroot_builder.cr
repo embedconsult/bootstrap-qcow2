@@ -174,7 +174,7 @@ module Bootstrap
     # Return true when a serialized plan exists in the workspace.
     def rootfs_ready? : Bool
       build_state = SysrootBuildState.new(workspace: @workspace)
-      File.exists?(build_state.plan_path)
+      build_state.plan_exists?
     end
 
     def bootstrap_repo_dir
@@ -1080,14 +1080,11 @@ module Bootstrap
     end
 
     # Persist the build plan JSON.
-    def write_plan(plan : BuildPlan = build_plan) : Path
+    def write_plan(plan : BuildPlan = build_plan) : String?
       @workspace = SysrootWorkspace.create
-      build_state = SysrootBuildState.new(workspace: @workspace)
-      plan_json = plan.to_pretty_json
-      plan_path = build_state.plan_path
-      FileUtils.mkdir_p(plan_path.parent)
-      File.write(plan_path, plan_json)
-      plan_path
+      build_state = SysrootBuildState.new(workspace: @workspace, ignore_overrides: true)
+      build_state.plan = plan
+      build_state.save_plan
     end
 
     # Convert a PhaseSpec into a concrete BuildPhase with computed workdirs and
@@ -1448,14 +1445,13 @@ module Bootstrap
       end
       return CLI.print_help(parser) if help
 
-      Log.info { "Sysroot builder log level=#{Log.for("").level} (env-configured)" }
       builder = SysrootBuilder.new(
         architecture: architecture,
         seed: seed,
       )
-      plan_path = builder.write_plan
+      plan_digest = builder.write_plan
       puts "Prepared sysroot workspace at #{builder.workspace.host_workdir}"
-      puts "Wrote build plan at #{plan_path}"
+      puts "Wrote build plan (digest=#{plan_digest})"
       0
     end
 
@@ -1479,35 +1475,32 @@ module Bootstrap
         return -1
       end
 
-      plan_path = workspace.log_path / SysrootBuildState::PLAN_FILE
-      unless File.exists?(plan_path)
-        STDERR.puts "No build plan found at #{plan_path}, run `bq2 sysroot-builder` first"
+      build_state = SysrootBuildState.new(workspace: workspace, ignore_overrides: true)
+      unless build_state.plan_exists?
+        STDERR.puts "No build plan found at #{build_state.plan_path}, run `bq2 sysroot-builder` first"
         return -1
       end
 
-      build_state_path = workspace.log_path / SysrootBuildState::STATE_FILE
-      build_state = if File.exists?(build_state_path)
-                      SysrootBuildState.load(workspace, build_state_path)
-                    else
-                      SysrootBuildState.new(workspace: workspace)
-                    end
+      begin
+        base_plan = build_state.plan.not_nil!
+      rescue ex
+        STDERR.puts "Unable to load base plan from #{build_state.plan_path}: #{ex.message}"
+        return -1
+      end
 
-      base_plan = BuildPlan.parse(File.read(plan_path))
       builder = SysrootBuilder.new(workspace: workspace, architecture: architecture, seed: seed)
       target_plan = builder.build_plan
-      overrides = BuildPlanOverrides.from_diff(base_plan, target_plan)
+      build_state.overrides = BuildPlanOverrides.from_diff(base_plan, target_plan)
 
-      overrides_path = workspace.log_path / SysrootBuildState::OVERRIDES_FILE
-      FileUtils.mkdir_p(overrides_path.parent)
-      File.write(overrides_path, overrides.to_pretty_json)
-
-      build_state.plan_digest = SysrootBuildState.digest_for?(plan_path)
-      build_state.overrides_digest = SysrootBuildState.digest_for?(overrides_path)
-      build_state.touch
-      build_state.save(build_state_path)
-
-      puts "Wrote build plan overrides to #{overrides_path}"
-      puts "Overrides phases=#{overrides.phases.size}"
+      if build_state.overrides.nil?
+        puts "No overrides required, on-disk plan matches new plan"
+      else
+        overrides = build_state.overrides.not_nil!
+        build_state.save_overrides
+        build_state.touch
+        puts "Wrote build plan overrides to #{build_state.overrides_path}"
+        puts "Overrides phases=#{overrides.phases.size}"
+      end
       0
     end
   end
