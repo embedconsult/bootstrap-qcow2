@@ -321,7 +321,10 @@ module Bootstrap
           if (build_directory = spec.build_directory)
             build_path = destination / build_directory
             if File.exists?(build_path)
-              Log.info { "Skipping extract of #{spec.name} #{spec.version}: #{build_path} already exists" }
+              Log.warn do
+                "Skipping extract of #{spec.name} #{spec.version}: #{build_path} already exists; " \
+                "remove the directory to force a clean re-extract if the previous run was incomplete"
+              end
               next
             end
           end
