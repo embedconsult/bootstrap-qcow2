@@ -383,7 +383,7 @@ module Bootstrap
 
     # Return true when the file may be missing for this patch.
     private def allow_missing?(file_patch : FilePatch) : Bool
-      file_patch.old_path == "/dev/null"
+      file_patch.old_path == "/dev/null" || file_patch.new_path == "/dev/null"
     end
 
     # Strip the leading "a/" or "b/" path component used by unified diff output.
