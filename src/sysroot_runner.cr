@@ -65,7 +65,7 @@ module Bootstrap
                       overrides_path : String? = nil,
                       use_default_overrides : Bool = true,
                       workspace : SysrootWorkspace? = nil) : Nil
-      plan = BuildPlan.parse(File.read(plan_path))
+      plan = SysrootBuildState.load_plan_from(Path[plan_path])
       run_plan(plan,
         runner,
         phase: phase,
@@ -90,23 +90,22 @@ module Bootstrap
                       report_dir : String? = nil,
                       dry_run : Bool = false,
                       dry_run_io : IO? = nil,
-                      resume : Bool = true,
-                      overrides_path : String? = nil,
-                      use_default_overrides : Bool = true,
-                      workspace : SysrootWorkspace? = nil) : Nil
-      # plan = state.load_plan
-      # run_plan(plan,
-      #  runner,
-      #  phase: phase,
-      #  packages: packages,
-      #  report: report,
-      #  dry_run: dry_run,
-      #  dry_run_io: dry_run_io,
-      #  resume: resume,
-      #  state: state,
-      #  overrides_path: overrides_path,
-      #  use_default_overrides: use_default_overrides,
-      #  workspace: workspace)
+                      resume : Bool = true) : Nil
+      # SysrootBuildState owns plan loading and override resolution.
+      resolved_plan = state.plan || state.load_plan!
+      run_plan(resolved_plan,
+        runner,
+        phase: phase,
+        packages: packages,
+        report: report,
+        report_dir: report_dir,
+        dry_run: dry_run,
+        dry_run_io: dry_run_io,
+        resume: resume,
+        state: state,
+        overrides_path: nil,
+        use_default_overrides: false,
+        workspace: nil)
     end
 
     # Execute a build plan with a custom step runner.
@@ -156,8 +155,8 @@ module Bootstrap
                                      workspace : SysrootWorkspace?) : BuildPlan
       path = overrides_path
       if path.nil? && use_default_overrides
-        effective_workspace = workspace || SysrootWorkspace.new(host_workdir: Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR])
-        path = effective_workspace.log_path.join(SysrootBuildState::OVERRIDES_FILE).to_s
+        return plan unless workspace
+        path = workspace.log_path.join(SysrootBuildState::OVERRIDES_FILE).to_s
       end
       return plan unless path && File.exists?(path)
       overrides = BuildPlanOverrides.from_json(File.read(path))
@@ -266,10 +265,7 @@ module Bootstrap
         # report_dir: nil,
         report: report,
         dry_run: dry_run,
-        resume: resume,
-        # overrides_path: overrides_path,
-        use_default_overrides: true,
-        workspace: workspace
+        resume: resume
       )
       0
     end

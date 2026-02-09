@@ -27,7 +27,7 @@ module Bootstrap
     getter format_version : Int32 = FORMAT_VERSION
 
     @[JSON::Field(ignore: true)]
-    @workspace : SysrootWorkspace = SysrootWorkspace.new(host_workdir: Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR])
+    @workspace : SysrootWorkspace? = nil
 
     @[JSON::Field(ignore: true)]
     property plan : BuildPlan? = nil
@@ -65,7 +65,7 @@ module Bootstrap
     getter progress : Progress = Progress.new
 
     # Initialize the build state, loading any persisted state from disk.
-    def initialize(@workspace : SysrootWorkspace = SysrootWorkspace.new(host_workdir: Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR]),
+    def initialize(@workspace : SysrootWorkspace = SysrootWorkspace.new,
                    @rootfs_id : String = Random::Secure.hex(8),
                    @created_at : String = Time.utc.to_s,
                    @updated_at : String? = nil,
@@ -77,7 +77,10 @@ module Bootstrap
                    @format_version : Int32 = FORMAT_VERSION,
                    ignore_overrides : Bool = false,
                    invalidate_on_overrides : Bool = false)
-      @workspace ||= SysrootWorkspace.new(host_workdir: Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR])
+      # Load the plan first so any overrides resolve against the current on-disk
+      # plan. If an existing state file is found we restore its metadata and
+      # progress, then refresh digests to reflect the current on-disk inputs.
+      # Finally, detect override changes and optionally invalidate progress.
       load_plan!
       current_overrides_digest = on_disk_overrides_digest
       unless ignore_overrides
@@ -93,6 +96,8 @@ module Bootstrap
       end
       if previous_state
         unless ignore_overrides
+          # Track whether overrides changed since the last run so callers can
+          # decide if completed steps are still valid.
           @overrides_changed = previous_state.overrides_digest != current_overrides_digest
           if invalidate_on_overrides && @overrides_changed
             invalidate_progress!("Overrides changed; cleared completed steps")
@@ -105,22 +110,22 @@ module Bootstrap
 
     # Current rootfs-relative state path
     def state_path : Path
-      @workspace.log_path / STATE_FILE
+      workspace.log_path / STATE_FILE
     end
 
     # Resolve the plan path into the active namespace.
     def plan_path : Path
-      @workspace.log_path / PLAN_FILE
+      workspace.log_path / PLAN_FILE
     end
 
     # Resolve overrides path into the active namespace.
     def overrides_path : Path
-      @workspace.log_path / OVERRIDES_FILE
+      workspace.log_path / OVERRIDES_FILE
     end
 
     # Resolve report directory path into the active namespace.
     def report_dir : Path
-      @workspace.log_path / REPORT_DIR_NAME
+      workspace.log_path / REPORT_DIR_NAME
     end
 
     # Returns true when the build plan file exists for this workspace.
@@ -224,6 +229,11 @@ module Bootstrap
       digest.final.hexstring
     end
 
+    # Load a build plan from an explicit path on disk.
+    def self.load_plan_from(path : Path) : BuildPlan
+      BuildPlan.parse(File.read(path))
+    end
+
     # Persist the state JSON to disk.
     def save(path : Path = state_path)
       FileUtils.mkdir_p(path.parent)
@@ -296,6 +306,10 @@ module Bootstrap
       overrides = BuildPlanOverrides.from_json(File.read(overrides_path))
       old_plan = @plan.not_nil!
       @plan = overrides.apply(old_plan)
+    end
+
+    private def workspace : SysrootWorkspace
+      @workspace || raise "Sysroot workspace has not been initialized"
     end
 
     # Restore persisted metadata and progress from *previous_state*.
