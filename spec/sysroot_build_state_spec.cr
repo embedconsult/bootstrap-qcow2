@@ -49,7 +49,16 @@ describe Bootstrap::SysrootBuildState do
       overrides_path = workspace.log_path / Bootstrap::SysrootBuildState::OVERRIDES_FILE
 
       FileUtils.mkdir_p(plan_path.parent)
-      File.write(plan_path, "[]")
+      plan = Bootstrap::BuildPlan.new([
+        Bootstrap::BuildPhase.new(
+          name: "phase-a",
+          description: "phase a",
+          namespace: "host",
+          install_prefix: "/opt/sysroot",
+          steps: [] of Bootstrap::BuildStep,
+        ),
+      ])
+      File.write(plan_path, plan.to_json)
       File.write(overrides_path, %({"phases":{}}))
 
       state = Bootstrap::SysrootBuildState.new(workspace: workspace)
@@ -60,7 +69,7 @@ describe Bootstrap::SysrootBuildState do
 
       reloaded = Bootstrap::SysrootBuildState.new(workspace: workspace)
       reloaded.completed?("phase-a", "musl").should be_true
-      reloaded.overrides_changed?.should be_true
+      reloaded.overrides_changed.should be_true
       reloaded.invalidated_at.should be_nil
       reloaded.invalidation_reason.should be_nil
     end
@@ -73,7 +82,16 @@ describe Bootstrap::SysrootBuildState do
       overrides_path = workspace.log_path / Bootstrap::SysrootBuildState::OVERRIDES_FILE
 
       FileUtils.mkdir_p(plan_path.parent)
-      File.write(plan_path, "[]")
+      plan = Bootstrap::BuildPlan.new([
+        Bootstrap::BuildPhase.new(
+          name: "phase-a",
+          description: "phase a",
+          namespace: "host",
+          install_prefix: "/opt/sysroot",
+          steps: [] of Bootstrap::BuildStep,
+        ),
+      ])
+      File.write(plan_path, plan.to_json)
       File.write(overrides_path, %({"phases":{}}))
 
       state = Bootstrap::SysrootBuildState.new(workspace: workspace)

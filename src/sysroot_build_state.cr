@@ -27,7 +27,7 @@ module Bootstrap
     getter format_version : Int32 = FORMAT_VERSION
 
     @[JSON::Field(ignore: true)]
-    @workspace : SysrootWorkspace = SysrootWorkspace.new
+    @workspace : SysrootWorkspace = SysrootWorkspace.new(host_workdir: Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR])
 
     @[JSON::Field(ignore: true)]
     property plan : BuildPlan? = nil
@@ -65,7 +65,7 @@ module Bootstrap
     getter progress : Progress = Progress.new
 
     # Initialize the build state, loading any persisted state from disk.
-    def initialize(@workspace : SysrootWorkspace = SysrootWorkspace.new,
+    def initialize(@workspace : SysrootWorkspace = SysrootWorkspace.new(host_workdir: Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR]),
                    @rootfs_id : String = Random::Secure.hex(8),
                    @created_at : String = Time.utc.to_s,
                    @updated_at : String? = nil,
@@ -77,7 +77,7 @@ module Bootstrap
                    @format_version : Int32 = FORMAT_VERSION,
                    ignore_overrides : Bool = false,
                    invalidate_on_overrides : Bool = false)
-      @workspace ||= SysrootWorkspace.new
+      @workspace ||= SysrootWorkspace.new(host_workdir: Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR])
       load_plan!
       current_overrides_digest = on_disk_overrides_digest
       unless ignore_overrides
@@ -143,6 +143,21 @@ module Bootstrap
       @plan = on_disk_plan || BuildPlan.new([] of BuildPhase)
     end
 
+    # Apply overrides to *plan* and return the resolved plan.
+    def resolve_plan(plan : BuildPlan,
+                     overrides_path : Path? = nil,
+                     use_default_overrides : Bool = true,
+                     workspace : SysrootWorkspace? = nil) : BuildPlan
+      @plan = plan
+      path = overrides_path || (use_default_overrides ? self.overrides_path : nil)
+      if path && File.exists?(path)
+        Log.info { "Applying build plan overrides from #{path}" }
+        overrides = BuildPlanOverrides.from_json(File.read(path))
+        @plan = overrides.apply(@plan.not_nil!)
+      end
+      @plan.not_nil!
+    end
+
     # Persist the current build plan to the workspace and refresh its digest.
     def save_plan : String?
       plan_json = @plan.to_pretty_json
@@ -162,7 +177,7 @@ module Bootstrap
 
     # Return the next incomplete phase/step for the plan.
     def next_incomplete_step : Tuple(String?, String?)
-      @plan.phases.each do |phase|
+      @plan.not_nil!.phases.each do |phase|
         phase.steps.each do |step|
           next if completed?(phase.name, step.name)
           return {phase.name, step.name}
@@ -178,7 +193,7 @@ module Bootstrap
 
     # Load the build plan JSON from the workspace, or nil when missing.
     def on_disk_plan : BuildPlan?
-      plan_exists? ? BuildPlan.from_json(File.read(plan_path)) : nil
+      plan_exists? ? BuildPlan.parse(File.read(plan_path)) : nil
     end
 
     # Load overrides JSON from the workspace, or nil when missing.

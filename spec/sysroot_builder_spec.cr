@@ -37,7 +37,7 @@ describe Bootstrap::SysrootBuilder do
       workspace = Bootstrap::SysrootWorkspace.new(host_workdir: builder.host_workdir)
       build_state = Bootstrap::SysrootBuildState.new(workspace: workspace)
       FileUtils.mkdir_p(build_state.plan_path.parent)
-      File.write(build_state.plan_path, "[]")
+      File.write(build_state.plan_path, Bootstrap::BuildPlan.new([] of Bootstrap::BuildPhase).to_json)
       builder.rootfs_ready?.should be_true
     end
   end
@@ -179,7 +179,7 @@ describe Bootstrap::SysrootBuilder do
           phases: ["rootfs-from-sysroot"],
         ),
       ]
-      plan_path = builder.write_plan
+      plan_path = builder.write_plan.not_nil!
       File.exists?(plan_path).should be_true
       plan = Bootstrap::BuildPlan.parse(File.read(plan_path))
       plan.phases.map(&.name).should eq ["host-setup", "sysroot-from-alpine", "rootfs-from-sysroot", "system-from-sysroot", "finalize-rootfs"]
