@@ -177,6 +177,7 @@ module Bootstrap
                        steps : Array(BuildStep),
                        runner,
                        report : Bool = true,
+                       report_dir : String? = nil,
                        state : SysrootBuildState? = nil,
                        resume : Bool = true) : Nil
       Log.info { "Executing #{steps.size} build steps" }
