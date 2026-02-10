@@ -26,8 +26,11 @@ def with_tempdir(prefix : String = "bq2-spec", &block : Path ->)
   end
 end
 
-# Ensure the default workspace probe marker exists for specs that instantiate
-# SysrootBuildState with API defaults.
+# SysrootWorkspace.new probes for a marker at
+# data/sysroot/seed-rootfs/bq2-rootfs/.bq2-rootfs when running on the host
+# (see SysrootWorkspace::PROBE_PATHS_FOR_MARKER). Ensure that marker exists
+# so specs that intentionally exercise default workspace discovery remain
+# deterministic in CI and local runs.
 def ensure_default_workspace_marker : Nil
   marker = Path["data/sysroot/seed-rootfs/bq2-rootfs/.bq2-rootfs"]
   FileUtils.mkdir_p(marker.parent)
