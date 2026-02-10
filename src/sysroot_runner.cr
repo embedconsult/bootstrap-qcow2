@@ -226,6 +226,7 @@ module Bootstrap
       0
     end
 
+    # TODO: Get this wired up
     # Run the finalize-rootfs phase to emit a prefix-free rootfs tarball.
     private def self.run_tarball(args : Array(String)) : Int32
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-tarball [options]") do |p|
@@ -235,27 +236,27 @@ module Bootstrap
       1
     end
 
-    private def self.default_phase(plan : BuildPlan) : String
-      "all"
-    end
-
+    # TODO: Use SysrootWorkspace method for this
     private def self.inside_rootfs? : Bool
       marker = ENV["BQ2_ROOTFS_MARKER"]?
       return File.exists?(marker) if marker
       File.exists?(Path["/#{SysrootWorkspace::ROOTFS_MARKER_NAME}"])
     end
 
+    # TODO: Use SysrootWorkspace method for this
     # Return the namespace label for the current workspace.
     private def self.namespace_name(workspace : SysrootWorkspace) : String
       workspace.namespace.label
     end
 
+    # TODO: Use SysrootWorkspace method for this
     # Return true when the phase should execute in a different namespace.
     private def self.namespace_switch_required?(phase : BuildPhase, workspace : SysrootWorkspace) : Bool
       requested = SysrootWorkspace::Namespace.parse(phase.namespace)
       requested != workspace.namespace
     end
 
+    # TODO: Use SysrootWorkspace method for this
     # Enter the requested phase namespace, if needed.
     private def self.enter_phase_namespace(phase : BuildPhase, workspace : SysrootWorkspace) : Nil
       requested = SysrootWorkspace::Namespace.parse(phase.namespace)
