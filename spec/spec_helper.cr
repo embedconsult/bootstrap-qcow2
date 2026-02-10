@@ -74,6 +74,7 @@ def with_server(status_code, message, &block : Int32 ->)
   end
   begin
     address = server.bind_tcp("127.0.0.1", 0)
+    Log.debug { "Started sever at 127.0.0.1:#{address.port}" }
   rescue ex : Socket::Error
     raise ServerUnavailable.new("HTTP server unavailable: #{ex.message}")
   end
@@ -89,5 +90,55 @@ def with_server(status_code, message, &block : Int32 ->)
   ensure
     server.close
     done.receive
+  end
+end
+
+class RecordingRunner < Bootstrap::StepRunner
+  getter calls = [] of NamedTuple(phase: String, name: String, workdir: String?, strategy: String, configure_flags: Array(String), env: Hash(String, String))
+  property status : Bool = true
+  property exit_code : Int32 = 0
+  getter workdir : Path
+
+  def initialize(@status : Bool = true, @exit_code : Int32 = 0)
+    @workdir = Path[Dir.tempdir] / "bq2-runner-spec-#{Random::Secure.hex(8)}"
+    host_workdir = @workdir
+    super(Bootstrap::SysrootWorkspace.create(host_workdir: host_workdir))
+  end
+
+  def run(phase : Bootstrap::BuildPhase, step : Bootstrap::BuildStep)
+    @calls << {phase: phase.name, name: step.name, workdir: step.workdir, strategy: step.strategy, configure_flags: step.configure_flags, env: step.env}
+    raise "Command failed (#{@exit_code})" unless @status
+    FakeStatus.new(@status, @exit_code)
+  end
+
+  struct FakeStatus
+    def initialize(@success : Bool, @exit_code : Int32)
+    end
+
+    def success? : Bool
+      @success
+    end
+
+    def exit_code : Int32
+      @exit_code
+    end
+  end
+end
+
+def with_recording_runner(plan : Bootstrap::BuildPlan, overrides : Bootstrap::BuildPlanOverrides? = nil, &block : Bootstrap::SysrootBuildState, RecordingRunner ->)
+  step_runner = RecordingRunner.new
+  begin
+    plan_path = step_runner.workspace.log_path / Bootstrap::SysrootBuildState::PLAN_FILE
+    overrides_path = step_runner.workspace.log_path / Bootstrap::SysrootBuildState::OVERRIDES_FILE
+    File.write(plan_path, plan.to_json)
+    Log.debug { "Wrote plan to #{plan_path}" }
+    unless overrides.nil?
+      File.write(overrides_path, overrides.to_json)
+      Log.debug { "Wrote plan to #{overrides_path}" }
+    end
+    build_state = Bootstrap::SysrootBuildState.new(workspace: step_runner.workspace)
+    yield build_state, step_runner
+  ensure
+    FileUtils.rm_rf(step_runner.workdir)
   end
 end

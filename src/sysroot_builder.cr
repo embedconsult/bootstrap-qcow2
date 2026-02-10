@@ -917,7 +917,6 @@ module Bootstrap
         "export RANLIB=llvm-ranlib",
         "export STRIP=llvm-strip",
         "export CRYSTAL_PATH=\"/usr/share/crystal/src\"",
-        "export BQ2_ROOTFS=1",
         "export CHARSET=UTF-8",
         "export LANG=C.UTF-8",
         "export LC_COLLATE=C",

@@ -16,6 +16,25 @@ module Bootstrap
   # SysrootRunner replays build plan phases and delegates step execution to
   # StepRunner for the active namespace.
   class SysrootRunner < CLI
+    @state : SysrootBuildState
+    @step_runner : StepRunner
+    property phase : String
+    property packages : Array(String)
+    property report : Bool
+    property dry_run : Bool
+    property dry_run_io : IO?
+    property resume : Bool
+
+    def initialize(@state : SysrootBuildState = SysrootBuildState.new,
+                   @step_runner : StepRunner = StepRunner.new,
+                   @phase : String = "all",
+                   @packages : Array(String) = [] of String,
+                   @report : Bool = true,
+                   @dry_run : Bool = false,
+                   @dry_run_io : IO? = nil,
+                   @resume : Bool = true) : Nil
+    end
+
     # Summarize the sysroot runner CLI behavior for help output.
     def self.summary : String
       "Execute build plan to build rootfs and emit rootfs tarball"
@@ -50,79 +69,59 @@ module Bootstrap
     end
 
     # Execute a build plan from a preloaded build state.
-    def self.run_plan(state : SysrootBuildState,
-                      runner : StepRunner = StepRunner.new,
-                      phase : String = "all",
-                      packages : Array(String) = [] of String,
-                      report : Bool = true,
-                      report_dir : String? = nil,
-                      dry_run : Bool = false,
-                      dry_run_io : IO? = nil,
-                      resume : Bool = true) : Nil
-      phases = state.filtered_phases(by_name: phase, by_state: resume, by_packages: packages)
+    def run_plan
+      selected_phases = @state.filtered_phases(by_name: @phase, by_state: @resume, by_packages: @packages)
 
-      if dry_run
-        print_dry_run(phases, dry_run_io || STDOUT)
+      if @dry_run
+        print_dry_run(selected_phases)
         return
       end
 
-      phases.each_with_index do |phase_entry, idx|
-        if resume && state
-          state.mark_current_phase(phase_entry.name)
+      selected_phases.each_with_index do |phase_entry, idx|
+        if @resume
+          @state.mark_current_phase(phase_entry.name)
         end
-        enter_phase_namespace(phase_entry, state.workspace) if state.workspace && namespace_switch_required?(phase_entry, state.workspace)
-        run_phase(phase_entry, runner, report: report, report_dir: report_dir, state: state, resume: resume)
-        if resume && state
-          state.mark_current_phase(phases[idx + 1]?.try(&.name))
+        if @state.workspace.namespace_switch_required?(phase_entry.name)
+          Log.info { "Entering namespace #{phase_entry.name}" }
+          @state.workspace.enter_namespace(phase_entry.name)
+        end
+        run_phase(phase_entry)
+        if @resume
+          @state.mark_current_phase(@state.plan.phases[idx + 1]?.try(&.name))
         end
       end
     end
 
     # Run a single phase from the plan.
-    def self.run_phase(phase : BuildPhase,
-                       runner,
-                       report : Bool = true,
-                       report_dir : String? = nil,
-                       allow_outside_rootfs : Bool = false,
-                       state : SysrootBuildState? = nil,
-                       resume : Bool = true) : Nil
-      if phase.namespace == "bq2" && !allow_outside_rootfs
-        raise "Refusing to run #{phase.name} outside the rootfs" unless inside_rootfs?
-      end
+    private def run_phase(phase : BuildPhase)
       Log.info { "Executing phase #{phase.name} (namespace=#{phase.namespace})" }
       Log.info { "**** #{phase.description} ****" }
       if destdir = phase.destdir
-        prepare_destdir(destdir)
+        FileUtils.mkdir_p(destdir)
       end
-      run_steps(phase, phase.steps, runner, report: report, report_dir: report_dir, state: state, resume: resume)
+      run_steps(phase)
       Log.info { "Completed phase #{phase.name}" }
     end
 
     # Execute a list of BuildStep entries, stopping immediately on failure.
-    def self.run_steps(phase : BuildPhase,
-                       steps : Array(BuildStep),
-                       runner,
-                       report : Bool = true,
-                       report_dir : String? = nil,
-                       state : SysrootBuildState? = nil,
-                       resume : Bool = true) : Nil
-      Log.info { "Executing #{steps.size} build steps" }
-      effective_report_dir = report ? resolve_report_dir(report_dir, state) : nil
-      steps.each do |step|
-        if resume && state && state.completed?(phase.name, step.name)
+    private def run_steps(phase : BuildPhase)
+      Log.info { "Executing #{phase.steps.size} build steps" }
+      effective_report_dir = @report ? @state.report_dir : nil
+      phase.steps.each do |step|
+        if @resume && @state.completed?(phase.name, step.name)
           Log.info { "Skipping previously completed #{phase.name}/#{step.name}" }
           next
         end
         Log.info { "Building #{step.name} in #{step.workdir} (phase=#{phase.name})" }
         begin
-          runner.run(phase, step)
-          if resume && state
-            state.mark_success(phase.name, step.name)
+          @step_runner.run(phase, step)
+          if resume
+            @state.mark_success(phase.name, step.name)
           end
         rescue ex
-          report_path = effective_report_dir ? write_failure_report(effective_report_dir, phase, step, ex) : nil
-          if resume && state
-            state.mark_failure(phase.name, step.name, ex.message, report_path)
+          report_path = effective_report_dir ? write_failure_report(phase, step, ex, report_dir: effective_report_dir) : nil
+          if resume
+            @state.mark_failure(phase.name, step.name, ex.message, report_path)
           end
           raise ex
         end
@@ -169,15 +168,8 @@ module Bootstrap
 
       step_runner = StepRunner.new(workspace: workspace)
       step_runner.skip_existing_sources = resume
-      run_plan(
-        build_state,
-        step_runner,
-        phase: start_phase,
-        packages: packages,
-        report: report,
-        dry_run: dry_run,
-        resume: resume
-      )
+      runner = SysrootRunner.new(state: build_state, step_runner: step_runner, phase: start_phase, packages: packages, report: report, resume: resume, dry_run: dry_run)
+      runner.run_plan
       0
     end
 
@@ -236,60 +228,8 @@ module Bootstrap
       1
     end
 
-    # TODO: Use SysrootWorkspace method for this
-    private def self.inside_rootfs? : Bool
-      marker = ENV["BQ2_ROOTFS_MARKER"]?
-      return File.exists?(marker) if marker
-      File.exists?(Path["/#{SysrootWorkspace::ROOTFS_MARKER_NAME}"])
-    end
-
-    # TODO: Use SysrootWorkspace method for this
-    # Return the namespace label for the current workspace.
-    private def self.namespace_name(workspace : SysrootWorkspace) : String
-      workspace.namespace.label
-    end
-
-    # TODO: Use SysrootWorkspace method for this
-    # Return true when the phase should execute in a different namespace.
-    private def self.namespace_switch_required?(phase : BuildPhase, workspace : SysrootWorkspace) : Bool
-      requested = SysrootWorkspace::Namespace.parse(phase.namespace)
-      requested != workspace.namespace
-    end
-
-    # TODO: Use SysrootWorkspace method for this
-    # Enter the requested phase namespace, if needed.
-    private def self.enter_phase_namespace(phase : BuildPhase, workspace : SysrootWorkspace) : Nil
-      requested = SysrootWorkspace::Namespace.parse(phase.namespace)
-      case requested
-      in .host?
-        raise "Cannot enter host namespace from #{namespace_name(workspace)}" unless workspace.namespace.host?
-      in .seed?
-        if workspace.namespace.host?
-          workspace.enter_seed_rootfs_namespace
-        elsif workspace.namespace.seed?
-          # Already in seed namespace.
-        else
-          raise "Cannot enter seed namespace from #{namespace_name(workspace)}"
-        end
-      in .bq2?
-        if workspace.namespace.host?
-          workspace.enter_bq2_rootfs_namespace
-        elsif workspace.namespace.seed?
-          workspace.enter_bq2_rootfs_namespace
-        elsif workspace.namespace.bq2?
-          # Already in bq2 namespace.
-        else
-          raise "Cannot enter bq2 namespace from #{namespace_name(workspace)}"
-        end
-      end
-    end
-
-    # Ensure the DESTDIR root exists before running installs that expect it.
-    private def self.prepare_destdir(destdir : String)
-      FileUtils.mkdir_p(destdir)
-    end
-
-    private def self.print_dry_run(phases : Array(BuildPhase), io : IO) : Nil
+    private def print_dry_run(phases : Array(BuildPhase)) : Nil
+      io = @dry_run_io || STDOUT
       phases.each do |phase|
         phase.steps.each do |step|
           payload = {
@@ -301,7 +241,7 @@ module Bootstrap
       end
     end
 
-    private def self.write_failure_report(report_dir : String, phase : BuildPhase, step : BuildStep, ex : Exception) : String?
+    private def write_failure_report(phase : BuildPhase, step : BuildStep, ex : Exception, report_dir : Path = @state.report_dir) : String?
       FileUtils.mkdir_p(report_dir)
       timestamp = Time.utc.to_s("%Y%m%dT%H%M%S.%LZ")
       phase_slug = slugify(phase.name)
@@ -355,15 +295,8 @@ module Bootstrap
       nil
     end
 
-    private def self.slugify(value : String) : String
+    private def slugify(value : String) : String
       value.gsub(/[^A-Za-z0-9]+/, "_").gsub(/^_+|_+$/, "").downcase
-    end
-
-    # Resolve the report directory for the active namespace or use a provided override.
-    private def self.resolve_report_dir(report_dir : String?, state : SysrootBuildState?) : String?
-      return report_dir if report_dir
-      return nil unless state
-      state.report_dir.to_s
     end
   end
 end
