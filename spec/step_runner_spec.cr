@@ -1,6 +1,4 @@
-require "http/server"
 require "./spec_helper"
-require "../src/tar_writer"
 
 describe Bootstrap::StepRunner do
   it "skips extracting sources with existing build directories when enabled" do
@@ -55,33 +53,17 @@ describe Bootstrap::StepRunner do
       workspace = Bootstrap::SysrootWorkspace.create(host_workdir: host_workdir)
       runner = Bootstrap::StepRunner.new(workspace: workspace)
 
-      server = HTTP::Server.new do |context|
-        context.response.status_code = 404
-        context.response.print("missing")
-      end
-
-      address = server.bind_tcp("127.0.0.1", 0)
-      done = Channel(Nil).new
-      spawn do
-        server.listen
-      ensure
-        done.send(nil)
-      end
-
-      begin
+      with_server(status_code: 404, message: "missing") do |port|
         spec = Bootstrap::SourceSpec.new(
           name: "missing",
           version: "1.0.0",
-          url: "http://127.0.0.1:#{address.port}/missing.tar.gz",
+          url: "http://127.0.0.1:#{port}/missing.tar.gz",
           filename: "missing.tar.gz",
         )
 
         expect_raises(Exception, /HTTP 404/) do
           runner.download_and_verify(spec)
         end
-      ensure
-        server.close
-        done.receive
       end
     end
   end

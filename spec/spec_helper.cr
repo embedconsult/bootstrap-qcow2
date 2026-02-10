@@ -1,6 +1,7 @@
 require "spec"
 require "log"
 require "path"
+require "http/server"
 
 # We are following a pattern of including all the source files for testing here and
 # not in the individual spec files. Please add the `require` here and not in the spec
@@ -15,6 +16,7 @@ require "../src/sysroot_workspace"
 require "../src/sysroot_build_state"
 require "../src/sysroot_runner"
 require "../src/tarball"
+require "../src/tar_writer"
 require "../src/patch_applier"
 # require "../src/hello-efi"
 require "../src/inproc_llvm"
@@ -49,5 +51,26 @@ def with_bq2_workspace(prefix : String = "bq2-spec", &)
     end
   ensure
     FileUtils.rm_rf(path)
+  end
+end
+
+def with_server(status_code, message, &block : Int32 ->)
+  server = HTTP::Server.new do |context|
+    context.response.status_code = 404
+    context.response.print("missing")
+  end
+  address = server.bind_tcp("127.0.0.1", 0)
+  done = Channel(Nil).new
+  spawn do
+    server.listen
+  ensure
+    done.send(nil)
+  end
+
+  begin
+    yield address.port
+  ensure
+    server.close
+    done.receive
   end
 end
