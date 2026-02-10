@@ -66,9 +66,8 @@ module Bootstrap
                       resume : Bool = true,
                       overrides_path : String? = nil,
                       use_default_overrides : Bool = true,
-                      state : SysrootBuildState? = nil,
                       workspace : SysrootWorkspace? = nil) : Nil
-      effective_state = state
+      effective_state = nil.as(SysrootBuildState?)
       effective_workspace = workspace
 
       plan = case plan_or_state
