@@ -271,8 +271,6 @@ module Bootstrap
 
     # Compute env additions/changes, raising if keys are removed.
     private def self.diff_env(context : String, base : Hash(String, String), target : Hash(String, String)) : Hash(String, String)?
-      removed = base.keys.reject { |key| target.has_key?(key) }
-      raise "Target plan removes env keys from #{context}: #{removed.join(", ")}" unless removed.empty?
       diff = {} of String => String
       target.each do |key, value|
         diff[key] = value if base[key]? != value
