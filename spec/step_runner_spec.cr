@@ -1,6 +1,8 @@
 require "./spec_helper"
 
 describe Bootstrap::StepRunner do
+  server_ok, server_reason = tcp_server_available?
+
   it "skips extracting sources with existing build directories when enabled" do
     with_tempdir do |dir|
       host_workdir = dir / "sysroot"
@@ -47,24 +49,79 @@ describe Bootstrap::StepRunner do
     end
   end
 
-  it "fails download_and_verify on non-success HTTP responses" do
+  it "prefetches shards dependencies for extracted shard projects" do
     with_tempdir do |dir|
       host_workdir = dir / "sysroot"
       workspace = Bootstrap::SysrootWorkspace.create(host_workdir: host_workdir)
+      destdir = workspace.workspace_path
+      shard_dir = destdir / "shards-0.18.0"
+      FileUtils.mkdir_p(shard_dir)
+      File.write(shard_dir / "shard.yml", "name: example\nversion: 0.1.0\n")
+
+      bin_dir = dir / "bin"
+      FileUtils.mkdir_p(bin_dir)
+      shards_script = bin_dir / "shards"
+      File.write(shards_script, "#!/bin/sh\n touch .shards-install-ran\n")
+      File.chmod(shards_script, 0o755)
+
+      step = Bootstrap::BuildStep.new(
+        name: "prefetch-shards",
+        strategy: "prefetch-shards",
+        workdir: nil,
+        configure_flags: [] of String,
+        patches: [] of String,
+        destdir: destdir.to_s,
+        extract_sources: [
+          Bootstrap::ExtractSpec.new(
+            name: "shards",
+            version: "0.18.0",
+            filename: "shards-0.18.0.tar.gz",
+            build_directory: "shards-0.18.0",
+          ),
+        ],
+        env: {
+          "PATH" => "#{bin_dir}:#{ENV["PATH"]?}",
+        },
+      )
+
+      phase = Bootstrap::BuildPhase.new(
+        name: "host-setup",
+        description: "prefetch",
+        namespace: "host",
+        install_prefix: "/opt/sysroot",
+        steps: [step],
+      )
+
       runner = Bootstrap::StepRunner.new(workspace: workspace)
+      runner.run(phase, step)
 
-      with_server(status_code: 404, message: "missing") do |port|
-        spec = Bootstrap::SourceSpec.new(
-          name: "missing",
-          version: "1.0.0",
-          url: "http://127.0.0.1:#{port}/missing.tar.gz",
-          filename: "missing.tar.gz",
-        )
+      File.exists?(shard_dir / ".shards-install-ran").should be_true
+    end
+  end
 
-        expect_raises(Exception, /HTTP 404/) do
-          runner.download_and_verify(spec)
+  if server_ok
+    it "fails download_and_verify on non-success HTTP responses" do
+      with_tempdir do |dir|
+        host_workdir = dir / "sysroot"
+        workspace = Bootstrap::SysrootWorkspace.create(host_workdir: host_workdir)
+        runner = Bootstrap::StepRunner.new(workspace: workspace)
+
+        with_server(status_code: 404, message: "missing") do |port|
+          spec = Bootstrap::SourceSpec.new(
+            name: "missing",
+            version: "1.0.0",
+            url: "http://127.0.0.1:#{port}/missing.tar.gz",
+            filename: "missing.tar.gz",
+          )
+
+          expect_raises(Exception, /HTTP 404/) do
+            runner.download_and_verify(spec)
+          end
         end
       end
+    end
+  else
+    pending "fails download_and_verify on non-success HTTP responses (HTTP server unavailable: #{server_reason || "unknown"})" do
     end
   end
 end

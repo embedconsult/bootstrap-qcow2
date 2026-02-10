@@ -23,6 +23,19 @@ require "../src/inproc_llvm"
 
 Log.setup_from_env
 
+class ServerUnavailable < Exception
+end
+
+def tcp_server_available? : Tuple(Bool, String?)
+  begin
+    server = TCPServer.new("127.0.0.1", 0)
+    server.close
+    {true, nil}
+  rescue ex : Socket::Error
+    {false, ex.message}
+  end
+end
+
 def with_tempdir(prefix : String = "bq2-spec", &block : Path ->)
   path = Path[File.tempname(prefix)].expand
   File.delete?(path.to_s)
@@ -56,10 +69,14 @@ end
 
 def with_server(status_code, message, &block : Int32 ->)
   server = HTTP::Server.new do |context|
-    context.response.status_code = 404
-    context.response.print("missing")
+    context.response.status_code = status_code
+    context.response.print(message)
   end
-  address = server.bind_tcp("127.0.0.1", 0)
+  begin
+    address = server.bind_tcp("127.0.0.1", 0)
+  rescue ex : Socket::Error
+    raise ServerUnavailable.new("HTTP server unavailable: #{ex.message}")
+  end
   done = Channel(Nil).new
   spawn do
     server.listen

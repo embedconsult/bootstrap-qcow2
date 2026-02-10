@@ -138,6 +138,64 @@ describe Bootstrap::BuildPlanOverrides do
     updated.phases.first.steps.first.configure_flags.should eq ["--two", "--three"]
   end
 
+  it "appends extra steps from overrides" do
+    plan = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        namespace: "test",
+        install_prefix: "/opt/sysroot",
+        steps: [
+          Bootstrap::BuildStep.new(name: "a", strategy: "autotools", workdir: "/a", configure_flags: [] of String, patches: [] of String),
+        ],
+      ),
+    ])
+
+    overrides = Bootstrap::BuildPlanOverrides.new(
+      phases: {
+        "one" => Bootstrap::PhaseOverride.new(
+          extra_steps: [
+            Bootstrap::BuildStep.new(name: "b", strategy: "noop", workdir: "/b", configure_flags: [] of String, patches: [] of String),
+          ],
+        ),
+      },
+    )
+
+    updated = overrides.apply(plan)
+    updated.phases.first.steps.map(&.name).should eq ["a", "b"]
+  end
+
+  it "builds overrides that append new steps when the plan changes" do
+    base = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        namespace: "test",
+        install_prefix: "/opt/sysroot",
+        steps: [
+          Bootstrap::BuildStep.new(name: "a", strategy: "autotools", workdir: "/a", configure_flags: [] of String, patches: [] of String),
+        ],
+      ),
+    ])
+
+    target = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        namespace: "test",
+        install_prefix: "/opt/sysroot",
+        steps: [
+          Bootstrap::BuildStep.new(name: "a", strategy: "autotools", workdir: "/a", configure_flags: [] of String, patches: [] of String),
+          Bootstrap::BuildStep.new(name: "b", strategy: "noop", workdir: "/b", configure_flags: [] of String, patches: [] of String),
+        ],
+      ),
+    ])
+
+    overrides = Bootstrap::BuildPlanOverrides.from_diff(base, target)
+    updated = overrides.apply(base)
+    updated.phases.first.steps.map(&.name).should eq ["a", "b"]
+  end
+
   it "raises when overrides reference an unknown phase" do
     plan = Bootstrap::BuildPlan.new([
       Bootstrap::BuildPhase.new(name: "one", description: "phase", namespace: "test", install_prefix: "/opt/sysroot"),

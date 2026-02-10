@@ -128,6 +128,8 @@ module Bootstrap
           extract_sources(step)
         when "populate-seed"
           extract_sources(step)
+        when "prefetch-shards"
+          prefetch_shards(step, env)
         when "prepare-rootfs"
           idx = 0
           wrote = false
@@ -203,7 +205,7 @@ module Bootstrap
           if File.exists?("shard.yml") && run_shards_install?(env)
             run_cmd(["shards", "install"], env: env)
           elsif File.exists?("shard.yml")
-            Log.info { "Skipping shards install for #{step.name} (prefetched during download phase)" }
+            Log.info { "Skipping shards install for #{step.name} (prefetched during host setup)" }
           end
           run_cmd(["crystal", "build"] + step.configure_flags, env: env)
           bin_prefix = destdir ? "#{destdir}#{install_prefix}" : install_prefix
@@ -248,6 +250,26 @@ module Bootstrap
     # Returns true when shards install should be performed during build steps.
     private def run_shards_install?(env : Hash(String, String)) : Bool
       truthy_env?(env["BQ2_FORCE_SHARDS_INSTALL"]?)
+    end
+
+    private def prefetch_shards(step : BuildStep, env : Hash(String, String)) : Nil
+      extract_specs = step.extract_sources || raise "prefetch-shards requires step.extract_sources"
+      destdir = step.destdir ? Path[step.destdir.not_nil!] : Path["."]
+      extract_specs.each do |spec|
+        build_dir = spec.build_directory
+        next unless build_dir
+        build_path = destdir / build_dir
+        shard_file = build_path / "shard.yml"
+        next unless File.exists?(shard_file)
+        unless Dir.exists?(build_path)
+          Log.warn { "Skipping shards prefetch for #{build_path}: missing build directory" }
+          next
+        end
+        Log.info { "Prefetching shards dependencies in #{build_path}" }
+        Dir.cd(build_path) do
+          run_cmd(["shards", "install"], env: env)
+        end
+      end
     end
 
     # Download all configured package sources and return their cached paths.

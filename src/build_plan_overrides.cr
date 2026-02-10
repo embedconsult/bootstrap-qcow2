@@ -63,6 +63,12 @@ module Bootstrap
       env = merge_env(phase.env, override.env)
       steps = apply_phase_packages(phase.steps, override.packages)
       steps = steps.map { |step| apply_step(phase.name, step, override.steps) }
+      if extra_steps = override.extra_steps
+        existing = steps.map(&.name).to_set
+        duplicates = extra_steps.map(&.name).select { |name| existing.includes?(name) }
+        raise "Overrides add duplicate step(s) in phase #{phase.name}: #{duplicates.join(", ")}" unless duplicates.empty?
+        steps = steps + extra_steps
+      end
       BuildPhase.new(
         name: phase.name,
         description: phase.description,
@@ -146,47 +152,59 @@ module Bootstrap
       install_prefix = base_phase.install_prefix == target_phase.install_prefix ? nil : target_phase.install_prefix
       destdir = diff_nullable_path("phase #{base_phase.name} destdir", base_phase.destdir, target_phase.destdir)
       env = diff_env("phase #{base_phase.name} env", base_phase.env, target_phase.env)
-      packages = diff_phase_packages(base_phase, target_phase)
+      phase_packages = diff_phase_packages(base_phase, target_phase)
+      packages = phase_packages[:packages]
+      extra_steps = phase_packages[:extra_steps]
       steps = diff_phase_steps(base_phase, target_phase)
-      return nil if install_prefix.nil? && destdir.nil? && env.nil? && packages.nil? && steps.nil?
+      return nil if install_prefix.nil? && destdir.nil? && env.nil? && packages.nil? && extra_steps.nil? && steps.nil?
 
       PhaseOverride.new(
         install_prefix: install_prefix,
         destdir: destdir,
         env: env,
         packages: packages,
+        extra_steps: extra_steps,
         steps: steps,
       )
     end
 
     # Compute step overrides for a phase, or nil if none are needed.
     private def self.diff_phase_steps(base_phase : BuildPhase, target_phase : BuildPhase) : Hash(String, StepOverride)?
-      base_steps = index_steps(base_phase)
+      target_steps = index_steps(target_phase)
       overrides = {} of String => StepOverride
-      target_phase.steps.each do |target_step|
-        base_step = base_steps[target_step.name]? || raise "Target plan introduces new step #{target_step.name} in phase #{target_phase.name}"
+      base_phase.steps.each do |base_step|
+        target_step = target_steps[base_step.name]?
+        next unless target_step
         override = diff_step(base_phase.name, base_step, target_step)
-        overrides[target_step.name] = override if override
+        overrides[base_step.name] = override if override
       end
       return nil if overrides.empty?
       overrides
     end
 
-    # Compute a phase packages allowlist if steps were removed.
-    private def self.diff_phase_packages(base_phase : BuildPhase, target_phase : BuildPhase) : Array(String)?
+    # Compute a phase packages allowlist and extra steps for appended changes.
+    private def self.diff_phase_packages(base_phase : BuildPhase, target_phase : BuildPhase) : NamedTuple(packages: Array(String)?, extra_steps: Array(BuildStep)?)
       base_steps = base_phase.steps.map(&.name)
       target_steps = target_phase.steps.map(&.name)
-      return nil if base_steps == target_steps
+      return {packages: nil, extra_steps: nil} if base_steps == target_steps
 
       base_indexed = base_steps.to_set
-      missing = target_steps.reject { |name| base_indexed.includes?(name) }
-      raise "Target plan introduces new step(s) in phase #{base_phase.name}: #{missing.join(", ")}" unless missing.empty?
-
       base_ordered_target = base_steps.select { |name| target_steps.includes?(name) }
-      if base_ordered_target != target_steps
-        raise "Target plan reorders steps in phase #{base_phase.name}; overrides cannot reorder steps"
+      prefix = target_steps[0, base_ordered_target.size] || [] of String
+      if prefix != base_ordered_target
+        mismatch_index = prefix.zip(base_ordered_target).index { |pair| pair[0] != pair[1] }
+        expected = mismatch_index ? base_ordered_target[mismatch_index]? : base_ordered_target[prefix.size]?
+        actual = mismatch_index ? prefix[mismatch_index]? : prefix[base_ordered_target.size]?
+        raise "Target plan reorders steps in phase #{base_phase.name}; expected #{expected || "(none)"} at index #{mismatch_index || prefix.size}, got #{actual || "(none)"}"
       end
-      target_steps
+      extra_names = target_steps[base_ordered_target.size..] || [] of String
+      reused = extra_names.select { |name| base_indexed.includes?(name) }
+      unless reused.empty?
+        raise "Target plan reorders steps in phase #{base_phase.name}; unexpected step(s) reintroduced after append: #{reused.join(", ")}"
+      end
+      extra_steps = extra_names.empty? ? nil : target_phase.steps.select { |step| extra_names.includes?(step.name) }
+      packages = base_ordered_target == base_steps ? nil : base_ordered_target
+      {packages: packages, extra_steps: extra_steps}
     end
 
     # Index phase steps by name for fast lookup.
@@ -278,12 +296,14 @@ module Bootstrap
     getter destdir : String?
     getter env : Hash(String, String)?
     getter packages : Array(String)?
+    getter extra_steps : Array(BuildStep)?
     getter steps : Hash(String, StepOverride)?
 
     def initialize(@install_prefix : String? = nil,
                    @destdir : String? = nil,
                    @env : Hash(String, String)? = nil,
                    @packages : Array(String)? = nil,
+                   @extra_steps : Array(BuildStep)? = nil,
                    @steps : Hash(String, StepOverride)? = nil)
     end
   end
