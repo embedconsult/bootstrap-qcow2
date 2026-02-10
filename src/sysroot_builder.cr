@@ -786,6 +786,9 @@ module Bootstrap
           workdir: workspace_from_seed,
           package_allowlist: nil,
           env_overrides: {
+            "cmake" => {
+              "LD_LIBRARY_PATH" => "#{sysroot_prefix}/lib:#{sysroot_prefix}/lib/#{sysroot_triple}",
+            },
             "libxml2" => libxml2_env,
             "zlib"    => {
               "CFLAGS"   => "-fPIC",
