@@ -48,7 +48,7 @@ describe Bootstrap::SysrootRunner do
     ]
 
     runner = RecordingRunner.new
-    Bootstrap::SysrootRunner.run_steps(phase, steps, runner, report_dir: nil)
+    Bootstrap::SysrootRunner.run_steps(phase, steps, runner, report: false)
 
     runner.calls.size.should eq 2
     runner.calls.first[:workdir].should eq "/tmp"
@@ -67,7 +67,7 @@ describe Bootstrap::SysrootRunner do
     runner = RecordingRunner.new(false, 2)
 
     expect_raises(Exception) do
-      Bootstrap::SysrootRunner.run_steps(phase, steps, runner, report_dir: nil)
+      Bootstrap::SysrootRunner.run_steps(phase, steps, runner, report: false)
     end
   end
 
@@ -100,7 +100,7 @@ describe Bootstrap::SysrootRunner do
       plan_path = var_lib / "sysroot-build-plan.json"
       File.write(plan_path, plan.to_json)
 
-      Bootstrap::SysrootRunner.run_plan(plan_path.to_s, runner)
+      Bootstrap::SysrootRunner.run_plan(plan_path.to_s, runner, resume: false, use_default_overrides: false)
       runner.calls.size.should eq 2
       runner.calls.map(&.[:name]).should eq ["file-a", "file-b"]
     end
@@ -198,7 +198,7 @@ describe Bootstrap::SysrootRunner do
 
       begin
         expect_raises(Exception, /Refusing to run/) do
-          Bootstrap::SysrootRunner.run_phase(phase, runner, report_dir: nil)
+          Bootstrap::SysrootRunner.run_phase(phase, runner, report: false)
         end
       ensure
         if previous
@@ -208,7 +208,7 @@ describe Bootstrap::SysrootRunner do
         end
       end
 
-      Bootstrap::SysrootRunner.run_phase(phase, runner, report_dir: nil, allow_outside_rootfs: true).should be_nil
+      Bootstrap::SysrootRunner.run_phase(phase, runner, report: false, allow_outside_rootfs: true).should be_nil
     end
   else
     reason = restrictions.join("; ")
@@ -271,8 +271,9 @@ describe Bootstrap::SysrootRunner do
   end
 
   it "writes a failure report when a step fails" do
-    report_dir = Path[Dir.tempdir] / "bq2-report-spec-#{Random::Secure.hex(8)}"
-    begin
+    with_tempdir do |dir|
+      workspace = Bootstrap::SysrootWorkspace.new(host_workdir: dir)
+      state = Bootstrap::SysrootBuildState.new(workspace: workspace)
       phase = Bootstrap::BuildPhase.new(
         name: "phase-fail",
         description: "test phase",
@@ -284,12 +285,10 @@ describe Bootstrap::SysrootRunner do
       runner = RecordingRunner.new(false, 23)
 
       expect_raises(Exception) do
-        Bootstrap::SysrootRunner.run_steps(phase, steps, runner, report_dir: report_dir.to_s)
+        Bootstrap::SysrootRunner.run_steps(phase, steps, runner, report: true, state: state)
       end
 
-      Dir.glob("#{report_dir}/*.json").size.should be > 0
-    ensure
-      FileUtils.rm_rf(report_dir)
+      Dir.glob("#{state.report_dir}/*.json").size.should be > 0
     end
   end
 
@@ -302,7 +301,7 @@ describe Bootstrap::SysrootRunner do
     ])
 
     runner = RecordingRunner.new
-    Bootstrap::SysrootRunner.run_plan(plan, runner, phase: "all", packages: ["b"], report_dir: nil)
+    Bootstrap::SysrootRunner.run_plan(plan, runner, phase: "all", packages: ["b"], report: false)
     runner.calls.size.should eq 1
     runner.calls.first[:phase].should eq "two"
     runner.calls.first[:name].should eq "b"
@@ -316,7 +315,7 @@ describe Bootstrap::SysrootRunner do
 
     runner = RecordingRunner.new
     expect_raises(Exception, /not found/) do
-      Bootstrap::SysrootRunner.run_plan(plan, runner, packages: ["a", "missing"], report_dir: nil)
+      Bootstrap::SysrootRunner.run_plan(plan, runner, packages: ["a", "missing"], report: false)
     end
   end
 
@@ -349,7 +348,7 @@ describe Bootstrap::SysrootRunner do
       overrides_path = dir / "overrides.json"
       File.write(overrides_path, overrides)
 
-      Bootstrap::SysrootRunner.run_plan(plan_path.to_s, runner, overrides_path: overrides_path.to_s, report_dir: nil)
+      Bootstrap::SysrootRunner.run_plan(plan_path.to_s, runner, overrides_path: overrides_path.to_s, report: false, resume: false, use_default_overrides: false)
       runner.calls.size.should eq 1
       runner.calls.first[:configure_flags].should eq ["--with-foo"]
       runner.calls.first[:env]["CC"].should eq "clang"
@@ -364,7 +363,7 @@ describe Bootstrap::SysrootRunner do
 
     runner = RecordingRunner.new
     output = IO::Memory.new
-    Bootstrap::SysrootRunner.run_plan(plan, runner, dry_run: true, dry_run_io: output, report_dir: nil)
+    Bootstrap::SysrootRunner.run_plan(plan, runner, dry_run: true, dry_run_io: output, report: false)
     runner.calls.should be_empty
   end
 
@@ -389,24 +388,19 @@ describe Bootstrap::SysrootRunner do
       plan_path = plan_file.path
       plan_file.close
 
-      state_path : Path? = nil
-      state_path = Path[File.tempname("bq2-state").not_nil!]
-      File.delete?(state_path.to_s)
       workspace = Bootstrap::SysrootWorkspace.create(Path[dir])
       state = Bootstrap::SysrootBuildState.new(workspace: workspace)
-        .load_or_init(state_path)
+
       state.mark_success("one", "a")
-      state.save(state_path)
+      state.save
 
       runner = RecordingRunner.new
-      Bootstrap::SysrootRunner.run_plan(plan_path, runner, report_dir: nil, state: state, overrides_path: nil, use_default_overrides: false, workspace: workspace)
+      Bootstrap::SysrootRunner.run_plan(plan_path, runner, report: false, state: state, overrides_path: nil, use_default_overrides: false, workspace: workspace)
       runner.calls.map { |call| call[:name] }.should eq ["b"]
 
-      updated = Bootstrap::SysrootBuildState.load(workspace, state_path)
+      updated = Bootstrap::SysrootBuildState.new(workspace: workspace)
       updated.completed?("one", "a").should be_true
       updated.completed?("one", "b").should be_true
-    ensure
-      File.delete?(state_path.to_s) if state_path
     end
   end
 
@@ -431,20 +425,15 @@ describe Bootstrap::SysrootRunner do
       plan_path = plan_file.path
       plan_file.close
 
-      state_path : Path? = nil
-      state_path = Path[File.tempname("bq2-state").not_nil!]
-      File.delete?(state_path.to_s)
       workspace = Bootstrap::SysrootWorkspace.create(Path[dir])
       state = Bootstrap::SysrootBuildState.new(workspace: workspace)
-        .load_or_init(state_path)
+
       state.mark_success("one", "a")
-      state.save(state_path)
+      state.save
 
       runner = RecordingRunner.new
-      Bootstrap::SysrootRunner.run_plan(plan_path, runner, report_dir: nil, state: state, resume: false, overrides_path: nil, use_default_overrides: false, workspace: workspace)
+      Bootstrap::SysrootRunner.run_plan(plan_path, runner, report: false, state: state, resume: false, overrides_path: nil, use_default_overrides: false, workspace: workspace)
       runner.calls.map { |call| call[:name] }.should eq ["a", "b"]
-    ensure
-      File.delete?(state_path.to_s) if state_path
     end
   end
 end

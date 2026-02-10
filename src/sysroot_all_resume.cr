@@ -75,15 +75,15 @@ module Bootstrap
       end
 
       plan_path = build_state.plan_path
-      plan = build_state.load_plan
+      build_state.load_plan!
       if state_exists
-        state = build_state.load
+        state = build_state.on_disk_state.not_nil!
         plan_digest = SysrootBuildState.digest_for?(plan_path)
         if plan_digest.nil? || state.plan_digest != plan_digest
           return Decision.new("sysroot-runner", "plan digest mismatch; ignoring state", plan_path: plan_path)
         end
 
-        next_phase, next_step = state.next_incomplete_step(plan)
+        next_phase, next_step = build_state.next_incomplete_step
         if next_phase.nil?
           return Decision.new("complete", "build complete", plan_path: plan_path, state_path: build_state.state_path)
         end

@@ -6,6 +6,7 @@ require "random/secure"
 require "set"
 require "time"
 require "./build_plan"
+require "./build_plan_overrides"
 require "./cli"
 require "./sysroot_build_state"
 require "./sysroot_workspace"
@@ -64,8 +65,8 @@ module Bootstrap
                       overrides_path : String? = nil,
                       use_default_overrides : Bool = true,
                       workspace : SysrootWorkspace? = nil) : Nil
-      state ||= SysrootBuildstate.new(workspace: workspace)
-      plan = state_for_plan.load_plan(Path[plan_path])
+      state_for_plan = state || SysrootBuildState.new(workspace: workspace || SysrootWorkspace.create)
+      plan = BuildPlan.from_json(File.read(plan_path))
       run_plan(plan,
         runner,
         phase: phase,
@@ -74,7 +75,7 @@ module Bootstrap
         dry_run: dry_run,
         dry_run_io: dry_run_io,
         resume: resume,
-        state: state,
+        state: state_for_plan,
         overrides_path: overrides_path,
         use_default_overrides: use_default_overrides,
         workspace: workspace)
@@ -120,13 +121,17 @@ module Bootstrap
                       overrides_path : String? = nil,
                       use_default_overrides : Bool = true,
                       workspace : SysrootWorkspace? = nil) : Nil
-      state_for_plan = state || SysrootBuildState.new(workspace: workspace || SysrootWorkspace.new(host_workdir: Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR]))
-      resolved_plan = state_for_plan.resolve_plan(
-        plan,
-        overrides_path: overrides_path ? Path[overrides_path] : nil,
-        use_default_overrides: use_default_overrides,
-        workspace: workspace
-      )
+      state_for_plan = state
+      resolved_plan = plan
+      selected_overrides_path = if overrides_path
+                                  Path[overrides_path]
+                                elsif use_default_overrides && state_for_plan
+                                  state_for_plan.overrides_path
+                                end
+      if selected_overrides_path && File.exists?(selected_overrides_path)
+        overrides = BuildPlanOverrides.from_json(File.read(selected_overrides_path))
+        resolved_plan = overrides.apply(plan)
+      end
 
       selected_phase = phase || default_phase(resolved_plan)
       phases = resolved_plan.selected_phases(selected_phase)
@@ -180,7 +185,7 @@ module Bootstrap
                        state : SysrootBuildState? = nil,
                        resume : Bool = true) : Nil
       Log.info { "Executing #{steps.size} build steps" }
-      effective_report_dir = report ? resolve_report_dir(report_dir, state) : nil
+      effective_report_dir = report ? resolve_report_dir(nil, state) : nil
       steps.each do |step|
         if resume && state && state.completed?(phase.name, step.name)
           Log.info { "Skipping previously completed #{phase.name}/#{step.name}" }
