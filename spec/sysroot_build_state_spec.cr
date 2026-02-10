@@ -2,9 +2,39 @@ require "./spec_helper"
 require "../src/sysroot_build_state"
 
 describe Bootstrap::SysrootBuildState do
+  it "discovers the default workspace when no workspace is provided" do
+    state = Bootstrap::SysrootBuildState.new
+    state.workspace.namespace.host?.should be_true
+    state.plan_path.should eq Path["data/sysroot/seed-rootfs/bq2-rootfs/var/lib/#{Bootstrap::SysrootBuildState::PLAN_FILE}"]
+    state.state_path.should eq Path["data/sysroot/seed-rootfs/bq2-rootfs/var/lib/#{Bootstrap::SysrootBuildState::STATE_FILE}"]
+  end
+
+  it "loads an on-disk plan when initialized with default workspace discovery" do
+    workspace = nil.as(Bootstrap::SysrootWorkspace?)
+    workspace = Bootstrap::SysrootWorkspace.new
+    plan = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "phase-default",
+        description: "default workspace phase",
+        namespace: "host",
+        install_prefix: "/opt/sysroot",
+        steps: [] of Bootstrap::BuildStep,
+      ),
+    ])
+
+    FileUtils.mkdir_p(workspace.log_path)
+    File.write(workspace.log_path / Bootstrap::SysrootBuildState::PLAN_FILE, plan.to_json)
+
+    state = Bootstrap::SysrootBuildState.new
+    state.plan.phases.map(&.name).should eq ["phase-default"]
+  ensure
+    if workspace
+      File.delete?(workspace.not_nil!.log_path / Bootstrap::SysrootBuildState::PLAN_FILE)
+    end
+  end
   it "round-trips JSON and preserves completed step markers" do
     with_tempdir do |dir|
-      workspace = Bootstrap::SysrootWorkspace.new(host_workdir: dir)
+      workspace = Bootstrap::SysrootWorkspace.create(Path[dir])
       state = Bootstrap::SysrootBuildState.new(workspace: workspace)
       state.mark_success("phase-a", "musl")
       encoded = state.to_json

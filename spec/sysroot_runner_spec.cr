@@ -3,12 +3,14 @@ require "json"
 require "file_utils"
 require "random/secure"
 
-class RecordingRunner
+class RecordingRunner < Bootstrap::StepRunner
   getter calls = [] of NamedTuple(phase: String, name: String, workdir: String?, strategy: String, configure_flags: Array(String), env: Hash(String, String))
   property status : Bool = true
   property exit_code : Int32 = 0
 
   def initialize(@status : Bool = true, @exit_code : Int32 = 0)
+    host_workdir = Path[Dir.tempdir] / "bq2-runner-spec-#{Random::Secure.hex(8)}"
+    super(Bootstrap::SysrootWorkspace.create(host_workdir: host_workdir))
   end
 
   def run(phase : Bootstrap::BuildPhase, step : Bootstrap::BuildStep)
@@ -33,7 +35,7 @@ end
 
 private def run_plan_from_state_plan(plan : Bootstrap::BuildPlan,
                                      runner,
-                                     phase : String? = nil,
+                                     phase : String = "all",
                                      packages : Array(String) = [] of String,
                                      report : Bool = true,
                                      report_dir : String? = nil,
@@ -53,8 +55,7 @@ private def run_plan_from_state_plan(plan : Bootstrap::BuildPlan,
       report_dir: report_dir,
       dry_run: dry_run,
       dry_run_io: dry_run_io,
-      resume: resume,
-      workspace: workspace
+      resume: resume
     )
     return
   end
@@ -72,8 +73,7 @@ private def run_plan_from_state_plan(plan : Bootstrap::BuildPlan,
       report_dir: report_dir,
       dry_run: dry_run,
       dry_run_io: dry_run_io,
-      resume: resume,
-      workspace: temp_workspace
+      resume: resume
     )
   end
 end
