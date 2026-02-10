@@ -100,7 +100,7 @@ describe Bootstrap::SysrootRunner do
       plan_path = var_lib / "sysroot-build-plan.json"
       File.write(plan_path, plan.to_json)
 
-      Bootstrap::SysrootRunner.run_plan(plan_path.to_s, runner)
+      Bootstrap::SysrootRunner.run_plan(plan, runner)
       runner.calls.size.should eq 2
       runner.calls.map(&.[:name]).should eq ["file-a", "file-b"]
     end
@@ -349,7 +349,9 @@ describe Bootstrap::SysrootRunner do
       overrides_path = dir / "overrides.json"
       File.write(overrides_path, overrides)
 
-      Bootstrap::SysrootRunner.run_plan(plan_path.to_s, runner, overrides_path: overrides_path.to_s, report_dir: nil)
+      overrides = Bootstrap::BuildPlanOverrides.from_json(File.read(overrides_path))
+      plan = overrides.apply(plan)
+      Bootstrap::SysrootRunner.run_plan(plan, runner, report_dir: nil)
       runner.calls.size.should eq 1
       runner.calls.first[:configure_flags].should eq ["--with-foo"]
       runner.calls.first[:env]["CC"].should eq "clang"
@@ -395,7 +397,8 @@ describe Bootstrap::SysrootRunner do
       state.save
 
       runner = RecordingRunner.new
-      Bootstrap::SysrootRunner.run_plan(plan_path, runner, report_dir: nil, state: state, overrides_path: nil, use_default_overrides: false, workspace: workspace)
+      state.plan = Bootstrap::BuildPlan.parse(File.read(plan_path))
+      Bootstrap::SysrootRunner.run_plan(state, runner, report_dir: nil, use_default_overrides: false)
       runner.calls.map { |call| call[:name] }.should eq ["b"]
 
       updated = Bootstrap::SysrootBuildState.new(workspace: workspace)
@@ -431,7 +434,8 @@ describe Bootstrap::SysrootRunner do
       state.save
 
       runner = RecordingRunner.new
-      Bootstrap::SysrootRunner.run_plan(plan_path, runner, report_dir: nil, state: state, resume: false, overrides_path: nil, use_default_overrides: false, workspace: workspace)
+      state.plan = Bootstrap::BuildPlan.parse(File.read(plan_path))
+      Bootstrap::SysrootRunner.run_plan(state, runner, report_dir: nil, resume: false, use_default_overrides: false)
       runner.calls.map { |call| call[:name] }.should eq ["a", "b"]
     end
   end

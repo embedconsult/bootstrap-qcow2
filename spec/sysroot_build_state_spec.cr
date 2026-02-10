@@ -9,6 +9,7 @@ describe Bootstrap::SysrootBuildState do
       state.mark_success("phase-a", "musl")
       encoded = state.to_json
       decoded = Bootstrap::SysrootBuildState.from_json(encoded)
+      decoded.workspace = workspace
       decoded.completed?("phase-a", "musl").should be_true
       decoded.completed?("phase-a", "busybox").should be_false
     end

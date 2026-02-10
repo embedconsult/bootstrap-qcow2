@@ -64,8 +64,12 @@ module Bootstrap
     # Runner progress tracked per phase/package.
     getter progress : Progress = Progress.new
 
+    # Active workspace for this build state.
+    @[JSON::Field(ignore: true)]
+    property workspace : SysrootWorkspace
+
     # Initialize the build state, loading any persisted state from disk.
-    def initialize(@workspace : SysrootWorkspace = SysrootWorkspace.new(host_workdir: Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR]),
+    def initialize(@workspace : SysrootWorkspace = SysrootWorkspace.new,
                    @rootfs_id : String = Random::Secure.hex(8),
                    @created_at : String = Time.utc.to_s,
                    @updated_at : String? = nil,
@@ -77,28 +81,20 @@ module Bootstrap
                    @format_version : Int32 = FORMAT_VERSION,
                    ignore_overrides : Bool = false,
                    invalidate_on_overrides : Bool = false)
-      @workspace ||= SysrootWorkspace.new(host_workdir: Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR])
       load_plan!
       current_overrides_digest = on_disk_overrides_digest
-      unless ignore_overrides
-        apply_overrides
-      end
+      # Apply overrides before restoring state so the in-memory plan is the
+      # resolved version used for resume decisions.
+      apply_overrides unless ignore_overrides
+      # Restore persisted metadata and progress after loading the plan so the
+      # persisted plan digest and progress markers remain intact.
       previous_state = on_disk_state
-      unless previous_state.nil?
-        restore_from(previous_state)
-      end
+      restore_from(previous_state) if previous_state
+      # Refresh plan/overrides digests from disk for resume and invalidation
+      # decisions (these are compared against restored values when present).
       @plan_digest = on_disk_plan_digest
-      unless ignore_overrides
-        @overrides_digest = current_overrides_digest
-      end
-      if previous_state
-        unless ignore_overrides
-          @overrides_changed = previous_state.overrides_digest != current_overrides_digest
-          if invalidate_on_overrides && @overrides_changed
-            invalidate_progress!("Overrides changed; cleared completed steps")
-          end
-        end
-      end
+      @overrides_digest = current_overrides_digest unless ignore_overrides
+      update_overrides_tracking(previous_state, current_overrides_digest, ignore_overrides, invalidate_on_overrides)
       # TODO: There is some case where progress should be cleared, but it can be manual for now
       # invalidate_progress!("Overrides changed; cleared completed steps")
     end
@@ -145,11 +141,9 @@ module Bootstrap
 
     # Apply overrides to *plan* and return the resolved plan.
     def resolve_plan(plan : BuildPlan,
-                     overrides_path : Path? = nil,
-                     use_default_overrides : Bool = true,
-                     workspace : SysrootWorkspace? = nil) : BuildPlan
+                     use_overrides : Bool = true) : BuildPlan
       @plan = plan
-      path = overrides_path || (use_default_overrides ? self.overrides_path : nil)
+      path = use_overrides ? self.overrides_path : nil
       if path && File.exists?(path)
         Log.info { "Applying build plan overrides from #{path}" }
         overrides = BuildPlanOverrides.from_json(File.read(path))
@@ -188,7 +182,10 @@ module Bootstrap
 
     # Load persisted state from the workspace, or nil when missing.
     def on_disk_state : SysrootBuildState?
-      state_exists? ? SysrootBuildState.from_json(File.read(state_path)) : nil
+      return nil unless state_exists?
+      state = SysrootBuildState.from_json(File.read(state_path))
+      state.workspace = @workspace
+      state
     end
 
     # Load the build plan JSON from the workspace, or nil when missing.
@@ -296,6 +293,18 @@ module Bootstrap
       overrides = BuildPlanOverrides.from_json(File.read(overrides_path))
       old_plan = @plan.not_nil!
       @plan = overrides.apply(old_plan)
+    end
+
+    private def update_overrides_tracking(previous_state : SysrootBuildState?,
+                                          current_overrides_digest : String?,
+                                          ignore_overrides : Bool,
+                                          invalidate_on_overrides : Bool) : Nil
+      return if ignore_overrides
+      return unless previous_state
+      @overrides_changed = previous_state.overrides_digest != current_overrides_digest
+      if invalidate_on_overrides && @overrides_changed
+        invalidate_progress!("Overrides changed; cleared completed steps")
+      end
     end
 
     # Restore persisted metadata and progress from *previous_state*.
