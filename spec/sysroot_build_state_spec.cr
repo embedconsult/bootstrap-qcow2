@@ -4,7 +4,7 @@ require "../src/sysroot_build_state"
 describe Bootstrap::SysrootBuildState do
   it "round-trips JSON and preserves completed step markers" do
     with_tempdir do |dir|
-      workspace = Bootstrap::SysrootWorkspace.new(host_workdir: dir)
+      workspace = Bootstrap::SysrootWorkspace.create(Path[dir])
       state = Bootstrap::SysrootBuildState.new(workspace: workspace)
       state.mark_success("phase-a", "musl")
       encoded = state.to_json
