@@ -78,9 +78,9 @@ module Bootstrap
                raise "SysrootBuildState.plan must be loaded before running" unless loaded_plan
                effective_state = build_state
                effective_workspace ||= build_state.workspace
-               resolve_plan_for_run(build_state, loaded_plan, overrides_path, use_default_overrides)
+               loaded_plan
              in BuildPlan
-               resolve_plan_for_path_override(plan_or_state, overrides_path)
+               resolve_plan_for_build_plan(plan_or_state, overrides_path, use_default_overrides, effective_workspace)
              end
 
       run_plan_impl(
@@ -134,20 +134,19 @@ module Bootstrap
       end
     end
 
-    private def self.resolve_plan_for_run(state : SysrootBuildState,
-                                          plan : BuildPlan,
-                                          overrides_path : String?,
-                                          use_default_overrides : Bool) : BuildPlan
-      return resolve_plan_for_path_override(plan, overrides_path) if overrides_path
-      state.resolve_plan(plan, use_overrides: use_default_overrides)
-    end
+    private def self.resolve_plan_for_build_plan(plan : BuildPlan,
+                                                 overrides_path : String?,
+                                                 use_default_overrides : Bool,
+                                                 workspace : SysrootWorkspace?) : BuildPlan
+      path = overrides_path
+      if path.nil? && use_default_overrides
+        effective_workspace = workspace || SysrootWorkspace.new(host_workdir: Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR])
+        path = effective_workspace.log_path.join(SysrootBuildState::OVERRIDES_FILE).to_s
+      end
+      return plan unless path
+      return plan unless File.exists?(path)
 
-    private def self.resolve_plan_for_path_override(plan : BuildPlan,
-                                                    overrides_path : String?) : BuildPlan
-      return plan unless overrides_path
-      return plan unless File.exists?(overrides_path)
-
-      overrides = BuildPlanOverrides.from_json(File.read(overrides_path))
+      overrides = BuildPlanOverrides.from_json(File.read(path))
       overrides.apply(plan)
     end
 
