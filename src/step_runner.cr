@@ -92,6 +92,12 @@ module Bootstrap
           end
         when "busybox"
           run_cmd(["make", "defconfig"], env: env)
+          if (config_tool = env["BQ2_KCONFIG_CONFIG_TOOL"]?) && File.exists?(config_tool)
+            run_cmd([config_tool, "--file", ".config", "--disable", "STATIC_LIBGCC"], env: env)
+            run_cmd(["make", "silentoldconfig"], env: env)
+          else
+            Log.warn { "Skipping BusyBox Kconfig update; set BQ2_KCONFIG_CONFIG_TOOL to disable STATIC_LIBGCC" }
+          end
           run_cmd(["make", "-j#{cpus}"], env: env)
           install_root = destdir || install_prefix
           run_cmd(["make", "CONFIG_PREFIX=#{install_root}", "install"], env: env)

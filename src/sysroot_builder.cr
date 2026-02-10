@@ -748,11 +748,12 @@ module Bootstrap
           package_allowlist: ["musl", "busybox", "linux-headers"],
           env_overrides: {
             "busybox" => {
-              "HOSTCC"      => "#{sysroot_prefix}/bin/clang #{cmake_c_flags}",
-              "HOSTCXX"     => "#{sysroot_prefix}/bin/clang++ #{cmake_c_flags}",
-              "HOSTLDFLAGS" => "-L#{sysroot_prefix}/lib/#{sysroot_triple} -L#{sysroot_prefix}/lib",
-              "MAKEFLAGS"   => "-e",
-              "STRIP"       => "/bin/true",
+              "HOSTCC"                  => "#{sysroot_prefix}/bin/clang #{cmake_c_flags}",
+              "HOSTCXX"                 => "#{sysroot_prefix}/bin/clang++ #{cmake_c_flags}",
+              "HOSTLDFLAGS"             => "-L#{sysroot_prefix}/lib/#{sysroot_triple} -L#{sysroot_prefix}/lib",
+              "MAKEFLAGS"               => "-e",
+              "STRIP"                   => "/bin/true",
+              "BQ2_KCONFIG_CONFIG_TOOL" => "#{workspace_from_seed}/bootstrap-qcow2-#{bootstrap_source_version}/tools/kconfig/config",
             },
           },
           extra_steps: [

@@ -1,0 +1,60 @@
+#!/bin/sh
+# Minimal Kconfig .config toggler for bootstrap builds.
+set -eu
+
+config_file="${KCONFIG_CONFIG:-.config}"
+
+usage() {
+  echo "Usage: $0 [--file PATH] [--enable SYMBOL] [--disable SYMBOL]" >&2
+  exit 2
+}
+
+set_config() {
+  sym="$1"
+  val="$2"
+  if [ -f "$config_file" ]; then
+    sed -i "/^# CONFIG_${sym} is not set$/d" "$config_file"
+    if grep -q "^CONFIG_${sym}=" "$config_file"; then
+      sed -i "s/^CONFIG_${sym}=.*/CONFIG_${sym}=${val}/" "$config_file"
+    else
+      printf "CONFIG_%s=%s\n" "$sym" "$val" >> "$config_file"
+    fi
+  else
+    printf "CONFIG_%s=%s\n" "$sym" "$val" > "$config_file"
+  fi
+}
+
+unset_config() {
+  sym="$1"
+  if [ -f "$config_file" ]; then
+    sed -i "/^CONFIG_${sym}=.*/d" "$config_file"
+  fi
+  printf "# CONFIG_%s is not set\n" "$sym" >> "$config_file"
+}
+
+if [ "$#" -eq 0 ]; then
+  usage
+fi
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --file)
+      [ "$#" -ge 2 ] || usage
+      config_file="$2"
+      shift 2
+      ;;
+    --enable)
+      [ "$#" -ge 2 ] || usage
+      set_config "$2" "y"
+      shift 2
+      ;;
+    --disable)
+      [ "$#" -ge 2 ] || usage
+      unset_config "$2"
+      shift 2
+      ;;
+    *)
+      usage
+      ;;
+  esac
+done
