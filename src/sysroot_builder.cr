@@ -1249,7 +1249,7 @@ module Bootstrap
 
     # Ensure clean rebuilds when a package is installed into multiple prefixes.
     private def clean_build_for(pkg : PackageSpec, spec : PhaseSpec) : Bool
-      return false unless pkg.name == "bdwgc"
+      return false unless pkg.name == "bdwgc" || pkg.name == "libatomic_ops"
       spec.phase.name == "sysroot-from-alpine" || spec.phase.name == "system-from-sysroot"
     end
 
