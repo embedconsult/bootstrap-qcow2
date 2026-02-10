@@ -66,7 +66,7 @@ module Bootstrap
       raise "CLI command #{self.name} must implement .run(args, command_name)"
     end
 
-    # Returns the basename of the invoked executable, falling back to a default
+    # Returns the basename of the invoked executable, falling back to default
     # when it cannot be resolved (e.g., when Process.executable_path is nil).
     def self.invoked_name(default : String = "bq2") : String
       return File.basename(PROGRAM_NAME) unless PROGRAM_NAME.empty?
