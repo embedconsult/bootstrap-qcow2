@@ -16,8 +16,6 @@ module Bootstrap
   # SysrootRunner replays build plan phases and delegates step execution to
   # StepRunner for the active namespace.
   class SysrootRunner < CLI
-    DEFAULT_PHASE = "default"
-
     # Summarize the sysroot runner CLI behavior for help output.
     def self.summary : String
       "Execute build plan to build rootfs and emit rootfs tarball"
@@ -53,51 +51,15 @@ module Bootstrap
 
     # Execute a build plan from a preloaded build state.
     def self.run_plan(state : SysrootBuildState,
-                      runner,
-                      phase : String? = nil,
+                      runner : StepRunner = StepRunner.new,
+                      phase : String = "all",
                       packages : Array(String) = [] of String,
                       report : Bool = true,
                       report_dir : String? = nil,
                       dry_run : Bool = false,
                       dry_run_io : IO? = nil,
-                      resume : Bool = true,
-                      workspace : SysrootWorkspace? = nil) : Nil
-      loaded_plan = state.plan
-      raise "SysrootBuildState.plan must be loaded before running" unless loaded_plan
-      effective_workspace = workspace || state.workspace
-      run_plan_impl(
-        loaded_plan,
-        runner,
-        phase: phase,
-        packages: packages,
-        report: report,
-        report_dir: report_dir,
-        dry_run: dry_run,
-        dry_run_io: dry_run_io,
-        resume: resume,
-        state: state,
-        workspace: effective_workspace
-      )
-    end
-
-    private def self.run_plan_impl(plan : BuildPlan,
-                                   runner,
-                                   phase : String? = nil,
-                                   packages : Array(String) = [] of String,
-                                   report : Bool = true,
-                                   report_dir : String? = nil,
-                                   dry_run : Bool = false,
-                                   dry_run_io : IO? = nil,
-                                   resume : Bool = true,
-                                   state : SysrootBuildState? = nil,
-                                   workspace : SysrootWorkspace? = nil) : Nil
-      selected_phase = phase || default_phase(plan)
-      phases = plan.selected_phases(selected_phase)
-      phases = filter_phases_by_packages(phases, packages) if packages.any?
-
-      if state && resume
-        phases = filter_phases_by_state(phases, state)
-      end
+                      resume : Bool = true) : Nil
+      phases = state.filtered_phases(by_name: phase, by_state: resume, by_packages: packages)
 
       if dry_run
         print_dry_run(phases, dry_run_io || STDOUT)
@@ -108,7 +70,7 @@ module Bootstrap
         if state
           state.mark_current_phase(phase_entry.name)
         end
-        enter_phase_namespace(phase_entry, workspace) if workspace && namespace_switch_required?(phase_entry, workspace)
+        enter_phase_namespace(phase_entry, state.workspace) if state.workspace && namespace_switch_required?(phase_entry, state.workspace)
         run_phase(phase_entry, runner, report: report, report_dir: report_dir, state: state, resume: resume)
         if state
           state.mark_current_phase(phases[idx + 1]?.try(&.name))
@@ -171,7 +133,7 @@ module Bootstrap
     # Run build plan phases/steps from the CLI.
     private def self.run_runner(args : Array(String)) : Int32
       packages = [] of String
-      start_phase : String? = DEFAULT_PHASE
+      start_phase : String = "all"
       report = true
       resume = true
       dry_run = false
@@ -200,20 +162,17 @@ module Bootstrap
       end
 
       build_state = SysrootBuildState.new(workspace: workspace, invalidate_on_overrides: invalidate_overrides)
-      #  .load_or_init(invalidate_on_overrides: invalidate_overrides)
-      # plan_path = build_state.plan_path.to_s
-      # overrides_path = build_state.overrides_path.to_s
-      # Log.info { "Running plan #{plan_path} with overrides #{overrides_path} (namespace=#{workspace.namespace})" }
-      # if resume && build_state.overrides_changed? && !invalidate_overrides
-      #  Log.warn { "Overrides changed; completed steps are preserved. Re-run affected steps, pass --invalidate-overrides, or clear the state." }
-      # end
+      Log.info { "Running plan #{build_state.plan_path} with overrides #{build_state.overrides_path} (namespace=#{workspace.namespace})" }
+      if resume && build_state.overrides_changed && !invalidate_overrides
+        Log.warn { "Overrides changed; completed steps are preserved. To re-run affected steps, pass --invalidate-overrides, or clear the state." }
+      end
 
       step_runner = StepRunner.new(workspace: workspace)
       step_runner.skip_existing_sources = resume
       run_plan(
         build_state,
         step_runner,
-        phase: start_phase == DEFAULT_PHASE ? nil : start_phase,
+        phase: start_phase,
         packages: packages,
         report: report,
         dry_run: dry_run,
@@ -246,25 +205,24 @@ module Bootstrap
         return -1
       end
 
-      # state = SysrootBuildState.new(workspace: workspace).load_or_init
-      # resolved_plan = state.resolved_plan(workspace: workspace)
-      # next_phase, next_step = state.next_incomplete_step(resolved_plan)
-      # puts "plan_path=#{state.plan_path}"
-      # puts "state_path=#{state.state_path}"
-      # puts "report_dir=#{state.report_dir}"
-      # puts "current_phase=#{state.progress.current_phase}" if state.progress.current_phase
-      # if next_phase
-      #  puts "next_phase=#{next_phase}"
-      #  puts "next_step=#{next_step}" if next_step
-      # else
-      #  puts "next_phase=complete"
-      # end
-      # if (failure = state.progress.last_failure)
-      #  puts "last_failure=#{failure.phase}/#{failure.step}"
-      #  if (report_path = failure.report_path)
-      #    puts "last_failure_report=#{report_path}"
-      #  end
-      # end
+      state = SysrootBuildState.new
+      next_phase, next_step = state.next_incomplete_step
+      puts "plan_path=#{state.plan_path}"
+      puts "state_path=#{state.state_path}"
+      puts "report_dir=#{state.report_dir}"
+      puts "current_phase=#{state.progress.current_phase}" if state.progress.current_phase
+      if next_phase
+        puts "next_phase=#{next_phase}"
+        puts "next_step=#{next_step}" if next_step
+      else
+        puts "next_phase=complete"
+      end
+      if (failure = state.progress.last_failure)
+        puts "last_failure=#{failure.phase}/#{failure.step}"
+        if (report_path = failure.report_path)
+          puts "last_failure_report=#{report_path}"
+        end
+      end
       0
     end
 
@@ -323,49 +281,6 @@ module Bootstrap
           raise "Cannot enter bq2 namespace from #{namespace_name(workspace)}"
         end
       end
-    end
-
-    private def self.filter_phases_by_state(phases : Array(BuildPhase), state : SysrootBuildState) : Array(BuildPhase)
-      phases.compact_map do |phase|
-        remaining = phase.steps.reject { |step| state.completed?(phase.name, step.name) }
-        next nil if remaining.empty?
-        BuildPhase.new(
-          name: phase.name,
-          description: phase.description,
-          namespace: phase.namespace,
-          install_prefix: phase.install_prefix,
-          destdir: phase.destdir,
-          env: phase.env,
-          steps: remaining,
-        )
-      end
-    end
-
-    private def self.filter_phases_by_packages(phases : Array(BuildPhase), packages : Array(String)) : Array(BuildPhase)
-      matched = Set(String).new
-      phases.each do |phase|
-        phase.steps.each do |step|
-          matched << step.name if packages.includes?(step.name)
-        end
-      end
-      missing = packages.uniq.reject { |name| matched.includes?(name) }
-      raise "Requested package(s) not found in selected phases: #{missing.join(", ")}" unless missing.empty?
-
-      selected = phases.compact_map do |phase|
-        steps = phase.steps.select { |step| packages.includes?(step.name) }
-        next nil if steps.empty?
-        BuildPhase.new(
-          name: phase.name,
-          description: phase.description,
-          namespace: phase.namespace,
-          install_prefix: phase.install_prefix,
-          destdir: phase.destdir,
-          env: phase.env,
-          steps: steps,
-        )
-      end
-      raise "No matching packages found in selected phases: #{packages.join(", ")}" if selected.empty?
-      selected
     end
 
     # Ensure the DESTDIR root exists before running installs that expect it.

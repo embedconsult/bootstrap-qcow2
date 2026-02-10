@@ -156,26 +156,5 @@ module Bootstrap
       end
       plan
     end
-
-    # Select phases for execution based on the optional phase selector.
-    def selected_phases(requested : String = "all") : Array(BuildPhase)
-      raise "Build plan is empty" if @phases.empty?
-      return @phases if requested == "all"
-      matching = @phases.select { |phase| phase.name == requested }
-      raise "Unknown build phase #{requested}" if matching.empty?
-      matching
-    end
-
-    # Return phases that are valid for the provided workspace namespace.
-    def phases_for_current_namespace(workspace : SysrootWorkspace) : Array(BuildPhase)
-      case workspace.namespace
-      in .host?
-        @phases
-      in .seed?
-        @phases.reject { |phase| phase.namespace == "host" }
-      in .bq2?
-        @phases.reject { |phase| phase.namespace == "host" || phase.namespace == "seed" }
-      end
-    end
   end
 end

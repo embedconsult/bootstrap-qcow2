@@ -27,10 +27,10 @@ module Bootstrap
     getter format_version : Int32 = FORMAT_VERSION
 
     @[JSON::Field(ignore: true)]
-    @workspace : SysrootWorkspace = SysrootWorkspace.new(host_workdir: Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR])
+    @workspace : SysrootWorkspace
 
     @[JSON::Field(ignore: true)]
-    property plan : BuildPlan? = nil
+    property plan : BuildPlan = BuildPlan.new([] of BuildPhase)
 
     @[JSON::Field(ignore: true)]
     property overrides : BuildPlanOverrides? = nil
@@ -66,7 +66,7 @@ module Bootstrap
 
     # Active workspace for this build state.
     @[JSON::Field(ignore: true)]
-    property workspace : SysrootWorkspace
+    property workspace : SysrootWorkspace = SysrootWorkspace.new
 
     # Initialize the build state, loading any persisted state from disk.
     def initialize(@workspace : SysrootWorkspace = SysrootWorkspace.new,
@@ -81,7 +81,9 @@ module Bootstrap
                    @format_version : Int32 = FORMAT_VERSION,
                    ignore_overrides : Bool = false,
                    invalidate_on_overrides : Bool = false)
-      load_plan!
+      @plan = BuildPlan.new([] of BuildPhase)
+      saved_plan = on_disk_plan
+      @plan = saved_plan.not_nil! unless saved_plan.nil?
       current_overrides_digest = on_disk_overrides_digest
       # Apply overrides before restoring state so the in-memory plan is the
       # resolved version used for resume decisions.
@@ -95,8 +97,6 @@ module Bootstrap
       @plan_digest = on_disk_plan_digest
       @overrides_digest = current_overrides_digest unless ignore_overrides
       update_overrides_tracking(previous_state, current_overrides_digest, ignore_overrides, invalidate_on_overrides)
-      # TODO: There is some case where progress should be cleared, but it can be manual for now
-      # invalidate_progress!("Overrides changed; cleared completed steps")
     end
 
     # Current rootfs-relative state path
@@ -134,11 +134,6 @@ module Bootstrap
       File.exists?(state_path)
     end
 
-    # Load the build plan JSON from disk.
-    def load_plan! : BuildPlan
-      @plan = on_disk_plan || BuildPlan.new([] of BuildPhase)
-    end
-
     # Apply overrides to *plan* and return the resolved plan.
     def resolve_plan(plan : BuildPlan,
                      use_overrides : Bool = true) : BuildPlan
@@ -171,7 +166,7 @@ module Bootstrap
 
     # Return the next incomplete phase/step for the plan.
     def next_incomplete_step : Tuple(String?, String?)
-      @plan.not_nil!.phases.each do |phase|
+      @plan.phases.each do |phase|
         phase.steps.each do |step|
           next if completed?(phase.name, step.name)
           return {phase.name, step.name}
@@ -270,11 +265,6 @@ module Bootstrap
       save
     end
 
-    # Return the selected build phases from the current plan.
-    def selected_phases(requested : String = "all") : Array(BuildPhase)
-      @plan.selected_phases(requested)
-    end
-
     # Clear completed steps and record a reason for invalidation.
     def invalidate_progress!(reason : String) : Nil
       @progress.completed_steps.clear
@@ -317,6 +307,60 @@ module Bootstrap
       @invalidated_at = previous_state.invalidated_at
       @invalidation_reason = previous_state.invalidation_reason
       @progress = previous_state.progress.not_nil!
+    end
+
+    def filtered_phases(by_name : String = "all",
+                        by_state : Bool = false,
+                        by_namespace : SysrootWorkspace? = nil,
+                        by_packages : Array(String) = [] of String,) : Array(BuildPhase)
+      selected_phases = @plan.phases.dup
+      selected_phases.reject! { |phase| phase.name != by_name } unless by_name == "all"
+      raise "Unknown build phase #{by_name}" if selected_phases.empty?
+      if by_state
+        selected_phases = selected_phases.compact_map do |phase|
+          remaining = phase.steps.reject { |step| completed?(phase.name, step.name) }
+          next nil if remaining.empty?
+          BuildPhase.new(
+            name: phase.name,
+            description: phase.description,
+            namespace: phase.namespace,
+            install_prefix: phase.install_prefix,
+            destdir: phase.destdir,
+            env: phase.env,
+            steps: remaining,
+          )
+        end
+      end
+      if by_namespace
+        selected_phases.reject! { |phase| phase.namespace == "host" } unless workspace.namespace.host?
+        selected_phases.reject! { |phase| phase.namespace == "seed" } if workspace.namespace.bq2?
+      end
+      if by_packages.present?
+        matched = Set(String).new
+        selected_phases.each do |phase|
+          phase.steps.each do |step|
+            matched << step.name if by_packages.includes?(step.name)
+          end
+        end
+        missing = by_packages.uniq.reject { |name| matched.includes?(name) }
+        raise "Requested package(s) not found in selected phases: #{missing.join(", ")}" unless missing.empty?
+
+        selected_phases = selected_phases.compact_map do |phase|
+          steps = phase.steps.select { |step| by_packages.includes?(step.name) }
+          next nil if steps.empty?
+          BuildPhase.new(
+            name: phase.name,
+            description: phase.description,
+            namespace: phase.namespace,
+            install_prefix: phase.install_prefix,
+            destdir: phase.destdir,
+            env: phase.env,
+            steps: steps,
+          )
+        end
+        raise "No matching packages found in selected phases: #{by_packages.join(", ")}" if selected_phases.empty?
+      end
+      selected_phases
     end
 
     # Minimal step reference used for progress tracking.
