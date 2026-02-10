@@ -31,12 +31,59 @@ class RecordingRunner
   end
 end
 
+private def run_plan_from_state_plan(plan : Bootstrap::BuildPlan,
+                                     runner,
+                                     phase : String? = nil,
+                                     packages : Array(String) = [] of String,
+                                     report : Bool = true,
+                                     report_dir : String? = nil,
+                                     dry_run : Bool = false,
+                                     dry_run_io : IO? = nil,
+                                     resume : Bool = true,
+                                     workspace : Bootstrap::SysrootWorkspace? = nil) : Nil
+  if workspace
+    state = Bootstrap::SysrootBuildState.new(workspace: workspace)
+    state.plan = plan
+    Bootstrap::SysrootRunner.run_plan(
+      state,
+      runner,
+      phase: phase,
+      packages: packages,
+      report: report,
+      report_dir: report_dir,
+      dry_run: dry_run,
+      dry_run_io: dry_run_io,
+      resume: resume,
+      workspace: workspace
+    )
+    return
+  end
+
+  with_tempdir do |dir|
+    temp_workspace = Bootstrap::SysrootWorkspace.create(Path[dir])
+    state = Bootstrap::SysrootBuildState.new(workspace: temp_workspace)
+    state.plan = plan
+    Bootstrap::SysrootRunner.run_plan(
+      state,
+      runner,
+      phase: phase,
+      packages: packages,
+      report: report,
+      report_dir: report_dir,
+      dry_run: dry_run,
+      dry_run_io: dry_run_io,
+      resume: resume,
+      workspace: temp_workspace
+    )
+  end
+end
+
 describe Bootstrap::SysrootRunner do
   it "runs steps with a custom runner" do
     phase = Bootstrap::BuildPhase.new(
       name: "phase-a",
       description: "test phase",
-      namespace: "test",
+      namespace: "host",
       install_prefix: "/opt/sysroot",
       destdir: nil,
       env: {} of String => String,
@@ -59,7 +106,7 @@ describe Bootstrap::SysrootRunner do
     phase = Bootstrap::BuildPhase.new(
       name: "phase-fail",
       description: "test phase",
-      namespace: "test",
+      namespace: "host",
       install_prefix: "/opt/sysroot",
       steps: [] of Bootstrap::BuildStep,
     )
@@ -78,14 +125,14 @@ describe Bootstrap::SysrootRunner do
       Bootstrap::BuildPhase.new(
         name: "phase-a",
         description: "phase a",
-        namespace: "test",
+        namespace: "host",
         install_prefix: "/opt/sysroot",
         steps: phase_a_steps,
       ),
       Bootstrap::BuildPhase.new(
         name: "phase-b",
         description: "phase b",
-        namespace: "test",
+        namespace: "host",
         install_prefix: "/usr",
         destdir: "/tmp/rootfs",
         steps: phase_b_steps,
@@ -100,7 +147,7 @@ describe Bootstrap::SysrootRunner do
       plan_path = var_lib / "sysroot-build-plan.json"
       File.write(plan_path, plan.to_json)
 
-      Bootstrap::SysrootRunner.run_plan(plan_path.to_s, runner)
+      run_plan_from_state_plan(plan, runner)
       runner.calls.size.should eq 2
       runner.calls.map(&.[:name]).should eq ["file-a", "file-b"]
     end
@@ -109,12 +156,12 @@ describe Bootstrap::SysrootRunner do
   it "runs all phases when requested" do
     steps = [Bootstrap::BuildStep.new(name: "step", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
     plan = Bootstrap::BuildPlan.new([
-      Bootstrap::BuildPhase.new(name: "one", description: "a", namespace: "test", install_prefix: "/opt/sysroot", steps: steps),
-      Bootstrap::BuildPhase.new(name: "two", description: "b", namespace: "test", install_prefix: "/usr", destdir: "/tmp/rootfs", steps: steps),
+      Bootstrap::BuildPhase.new(name: "one", description: "a", namespace: "host", install_prefix: "/opt/sysroot", steps: steps),
+      Bootstrap::BuildPhase.new(name: "two", description: "b", namespace: "host", install_prefix: "/usr", destdir: "/tmp/rootfs", steps: steps),
     ])
 
     runner = RecordingRunner.new
-    Bootstrap::SysrootRunner.run_plan(plan, runner, phase: "all")
+    run_plan_from_state_plan(plan, runner, phase: "all")
     runner.calls.size.should eq 2
     runner.calls.map(&.[:phase]).should eq ["one", "two"]
   end
@@ -122,12 +169,12 @@ describe Bootstrap::SysrootRunner do
   it "runs only the selected phase when requested" do
     steps = [Bootstrap::BuildStep.new(name: "step", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
     plan = Bootstrap::BuildPlan.new([
-      Bootstrap::BuildPhase.new(name: "one", description: "a", namespace: "test", install_prefix: "/opt/sysroot", steps: steps),
-      Bootstrap::BuildPhase.new(name: "two", description: "b", namespace: "test", install_prefix: "/usr", destdir: "/tmp/rootfs", steps: steps),
+      Bootstrap::BuildPhase.new(name: "one", description: "a", namespace: "host", install_prefix: "/opt/sysroot", steps: steps),
+      Bootstrap::BuildPhase.new(name: "two", description: "b", namespace: "host", install_prefix: "/usr", destdir: "/tmp/rootfs", steps: steps),
     ])
 
     runner = RecordingRunner.new
-    Bootstrap::SysrootRunner.run_plan(plan, runner, phase: "two")
+    run_plan_from_state_plan(plan, runner, phase: "two")
     runner.calls.size.should eq 1
     runner.calls.first[:phase].should eq "two"
   end
@@ -135,15 +182,15 @@ describe Bootstrap::SysrootRunner do
   it "defaults to all phases when not running inside the rootfs" do
     steps = [Bootstrap::BuildStep.new(name: "step", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
     plan = Bootstrap::BuildPlan.new([
-      Bootstrap::BuildPhase.new(name: "one", description: "a", namespace: "test", install_prefix: "/opt/sysroot", steps: steps),
-      Bootstrap::BuildPhase.new(name: "two", description: "b", namespace: "test", install_prefix: "/usr", steps: steps),
+      Bootstrap::BuildPhase.new(name: "one", description: "a", namespace: "host", install_prefix: "/opt/sysroot", steps: steps),
+      Bootstrap::BuildPhase.new(name: "two", description: "b", namespace: "host", install_prefix: "/usr", steps: steps),
     ])
 
     previous = ENV["BQ2_ROOTFS_MARKER"]?
     ENV.delete("BQ2_ROOTFS_MARKER")
     begin
       runner = RecordingRunner.new
-      Bootstrap::SysrootRunner.run_plan(plan, runner)
+      run_plan_from_state_plan(plan, runner)
       runner.calls.size.should eq 2
       runner.calls.map(&.[:phase]).should eq ["one", "two"]
     ensure
@@ -158,8 +205,8 @@ describe Bootstrap::SysrootRunner do
   it "defaults to all rootfs phases when running inside the rootfs" do
     steps = [Bootstrap::BuildStep.new(name: "step", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
     plan = Bootstrap::BuildPlan.new([
-      Bootstrap::BuildPhase.new(name: "two", description: "b", namespace: "bq2", install_prefix: "/usr", steps: steps),
-      Bootstrap::BuildPhase.new(name: "three", description: "c", namespace: "bq2", install_prefix: "/usr", steps: steps),
+      Bootstrap::BuildPhase.new(name: "two", description: "b", namespace: "host", install_prefix: "/usr", steps: steps),
+      Bootstrap::BuildPhase.new(name: "three", description: "c", namespace: "host", install_prefix: "/usr", steps: steps),
     ])
 
     with_tempdir do |dir|
@@ -169,7 +216,7 @@ describe Bootstrap::SysrootRunner do
       ENV["BQ2_ROOTFS_MARKER"] = marker_path.to_s
       begin
         runner = RecordingRunner.new
-        Bootstrap::SysrootRunner.run_plan(plan, runner)
+        run_plan_from_state_plan(plan, runner)
         runner.calls.size.should eq 2
         runner.calls.map(&.[:phase]).should eq ["two", "three"]
       ensure
@@ -218,12 +265,12 @@ describe Bootstrap::SysrootRunner do
 
   it "raises when a requested phase does not exist" do
     plan = Bootstrap::BuildPlan.new([
-      Bootstrap::BuildPhase.new(name: "one", description: "a", namespace: "test", install_prefix: "/opt/sysroot", steps: [] of Bootstrap::BuildStep),
+      Bootstrap::BuildPhase.new(name: "one", description: "a", namespace: "host", install_prefix: "/opt/sysroot", steps: [] of Bootstrap::BuildStep),
     ])
     runner = RecordingRunner.new
 
     expect_raises(Exception, /Unknown build phase/) do
-      Bootstrap::SysrootRunner.run_plan(plan, runner, phase: "missing")
+      run_plan_from_state_plan(plan, runner, phase: "missing")
     end
   end
 
@@ -262,7 +309,7 @@ describe Bootstrap::SysrootRunner do
 
       workspace = Bootstrap::SysrootWorkspace.create(host_workdir: destdir / "work")
       runner = Bootstrap::StepRunner.new(workspace: workspace)
-      Bootstrap::SysrootRunner.run_plan(plan, runner, phase: "all")
+      run_plan_from_state_plan(plan, runner, phase: "all")
 
       File.directory?(destdir).should be_true
     ensure
@@ -276,7 +323,7 @@ describe Bootstrap::SysrootRunner do
       phase = Bootstrap::BuildPhase.new(
         name: "phase-fail",
         description: "test phase",
-        namespace: "test",
+        namespace: "host",
         install_prefix: "/opt/sysroot",
         steps: [] of Bootstrap::BuildStep,
       )
@@ -297,12 +344,12 @@ describe Bootstrap::SysrootRunner do
     steps_a = [Bootstrap::BuildStep.new(name: "a", strategy: "autotools", workdir: "/a", configure_flags: [] of String, patches: [] of String)]
     steps_b = [Bootstrap::BuildStep.new(name: "b", strategy: "autotools", workdir: "/b", configure_flags: [] of String, patches: [] of String)]
     plan = Bootstrap::BuildPlan.new([
-      Bootstrap::BuildPhase.new(name: "one", description: "a", namespace: "test", install_prefix: "/opt/sysroot", steps: steps_a),
-      Bootstrap::BuildPhase.new(name: "two", description: "b", namespace: "test", install_prefix: "/usr", destdir: "/tmp/rootfs", steps: steps_b),
+      Bootstrap::BuildPhase.new(name: "one", description: "a", namespace: "host", install_prefix: "/opt/sysroot", steps: steps_a),
+      Bootstrap::BuildPhase.new(name: "two", description: "b", namespace: "host", install_prefix: "/usr", destdir: "/tmp/rootfs", steps: steps_b),
     ])
 
     runner = RecordingRunner.new
-    Bootstrap::SysrootRunner.run_plan(plan, runner, phase: "all", packages: ["b"], report_dir: nil)
+    run_plan_from_state_plan(plan, runner, phase: "all", packages: ["b"], report_dir: nil)
     runner.calls.size.should eq 1
     runner.calls.first[:phase].should eq "two"
     runner.calls.first[:name].should eq "b"
@@ -311,19 +358,19 @@ describe Bootstrap::SysrootRunner do
   it "raises when any requested package filter is missing" do
     steps = [Bootstrap::BuildStep.new(name: "a", strategy: "autotools", workdir: "/a", configure_flags: [] of String, patches: [] of String)]
     plan = Bootstrap::BuildPlan.new([
-      Bootstrap::BuildPhase.new(name: "one", description: "a", namespace: "test", install_prefix: "/opt/sysroot", steps: steps),
+      Bootstrap::BuildPhase.new(name: "one", description: "a", namespace: "host", install_prefix: "/opt/sysroot", steps: steps),
     ])
 
     runner = RecordingRunner.new
     expect_raises(Exception, /not found/) do
-      Bootstrap::SysrootRunner.run_plan(plan, runner, packages: ["a", "missing"], report_dir: nil)
+      run_plan_from_state_plan(plan, runner, packages: ["a", "missing"], report_dir: nil)
     end
   end
 
   it "applies overrides from a file when requested" do
     steps = [Bootstrap::BuildStep.new(name: "pkg", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
     plan = Bootstrap::BuildPlan.new([
-      Bootstrap::BuildPhase.new(name: "one", description: "a", namespace: "test", install_prefix: "/opt/sysroot", steps: steps),
+      Bootstrap::BuildPhase.new(name: "one", description: "a", namespace: "host", install_prefix: "/opt/sysroot", steps: steps),
     ])
 
     overrides = {
@@ -349,7 +396,9 @@ describe Bootstrap::SysrootRunner do
       overrides_path = dir / "overrides.json"
       File.write(overrides_path, overrides)
 
-      Bootstrap::SysrootRunner.run_plan(plan_path.to_s, runner, overrides_path: overrides_path.to_s, report_dir: nil)
+      overrides = Bootstrap::BuildPlanOverrides.from_json(File.read(overrides_path))
+      plan = overrides.apply(plan)
+      run_plan_from_state_plan(plan, runner, report_dir: nil)
       runner.calls.size.should eq 1
       runner.calls.first[:configure_flags].should eq ["--with-foo"]
       runner.calls.first[:env]["CC"].should eq "clang"
@@ -359,12 +408,12 @@ describe Bootstrap::SysrootRunner do
   it "supports dry-run without executing steps" do
     steps = [Bootstrap::BuildStep.new(name: "pkg", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
     plan = Bootstrap::BuildPlan.new([
-      Bootstrap::BuildPhase.new(name: "one", description: "a", namespace: "test", install_prefix: "/opt/sysroot", steps: steps),
+      Bootstrap::BuildPhase.new(name: "one", description: "a", namespace: "host", install_prefix: "/opt/sysroot", steps: steps),
     ])
 
     runner = RecordingRunner.new
     output = IO::Memory.new
-    Bootstrap::SysrootRunner.run_plan(plan, runner, dry_run: true, dry_run_io: output, report_dir: nil)
+    run_plan_from_state_plan(plan, runner, dry_run: true, dry_run_io: output, report_dir: nil)
     runner.calls.should be_empty
   end
 
@@ -389,24 +438,19 @@ describe Bootstrap::SysrootRunner do
       plan_path = plan_file.path
       plan_file.close
 
-      state_path : Path? = nil
-      state_path = Path[File.tempname("bq2-state").not_nil!]
-      File.delete?(state_path.to_s)
       workspace = Bootstrap::SysrootWorkspace.create(Path[dir])
       state = Bootstrap::SysrootBuildState.new(workspace: workspace)
-        .load_or_init(state_path)
       state.mark_success("one", "a")
-      state.save(state_path)
+      state.save
 
       runner = RecordingRunner.new
-      Bootstrap::SysrootRunner.run_plan(plan_path, runner, report_dir: nil, state: state, overrides_path: nil, use_default_overrides: false, workspace: workspace)
+      state.plan = Bootstrap::BuildPlan.parse(File.read(plan_path))
+      Bootstrap::SysrootRunner.run_plan(state, runner, report_dir: nil)
       runner.calls.map { |call| call[:name] }.should eq ["b"]
 
-      updated = Bootstrap::SysrootBuildState.load(workspace, state_path)
+      updated = Bootstrap::SysrootBuildState.new(workspace: workspace)
       updated.completed?("one", "a").should be_true
       updated.completed?("one", "b").should be_true
-    ensure
-      File.delete?(state_path.to_s) if state_path
     end
   end
 
@@ -431,20 +475,15 @@ describe Bootstrap::SysrootRunner do
       plan_path = plan_file.path
       plan_file.close
 
-      state_path : Path? = nil
-      state_path = Path[File.tempname("bq2-state").not_nil!]
-      File.delete?(state_path.to_s)
       workspace = Bootstrap::SysrootWorkspace.create(Path[dir])
       state = Bootstrap::SysrootBuildState.new(workspace: workspace)
-        .load_or_init(state_path)
       state.mark_success("one", "a")
-      state.save(state_path)
+      state.save
 
       runner = RecordingRunner.new
-      Bootstrap::SysrootRunner.run_plan(plan_path, runner, report_dir: nil, state: state, resume: false, overrides_path: nil, use_default_overrides: false, workspace: workspace)
+      state.plan = Bootstrap::BuildPlan.parse(File.read(plan_path))
+      Bootstrap::SysrootRunner.run_plan(state, runner, report_dir: nil, resume: false)
       runner.calls.map { |call| call[:name] }.should eq ["a", "b"]
-    ensure
-      File.delete?(state_path.to_s) if state_path
     end
   end
 end

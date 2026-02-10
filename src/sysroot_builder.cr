@@ -1085,6 +1085,7 @@ module Bootstrap
       build_state = SysrootBuildState.new(workspace: @workspace, ignore_overrides: true)
       build_state.plan = plan
       build_state.save_plan
+      build_state.plan_path.to_s
     end
 
     # Convert a PhaseSpec into a concrete BuildPhase with computed workdirs and
