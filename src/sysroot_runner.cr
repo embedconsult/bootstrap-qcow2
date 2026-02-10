@@ -61,16 +61,10 @@ module Bootstrap
                       dry_run : Bool = false,
                       dry_run_io : IO? = nil,
                       resume : Bool = true,
-                      overrides_path : String? = nil,
-                      use_default_overrides : Bool = true,
                       workspace : SysrootWorkspace? = nil) : Nil
       loaded_plan = state.plan
       raise "SysrootBuildState.plan must be loaded before running" unless loaded_plan
       effective_workspace = workspace || state.workspace
-      if overrides_path || !use_default_overrides
-        Log.debug { "Ignoring overrides options for SysrootBuildState.run_plan because state.plan is already resolved" }
-      end
-
       run_plan_impl(
         loaded_plan,
         runner,
@@ -86,36 +80,6 @@ module Bootstrap
       )
     end
 
-    # Execute a provided build plan with a custom step runner.
-    def self.run_plan(plan : BuildPlan,
-                      runner,
-                      phase : String? = nil,
-                      packages : Array(String) = [] of String,
-                      report : Bool = true,
-                      report_dir : String? = nil,
-                      dry_run : Bool = false,
-                      dry_run_io : IO? = nil,
-                      resume : Bool = true,
-                      overrides_path : String? = nil,
-                      use_default_overrides : Bool = true,
-                      workspace : SysrootWorkspace? = nil) : Nil
-      run_plan_impl(
-        plan,
-        runner,
-        phase: phase,
-        packages: packages,
-        report: report,
-        report_dir: report_dir,
-        dry_run: dry_run,
-        dry_run_io: dry_run_io,
-        resume: resume,
-        state: nil,
-        workspace: workspace,
-        overrides_path: overrides_path,
-        use_default_overrides: use_default_overrides
-      )
-    end
-
     private def self.run_plan_impl(plan : BuildPlan,
                                    runner,
                                    phase : String? = nil,
@@ -126,16 +90,9 @@ module Bootstrap
                                    dry_run_io : IO? = nil,
                                    resume : Bool = true,
                                    state : SysrootBuildState? = nil,
-                                   workspace : SysrootWorkspace? = nil,
-                                   overrides_path : String? = nil,
-                                   use_default_overrides : Bool = true) : Nil
-      resolved_plan = if state
-                        plan
-                      else
-                        resolve_plan_for_build_plan(plan, overrides_path, use_default_overrides, workspace)
-                      end
+                                   workspace : SysrootWorkspace? = nil) : Nil
       selected_phase = phase || default_phase(plan)
-      phases = resolved_plan.selected_phases(selected_phase)
+      phases = plan.selected_phases(selected_phase)
       phases = filter_phases_by_packages(phases, packages) if packages.any?
 
       if state && resume
@@ -157,22 +114,6 @@ module Bootstrap
           state.mark_current_phase(phases[idx + 1]?.try(&.name))
         end
       end
-    end
-
-    private def self.resolve_plan_for_build_plan(plan : BuildPlan,
-                                                 overrides_path : String?,
-                                                 use_default_overrides : Bool,
-                                                 workspace : SysrootWorkspace?) : BuildPlan
-      path = overrides_path
-      if path.nil? && use_default_overrides
-        effective_workspace = workspace || SysrootWorkspace.new(host_workdir: Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR])
-        path = effective_workspace.log_path.join(SysrootBuildState::OVERRIDES_FILE).to_s
-      end
-      return plan unless path
-      return plan unless File.exists?(path)
-
-      overrides = BuildPlanOverrides.from_json(File.read(path))
-      overrides.apply(plan)
     end
 
     # Run a single phase from the plan.
