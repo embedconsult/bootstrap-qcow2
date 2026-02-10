@@ -9,7 +9,7 @@ describe Bootstrap::CLI do
 
   it "falls back to default command when nothing matches" do
     command, args = Bootstrap::CLI.dispatch([] of String)
-    command.should eq "default"
+    command.should eq "help"
     args.should eq [] of String
   end
 

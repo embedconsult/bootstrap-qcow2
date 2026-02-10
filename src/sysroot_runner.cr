@@ -65,7 +65,7 @@ module Bootstrap
                       overrides_path : String? = nil,
                       use_default_overrides : Bool = true,
                       workspace : SysrootWorkspace? = nil) : Nil
-      state_for_plan = state || SysrootBuildState.new(workspace: workspace || SysrootWorkspace.create)
+      state_for_plan = state || SysrootBuildState.new(workspace: workspace || SysrootWorkspace.new(host_workdir: Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR]))
       plan = BuildPlan.from_json(File.read(plan_path))
       run_plan(plan,
         runner,

@@ -27,7 +27,7 @@ module Bootstrap
     getter format_version : Int32 = FORMAT_VERSION
 
     @[JSON::Field(ignore: true)]
-    @workspace : SysrootWorkspace = SysrootWorkspace.create
+    @workspace : SysrootWorkspace = SysrootWorkspace.new(host_workdir: Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR])
 
     @[JSON::Field(ignore: true)]
     property plan : BuildPlan? = nil
@@ -65,7 +65,7 @@ module Bootstrap
     # Runner progress tracked per phase/package.
     getter progress : Progress = Progress.new
 
-    def initialize(@workspace : SysrootWorkspace = SysrootWorkspace.create,
+    def initialize(@workspace : SysrootWorkspace = SysrootWorkspace.new(host_workdir: Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR]),
                    @rootfs_id : String = Random::Secure.hex(8),
                    @created_at : String = Time.utc.to_s,
                    @updated_at : String? = nil,
