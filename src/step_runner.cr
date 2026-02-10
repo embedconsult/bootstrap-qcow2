@@ -448,7 +448,14 @@ module Bootstrap
       current_url = url
       loop do
         response = HTTP::Client.exec(method, current_url)
-        return response unless redirect?(response.status_code)
+        unless redirect?(response.status_code)
+          unless response.success?
+            message = "#{method} #{current_url} failed with HTTP #{response.status_code}"
+            message += ": #{response.status_message}" if response.status_message.presence
+            raise message
+          end
+          return response
+        end
         raise "Redirect missing Location header" unless response.headers["Location"]?
         raise "Too many redirects" if redirects >= max_redirects
         current_url = resolve_redirect(current_url, response.headers["Location"])

@@ -67,12 +67,12 @@ module Bootstrap
       end
 
       phases.each_with_index do |phase_entry, idx|
-        if state
+        if resume && state
           state.mark_current_phase(phase_entry.name)
         end
         enter_phase_namespace(phase_entry, state.workspace) if state.workspace && namespace_switch_required?(phase_entry, state.workspace)
         run_phase(phase_entry, runner, report: report, report_dir: report_dir, state: state, resume: resume)
-        if state
+        if resume && state
           state.mark_current_phase(phases[idx + 1]?.try(&.name))
         end
       end
@@ -116,12 +116,12 @@ module Bootstrap
         Log.info { "Building #{step.name} in #{step.workdir} (phase=#{phase.name})" }
         begin
           runner.run(phase, step)
-          if state
+          if resume && state
             state.mark_success(phase.name, step.name)
           end
         rescue ex
           report_path = effective_report_dir ? write_failure_report(effective_report_dir, phase, step, ex) : nil
-          if state
+          if resume && state
             state.mark_failure(phase.name, step.name, ex.message, report_path)
           end
           raise ex
