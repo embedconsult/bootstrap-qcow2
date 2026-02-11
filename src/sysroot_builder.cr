@@ -630,7 +630,7 @@ module Bootstrap
       llvm_major = DEFAULT_LLVM_VER.split(".").first
       compiler_rt_arch = sysroot_triple.split("-").first
       clang_rt_dir = "/usr/lib/clang/#{llvm_major}/lib/#{sysroot_triple}"
-      clang_rt_atomic = "#{clang_rt_dir}/libclang_rt.atomic-#{compiler_rt_arch}.so"
+      clang_rt_atomic = "#{clang_rt_dir}/libclang_rt.atomic.so"
       libxml2_env = {
         "CPPFLAGS" => "-I#{sysroot_prefix}/include",
         "LDFLAGS"  => "-L#{sysroot_prefix}/lib",
