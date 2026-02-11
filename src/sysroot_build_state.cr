@@ -309,16 +309,23 @@ module Bootstrap
       @progress = previous_state.progress.not_nil!
     end
 
+    private def phase_names(phases : Array(BuildPhase)) : Array(String)?
+      phases.map { |phase| phase.name }
+    end
+
     def filtered_phases(by_name : String = "all",
                         by_state : Bool = false,
                         by_namespace : SysrootWorkspace? = nil,
                         by_packages : Array(String) = [] of String,) : Array(BuildPhase)
       selected_phases = @plan.phases.dup
+      Log.debug { "Testing #{phase_names(selected_phases)} for inclusion in selected_phases" }
       selected_phases.reject! { |phase| phase.name != by_name } unless by_name == "all"
+      Log.debug { "Phases #{phase_names(selected_phases)} remain after rejection by_name: #{by_name}" }
       raise "Unknown build phase #{by_name}" if selected_phases.empty?
       if by_state
         selected_phases = selected_phases.compact_map do |phase|
           remaining = phase.steps.reject { |step| completed?(phase.name, step.name) }
+          Log.debug { "Remaining steps in phase '#{phase.name}': #{remaining}" }
           next nil if remaining.empty?
           BuildPhase.new(
             name: phase.name,
@@ -331,10 +338,12 @@ module Bootstrap
           )
         end
       end
+      Log.debug { "Phases #{phase_names(selected_phases)} remain after rejection by_state: #{by_state}" }
       if by_namespace
         selected_phases.reject! { |phase| phase.namespace == "host" } unless workspace.namespace.host?
         selected_phases.reject! { |phase| phase.namespace == "seed" } if workspace.namespace.bq2?
       end
+      Log.debug { "Phases #{phase_names(selected_phases)} remain after rejection by_namespace: #{by_namespace}" }
       if by_packages.present?
         matched = Set(String).new
         selected_phases.each do |phase|
@@ -360,6 +369,7 @@ module Bootstrap
         end
         raise "No matching packages found in selected phases: #{by_packages.join(", ")}" if selected_phases.empty?
       end
+      Log.debug { "Phases #{phase_names(selected_phases)} remain after rejection by_packages: #{by_packages}" }
       selected_phases
     end
 
