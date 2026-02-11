@@ -1272,8 +1272,18 @@ module Bootstrap
       env["CMAKE_SOURCE_DIR"] = "llvm"
       stage2_env = env.dup
       stage2_lib = File.join(build_root, "build-stage2", "lib")
+      phase_ld = spec.phase.env["LD_LIBRARY_PATH"]?
       existing_ld = stage2_env["LD_LIBRARY_PATH"]?
-      stage2_env["LD_LIBRARY_PATH"] = existing_ld && !existing_ld.empty? ? "#{stage2_lib}:#{existing_ld}" : stage2_lib
+      ld_parts = [] of String
+      ld_parts << stage2_lib
+      [existing_ld, phase_ld].each do |value|
+        next unless value && !value.empty?
+        value.split(':').each do |part|
+          next if part.empty? || ld_parts.includes?(part)
+          ld_parts << part
+        end
+      end
+      stage2_env["LD_LIBRARY_PATH"] = ld_parts.join(":")
       base_flags = configure_flags_for(pkg, spec)
       patches = patches_for(pkg, spec)
       stage1_flags = llvm_stage1_flags(base_flags, spec.phase.env)
