@@ -138,6 +138,7 @@ module Bootstrap
     end
 
     def namespace_switch_required?(requested : String)
+      Log.debug { "Testing if #{requested} is #{@namespace}" }
       @namespace != Namespace.parse(requested)
     end
 

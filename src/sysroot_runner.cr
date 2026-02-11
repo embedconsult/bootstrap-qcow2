@@ -33,6 +33,7 @@ module Bootstrap
                    @dry_run : Bool = false,
                    @dry_run_io : IO? = nil,
                    @resume : Bool = true) : Nil
+      Log.debug { "Created new SysrootRunner (phase=#{@phase}, packages=#{packages}, report=#{report}, dry_run=#{dry_run}, resume=#{@resume})" }
     end
 
     # Summarize the sysroot runner CLI behavior for help output.
@@ -70,7 +71,9 @@ module Bootstrap
 
     # Execute a build plan from a preloaded build state.
     def run_plan
+      Log.debug { "Running plan filtered by_name: #{@phase}, by_state: #{@resume}, by_packages: #{@packages}" }
       selected_phases = @state.filtered_phases(by_name: @phase, by_state: @resume, by_packages: @packages)
+      Log.debug { "selected_phases=#{selected_phases.map { |phase| phase.name }}" }
 
       if @dry_run
         print_dry_run(selected_phases)
@@ -79,15 +82,18 @@ module Bootstrap
 
       selected_phases.each_with_index do |phase_entry, idx|
         if @resume
+          Log.debug { "Marking phase #{phase_entry.name} as current" }
           @state.mark_current_phase(phase_entry.name)
         end
-        if @state.workspace.namespace_switch_required?(phase_entry.name)
+        if @state.workspace.namespace_switch_required?(phase_entry.namespace)
           Log.info { "Entering namespace #{phase_entry.name}" }
           @state.workspace.enter_namespace(phase_entry.name)
         end
         run_phase(phase_entry)
         if @resume
-          @state.mark_current_phase(@state.plan.phases[idx + 1]?.try(&.name))
+	  next_phase = @state.plan.phases[idx + 1]?.try(&.name)
+          Log.debug { "Marking next phase #{next_phase} as current" }
+          @state.mark_current_phase(next_phase)
         end
       end
     end

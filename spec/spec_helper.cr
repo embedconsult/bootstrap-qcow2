@@ -102,10 +102,12 @@ class RecordingRunner < Bootstrap::StepRunner
   def initialize(@status : Bool = true, @exit_code : Int32 = 0)
     @workdir = Path[Dir.tempdir] / "bq2-runner-spec-#{Random::Secure.hex(8)}"
     host_workdir = @workdir
+    Log.debug { "Initializing RecordingRunner and creating workspace in #{@workdir}" }
     super(Bootstrap::SysrootWorkspace.create(host_workdir: host_workdir))
   end
 
   def run(phase : Bootstrap::BuildPhase, step : Bootstrap::BuildStep)
+    Log.debug { "Running #{phase.name} / #{step.name} in #{@workspace.host_workdir}" }
     @calls << {phase: phase.name, name: step.name, workdir: step.workdir, strategy: step.strategy, configure_flags: step.configure_flags, env: step.env}
     raise "Command failed (#{@exit_code})" unless @status
     FakeStatus.new(@status, @exit_code)
