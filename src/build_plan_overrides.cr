@@ -103,6 +103,7 @@ module Bootstrap
       configure_flags = (override.configure_flags || step.configure_flags) + override.configure_flags_add
       patches = (override.patches || step.patches) + override.patches_add
       clean_build = override.clean_build.nil? ? step.clean_build : override.clean_build.not_nil!
+      content = override.content || step.content
       BuildStep.new(
         name: step.name,
         strategy: step.strategy,
@@ -117,7 +118,7 @@ module Bootstrap
         sources: sources,
         extract_sources: extract_sources,
         packages: step.packages,
-        content: step.content,
+        content: content,
       )
     end
 
@@ -219,9 +220,7 @@ module Bootstrap
       if base_step.packages != target_step.packages
         raise "Target plan modifies package specs in phase #{phase_name} step #{base_step.name}; overrides cannot represent package changes"
       end
-      if base_step.content != target_step.content
-        raise "Target plan modifies content in phase #{phase_name} step #{base_step.name}; overrides cannot represent content changes"
-      end
+      content = base_step.content == target_step.content ? nil : target_step.content
       workdir = base_step.workdir == target_step.workdir ? nil : target_step.workdir
       build_dir = diff_nullable_path("phase #{phase_name} step #{base_step.name} build_dir", base_step.build_dir, target_step.build_dir)
       install_prefix = diff_nullable_path("phase #{phase_name} step #{base_step.name} install_prefix", base_step.install_prefix, target_step.install_prefix)
@@ -241,7 +240,8 @@ module Bootstrap
                     configure_flags_override[:replace].nil? &&
                     configure_flags_override[:append].empty? &&
                     patches_override[:replace].nil? &&
-                    patches_override[:append].empty?
+                    patches_override[:append].empty? &&
+                    content.nil?
 
       StepOverride.new(
         workdir: workdir,
@@ -252,6 +252,7 @@ module Bootstrap
         clean_build: clean_build,
         sources: sources,
         extract_sources: extract_sources,
+        content: content,
         configure_flags: configure_flags_override[:replace],
         configure_flags_add: configure_flags_override[:append],
         patches: patches_override[:replace],
@@ -317,6 +318,7 @@ module Bootstrap
     getter clean_build : Bool?
     getter sources : Array(SourceSpec)?
     getter extract_sources : Array(ExtractSpec)?
+    getter content : String?
     # Replace configure flags entirely for a step.
     getter configure_flags : Array(String)?
     # Replace patches entirely for a step.
@@ -334,6 +336,7 @@ module Bootstrap
                    @clean_build : Bool? = nil,
                    @sources : Array(SourceSpec)? = nil,
                    @extract_sources : Array(ExtractSpec)? = nil,
+                   @content : String? = nil,
                    @configure_flags : Array(String)? = nil,
                    @patches : Array(String)? = nil,
                    @configure_flags_add : Array(String) = [] of String,

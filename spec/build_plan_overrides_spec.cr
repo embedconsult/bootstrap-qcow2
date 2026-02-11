@@ -138,6 +138,50 @@ describe Bootstrap::BuildPlanOverrides do
     updated.phases.first.steps.first.configure_flags.should eq ["--two", "--three"]
   end
 
+  it "builds overrides that replace step content when the plan changes" do
+    base = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        namespace: "test",
+        install_prefix: "/opt/sysroot",
+        steps: [
+          Bootstrap::BuildStep.new(
+            name: "file",
+            strategy: "write-file",
+            workdir: "/tmp",
+            configure_flags: [] of String,
+            patches: [] of String,
+            content: "alpha",
+          ),
+        ],
+      ),
+    ])
+
+    target = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        namespace: "test",
+        install_prefix: "/opt/sysroot",
+        steps: [
+          Bootstrap::BuildStep.new(
+            name: "file",
+            strategy: "write-file",
+            workdir: "/tmp",
+            configure_flags: [] of String,
+            patches: [] of String,
+            content: "beta",
+          ),
+        ],
+      ),
+    ])
+
+    overrides = Bootstrap::BuildPlanOverrides.from_diff(base, target)
+    updated = overrides.apply(base)
+    updated.phases.first.steps.first.content.should eq "beta"
+  end
+
   it "appends extra steps from overrides" do
     plan = Bootstrap::BuildPlan.new([
       Bootstrap::BuildPhase.new(
