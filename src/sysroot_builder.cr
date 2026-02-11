@@ -1269,7 +1269,7 @@ module Bootstrap
       base_flags = configure_flags_for(pkg, spec)
       patches = patches_for(pkg, spec)
       stage1_flags = llvm_stage1_flags(base_flags, spec.phase.env)
-      stage2_flags = llvm_stage2_flags(base_flags, spec.phase.install_prefix, sysroot_target_triple, build_root)
+      stage2_flags = llvm_stage2_flags(base_flags, spec.phase.install_prefix, sysroot_target_triple, build_root, spec.phase.env)
       [
         BuildStep.new(
           name: "#{pkg.name}-stage1",
@@ -1300,14 +1300,6 @@ module Bootstrap
       {compiler, flags}
     end
 
-    # Ensure warning suppression is present for LLVM C++ builds.
-    private def append_warning_suppression(flags : String) : String
-      warning_flag = "-Wno-unnecessary-virtual-specifier"
-      return flags if flags.includes?(warning_flag)
-      return warning_flag if flags.empty?
-      "#{flags} #{warning_flag}"
-    end
-
     # Stage 1 LLVM flags use the host compiler, keep LLVM static, and still
     # build runtimes so stage 2 can link against libunwind/libc++ while it
     # assembles the shared toolchain.
@@ -1317,7 +1309,6 @@ module Bootstrap
       cxx_value = phase_env["CXX"]? || "clang++"
       cc, cc_flags = split_compiler_flags(cc_value)
       cxx, cxx_flags = split_compiler_flags(cxx_value)
-      cxx_flags = append_warning_suppression(cxx_flags)
 
       flags = base_flags.reject do |flag|
         flag.starts_with?("-DBUILD_SHARED_LIBS=") ||
@@ -1348,22 +1339,30 @@ module Bootstrap
     private def llvm_stage2_flags(base_flags : Array(String),
                                   sysroot_prefix : String,
                                   sysroot_triple : String,
-                                  build_root : String) : Array(String)
+                                  build_root : String,
+                                  phase_env : Hash(String, String)) : Array(String)
+      cc_value = phase_env["CC"]? || "#{sysroot_prefix}/bin/clang"
+      cxx_value = phase_env["CXX"]? || "#{sysroot_prefix}/bin/clang++"
+      cc, cc_flags = split_compiler_flags(cc_value)
+      cxx, cxx_flags = split_compiler_flags(cxx_value)
+
       libcxx_include = "#{sysroot_prefix}/include/c++/v1"
       libcxx_target_include = "#{sysroot_prefix}/include/#{sysroot_triple}/c++/v1"
       libcxx_libdir = "#{sysroot_prefix}/lib/#{sysroot_triple}"
       build_rpath = File.join(build_root, "build-stage2", "lib")
       install_rpath = "#{libcxx_libdir}:#{sysroot_prefix}/lib"
       cxx_standard_libs = "-lc++ -lc++abi -lunwind"
-      c_flags = "--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -Wno-unused-command-line-argument"
-      cxx_flags = "-nostdinc++ -isystem #{libcxx_include} -isystem #{libcxx_target_include} -nostdlib++ -stdlib=libc++ --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -Wno-unused-command-line-argument -Wno-unnecessary-virtual-specifier -L#{libcxx_libdir} -L#{sysroot_prefix}/lib"
       linker_flags = "--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{sysroot_prefix}/lib"
 
       flags = base_flags.dup
-      flags << "-DCMAKE_C_COMPILER=#{sysroot_prefix}/bin/clang"
-      flags << "-DCMAKE_CXX_COMPILER=#{sysroot_prefix}/bin/clang++"
-      flags << "-DCMAKE_C_FLAGS=#{c_flags}"
-      flags << "-DCMAKE_CXX_FLAGS=#{cxx_flags}"
+      flags << "-DCMAKE_C_COMPILER=#{cc}"
+      flags << "-DCMAKE_CXX_COMPILER=#{cxx}"
+      unless cc_flags.empty? || flags.any? { |flag| flag.starts_with?("-DCMAKE_C_FLAGS=") }
+        flags << "-DCMAKE_C_FLAGS=#{cc_flags}"
+      end
+      unless cxx_flags.empty? || flags.any? { |flag| flag.starts_with?("-DCMAKE_CXX_FLAGS=") }
+        flags << "-DCMAKE_CXX_FLAGS=#{cxx_flags}"
+      end
       flags << "-DCMAKE_CXX_STANDARD_LIBRARIES=#{cxx_standard_libs}"
       flags << "-DCMAKE_EXE_LINKER_FLAGS=#{linker_flags}"
       flags << "-DCMAKE_SHARED_LINKER_FLAGS=#{linker_flags}"
