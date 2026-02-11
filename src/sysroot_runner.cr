@@ -91,7 +91,7 @@ module Bootstrap
         end
         run_phase(phase_entry)
         if @resume
-	  next_phase = @state.plan.phases[idx + 1]?.try(&.name)
+          next_phase = @state.plan.phases[idx + 1]?.try(&.name)
           Log.debug { "Marking next phase #{next_phase} as current" }
           @state.mark_current_phase(next_phase)
         end
