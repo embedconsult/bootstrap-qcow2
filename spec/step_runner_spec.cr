@@ -79,9 +79,7 @@ describe Bootstrap::StepRunner do
             build_directory: "shards-0.18.0",
           ),
         ],
-        env: {
-          "PATH" => "#{bin_dir}:#{ENV["PATH"]?}",
-        },
+        env: {} of String => String,
       )
 
       phase = Bootstrap::BuildPhase.new(
@@ -93,7 +91,11 @@ describe Bootstrap::StepRunner do
       )
 
       runner = Bootstrap::StepRunner.new(workspace: workspace)
-      runner.run(phase, step)
+      # Process argv lookup uses the parent process PATH. Override ENV here so
+      # `shards` resolves to our fixture script before the real executable.
+      with_env({"PATH" => "#{bin_dir}:#{ENV["PATH"]?}"}) do
+        runner.run(phase, step)
+      end
 
       File.exists?(shard_dir / ".shards-install-ran").should be_true
     end
