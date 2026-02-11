@@ -86,8 +86,8 @@ module Bootstrap
           @state.mark_current_phase(phase_entry.name)
         end
         if @state.workspace.namespace_switch_required?(phase_entry.namespace)
-          Log.info { "Entering namespace #{phase_entry.name}" }
-          @state.workspace.enter_namespace(phase_entry.name)
+          Log.info { "Entering namespace #{phase_entry.namespace} for phase #{phase_entry.name}" }
+          @state.workspace.enter_namespace(phase_entry.namespace)
         end
         run_phase(phase_entry)
         if @resume
