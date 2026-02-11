@@ -526,6 +526,7 @@ module Bootstrap
         "-DLLVM_BUILD_DOCS=OFF",
         "-DLLVM_ENABLE_DOXYGEN=OFF",
         "-DLLVM_ENABLE_SPHINX=OFF",
+        "-DLLVM_ENABLE_LIBEDIT=OFF",
         "-DLLVM_ENABLE_SHARED=ON",
         "-DLLVM_BUILD_LLVM_DYLIB=ON",
         "-DLLVM_LINK_LLVM_DYLIB=ON",
@@ -546,6 +547,7 @@ module Bootstrap
         "-DCOMPILER_RT_BUILD_LIBFUZZER=OFF",
         "-DCOMPILER_RT_BUILD_PROFILE=OFF",
         "-DCOMPILER_RT_BUILD_MEMPROF=OFF",
+        "-DCOMPILER_RT_BUILD_STANDALONE_LIBATOMIC=ON",
         "-DLIBUNWIND_USE_COMPILER_RT=ON",
         "-DLIBUNWIND_ENABLE_SHARED=ON",
         "-DLIBUNWIND_ENABLE_STATIC=OFF",
@@ -623,6 +625,10 @@ module Bootstrap
       cmake_archive_create = "#{sysroot_prefix}/bin/llvm-ar qc <TARGET> <OBJECTS>"
       cmake_archive_append = "#{sysroot_prefix}/bin/llvm-ar q <TARGET> <OBJECTS>"
       cmake_archive_finish = "#{sysroot_prefix}/bin/llvm-ranlib <TARGET>"
+      llvm_major = DEFAULT_LLVM_VER.split(".").first
+      compiler_rt_arch = sysroot_triple.split("-").first
+      clang_rt_dir = "/usr/lib/clang/#{llvm_major}/lib/#{sysroot_triple}"
+      clang_rt_atomic = "#{clang_rt_dir}/libclang_rt.atomic-#{compiler_rt_arch}.so"
       libxml2_env = {
         "CPPFLAGS" => "-I#{sysroot_prefix}/include",
         "LDFLAGS"  => "-L#{sysroot_prefix}/lib",
@@ -793,7 +799,7 @@ module Bootstrap
             "libxml2" => libxml2_env,
             "zlib"    => {
               "CFLAGS"   => "-fPIC",
-              "LDSHARED" => "#{rootfs_env["CC"]} -shared -Wl,-soname,libz.so.1 -Wl,--version-script,libz.map",
+              "LDSHARED" => "#{system_from_sysroot_env["CC"]} -shared -Wl,-soname,libz.so.1 -Wl,--version-script,zlib.map",
             },
             "m4" => {
               "INSTALL" => "./build-aux/install-sh",
@@ -835,6 +841,8 @@ module Bootstrap
             {"bq2", "/usr/bin/curl"},
             {"bq2", "/usr/bin/git-remote-https"},
             {"bq2", "/usr/bin/pkg-config"},
+            {clang_rt_atomic, "/usr/lib/libatomic.so.1"},
+            {"libatomic.so.1", "/usr/lib/libatomic.so"},
           ]),
         ),
         # Inputs: prefix-free system rootfs staged in the bq2 rootfs.
