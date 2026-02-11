@@ -705,7 +705,7 @@ module Bootstrap
             },
             "zlib" => {
               "CFLAGS"   => "-fPIC",
-              "LDSHARED" => "#{sysroot_env["CC"]} -shared -Wl,-soname,libz.so.1 -Wl,--version-script,zlib.map",
+              "LDSHARED" => "#{sysroot_env["CC"]} -shared -Wl,-soname,libz.so.1",
             },
             "libxml2" => libxml2_env,
             "crystal" => {
@@ -801,7 +801,7 @@ module Bootstrap
             "libxml2" => libxml2_env,
             "zlib"    => {
               "CFLAGS"   => "-fPIC",
-              "LDSHARED" => "#{system_from_sysroot_env["CC"]} -shared -Wl,-soname,libz.so.1 -Wl,--version-script,zlib.map",
+              "LDSHARED" => "#{system_from_sysroot_env["CC"]} -shared -Wl,-soname,libz.so.1",
             },
             "m4" => {
               "INSTALL" => "./build-aux/install-sh",
