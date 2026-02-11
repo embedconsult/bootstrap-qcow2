@@ -137,6 +137,37 @@ module Bootstrap
       update_namespace(Namespace::BQ2)
     end
 
+    def namespace_switch_required?(requested : String)
+      @namespace != Namespace.parse(requested)
+    end
+
+    # Enter the requested namespace by label, if needed.
+    def enter_namespace(requested_label : String) : Nil
+      requested = Namespace.parse(requested_label)
+      case requested
+      in .host?
+        raise "Cannot enter host namespace from #{@namespace.label}" unless @namespace.host?
+      in .seed?
+        if @namespace.host?
+          enter_seed_rootfs_namespace
+        elsif @namespace.seed?
+          # Already in seed namespace.
+        else
+          raise "Cannot enter seed namespace from #{@namespace.label}"
+        end
+      in .bq2?
+        if @namespace.host?
+          enter_bq2_rootfs_namespace
+        elsif @namespace.seed?
+          enter_bq2_rootfs_namespace
+        elsif @namespace.bq2?
+          # Already in bq2 namespace.
+        else
+          raise "Cannot enter bq2 namespace from #{@namespace.label}"
+        end
+      end
+    end
+
     private def update_namespace(namespace : Namespace) : Nil
       @namespace = namespace
       @seed_rootfs_path = self.class.seed_rootfs_from(@namespace, @host_workdir)

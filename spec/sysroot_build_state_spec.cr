@@ -12,7 +12,6 @@ describe Bootstrap::SysrootBuildState do
 
   it "loads an on-disk plan when initialized with default workspace discovery" do
     with_bq2_workspace do
-      workspace = nil.as(Bootstrap::SysrootWorkspace?)
       workspace = Bootstrap::SysrootWorkspace.new
       plan = Bootstrap::BuildPlan.new([
         Bootstrap::BuildPhase.new(
