@@ -635,6 +635,10 @@ module Bootstrap
         "-DIconv_LIBRARY=#{sysroot_prefix}/lib/libiconv.so",
         "-DIconv_IS_BUILT_IN=OFF",
       ]
+      sysroot_ld_lib = "#{sysroot_prefix}/lib:#{sysroot_prefix}/lib/#{sysroot_triple}"
+      system_from_sysroot_env = rootfs_env.dup
+      existing_ld = system_from_sysroot_env["LD_LIBRARY_PATH"]?
+      system_from_sysroot_env["LD_LIBRARY_PATH"] = existing_ld && !existing_ld.empty? ? "#{sysroot_ld_lib}:#{existing_ld}" : sysroot_ld_lib
       musl_arch = case @architecture
                   when "aarch64", "arm64"
                     "aarch64"
@@ -781,17 +785,11 @@ module Bootstrap
             namespace: SysrootWorkspace::Namespace::Seed.label,
             install_prefix: "/usr",
             destdir: bq2_from_seed,
-            env: rootfs_env,
+            env: system_from_sysroot_env,
           ),
           workdir: workspace_from_seed,
           package_allowlist: nil,
           env_overrides: {
-            "cmake" => {
-              "LD_LIBRARY_PATH" => "#{sysroot_prefix}/lib:#{sysroot_prefix}/lib/#{sysroot_triple}",
-            },
-            "llvm-project" => {
-              "LD_LIBRARY_PATH" => "#{sysroot_prefix}/lib:#{sysroot_prefix}/lib/#{sysroot_triple}",
-            },
             "libxml2" => libxml2_env,
             "zlib"    => {
               "CFLAGS"   => "-fPIC",
