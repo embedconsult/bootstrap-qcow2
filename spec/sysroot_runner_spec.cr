@@ -31,15 +31,13 @@ describe Bootstrap::SysrootRunner do
   end
 
   it "raises when a command fails" do
-    phase = Bootstrap::BuildPhase.new(
+    plan = Bootstrap::BuildPlan.new([Bootstrap::BuildPhase.new(
       name: "phase-fail",
       description: "test phase",
       namespace: "host",
       install_prefix: "/opt/sysroot",
-      steps: [] of Bootstrap::BuildStep,
-    )
-    steps = [Bootstrap::BuildStep.new(name: "fail", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
-    plan = Bootstrap::BuildPlan.new([phase])
+      steps: [Bootstrap::BuildStep.new(name: "fail", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
+    )])
 
     with_recording_runner(plan: plan) do |build_state, step_runner|
       step_runner.status = false
@@ -134,14 +132,14 @@ describe Bootstrap::SysrootRunner do
   pending "prepares a destdir root directory"
 
   it "writes a failure report when a step fails" do
+    steps = [Bootstrap::BuildStep.new(name: "fail", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
     phase = Bootstrap::BuildPhase.new(
       name: "phase-fail",
       description: "test phase",
       namespace: "host",
       install_prefix: "/opt/sysroot",
-      steps: [] of Bootstrap::BuildStep,
+      steps: steps
     )
-    steps = [Bootstrap::BuildStep.new(name: "fail", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
 
     with_recording_runner(plan: Bootstrap::BuildPlan.new([phase])) do |build_state, step_runner|
       step_runner.status = false
