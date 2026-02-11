@@ -411,6 +411,7 @@ module Bootstrap
     # Build the LLVM configure flags for the sysroot toolchain.
     private def llvm_configure_flags(sysroot_triple : String) : Array(String)
       llvm_targets = llvm_targets_to_build(@architecture)
+      compiler_rt_arch = sysroot_triple.split("-").first
       enabled_tools = %w[LLVM_AR LLVM_NM LLVM_RANLIB LLVM_STRIP LLVM_CONFIG LLVM_SHLIB]
       disabled_tools = %w[
         BUGPOINT
@@ -548,6 +549,7 @@ module Bootstrap
         "-DCOMPILER_RT_BUILD_PROFILE=OFF",
         "-DCOMPILER_RT_BUILD_MEMPROF=OFF",
         "-DCOMPILER_RT_BUILD_STANDALONE_LIBATOMIC=ON",
+        "-DCOMPILER_RT_LIBATOMIC_LINK_LIBS_#{compiler_rt_arch}=clang_rt.builtins-#{compiler_rt_arch};c",
         "-DLIBUNWIND_USE_COMPILER_RT=ON",
         "-DLIBUNWIND_ENABLE_SHARED=ON",
         "-DLIBUNWIND_ENABLE_STATIC=OFF",
