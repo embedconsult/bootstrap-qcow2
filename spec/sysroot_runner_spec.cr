@@ -486,4 +486,37 @@ describe Bootstrap::SysrootRunner do
       runner.calls.map { |call| call[:name] }.should eq ["a", "b"]
     end
   end
+
+  it "sysroot-tarball creates a rootfs tarball excluding state files" do
+    with_tempdir do |dir|
+      workspace = Bootstrap::SysrootWorkspace.create(Path[dir])
+      rootfs = workspace.bq2_rootfs_path
+
+      # Populate rootfs with files that should be included and excluded.
+      FileUtils.mkdir_p(rootfs / "usr" / "bin")
+      File.write(rootfs / "usr" / "bin" / "hello", "#!/bin/sh\necho hello\n")
+      FileUtils.mkdir_p(rootfs / "var" / "lib")
+      File.write(rootfs / "var" / "lib" / "sysroot-build-state.json", "{}")
+      File.write(rootfs / "var" / "lib" / "sysroot-build-plan.json", "{}")
+
+      output = dir / "rootfs.tar.gz"
+      Bootstrap::TarWriter.write_gz(
+        sources: [rootfs],
+        output: output,
+        base_path: rootfs,
+        excludes: ["var/lib", Bootstrap::SysrootWorkspace::ROOTFS_MARKER_NAME]
+      )
+
+      File.exists?(output).should be_true
+      File.size(output).should be > 0
+
+      extract_dir = dir / "verify"
+      Bootstrap::Tarball.extract(output, extract_dir,
+        preserve_ownership: false, owner_uid: nil, owner_gid: nil)
+
+      File.exists?(extract_dir / "usr" / "bin" / "hello").should be_true
+      File.exists?(extract_dir / ".bq2-rootfs").should be_false
+      Dir.exists?(extract_dir / "var" / "lib").should be_false
+    end
+  end
 end

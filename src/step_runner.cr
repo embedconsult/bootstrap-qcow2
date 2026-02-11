@@ -13,6 +13,7 @@ require "./process_runner"
 require "./alpine_setup"
 require "./sysroot_workspace"
 require "./patch_applier"
+require "./tar_writer"
 require "./tarball"
 
 module Bootstrap
@@ -175,15 +176,14 @@ module Bootstrap
               source_root = File.join(destdir, source_root)
             end
           end
-          # TODO: Replace this logic with call to TarWriter.write_gz
           raise "Missing tarball source #{source_root}" unless Dir.exists?(source_root)
           FileUtils.mkdir_p(File.dirname(output))
-          tar_excludes = [
-            "--exclude=var/lib",
-            "--exclude=var/lib/**",
-            "--exclude=.bq2-rootfs",
-          ]
-          run_cmd(["tar", "-czf", output] + tar_excludes + ["-C", source_root, "."], env: env)
+          TarWriter.write_gz(
+            sources: [Path[source_root]],
+            output: Path[output],
+            base_path: Path[source_root],
+            excludes: ["var/lib", SysrootWorkspace::ROOTFS_MARKER_NAME]
+          )
         when "linux-headers"
           install_root = destdir ? "#{destdir}#{install_prefix}" : install_prefix
           run_cmd(["make"] + step.configure_flags + ["headers"], env: env)

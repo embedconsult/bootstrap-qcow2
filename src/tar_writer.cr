@@ -38,18 +38,22 @@ module Bootstrap
     class LongPathError < Exception; end
 
     # Write a gzipped tarball for a directory tree.
-    def self.write_gz(sources : Array(Path), output : Path, base_path : Path = Path["/"])
+    #
+    # *excludes* is a list of relative path prefixes to omit from the archive.
+    # An entry matches when its relative path equals the prefix or starts with
+    # the prefix followed by a `/` (i.e. the entire subtree is skipped).
+    def self.write_gz(sources : Array(Path), output : Path, base_path : Path = Path["/"], excludes : Array(String) = [] of String)
       sources.each { |source| assert_paths_fit(source, base_path) }
       File.open(output, "w") do |file|
         Compress::Gzip::Writer.open(file) do |gzip|
-          writer = new(gzip, sources, base_path)
+          writer = new(gzip, sources, base_path, excludes)
           writer.write_all
         end
       end
     end
 
     # Create a tar writer rooted at a source directory.
-    def initialize(@io : IO, @sources : Array(Path), @base_path : Path = "/")
+    def initialize(@io : IO, @sources : Array(Path), @base_path : Path = "/", @excludes : Array(String) = [] of String)
     end
 
     # Write every entry in the source tree to the tar stream.
@@ -75,12 +79,22 @@ module Bootstrap
     end
 
     # Walk the directory tree and yield every entry with its metadata.
+    # Prunes excluded directories so their children are never visited.
     private def walk(path : Path, &block : Path, File::Info ->)
       Dir.children(path).each do |child|
         entry = path / child
         stat = File.info(entry, follow_symlinks: false)
+        relative = entry.relative_to(@base_path).to_s
+        next if excluded?(relative)
         yield entry, stat
         walk(entry, &block) if stat.directory?
+      end
+    end
+
+    # Return true when *relative* matches any exclude prefix.
+    private def excluded?(relative : String) : Bool
+      @excludes.any? do |pattern|
+        relative == pattern || relative.starts_with?("#{pattern}/")
       end
     end
 

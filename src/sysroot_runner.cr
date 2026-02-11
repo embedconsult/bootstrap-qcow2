@@ -11,6 +11,7 @@ require "./sysroot_build_state"
 require "./sysroot_workspace"
 require "./sysroot_namespace"
 require "./step_runner"
+require "./tar_writer"
 
 module Bootstrap
   # SysrootRunner replays build plan phases and delegates step execution to
@@ -226,37 +227,61 @@ module Bootstrap
       0
     end
 
-    # TODO: Get this wired up
-    # Run the finalize-rootfs phase to emit a prefix-free rootfs tarball.
+    # Emit a prefix-free rootfs tarball from the bq2 rootfs directory.
     private def self.run_tarball(args : Array(String)) : Int32
+      output_path : String? = nil
+      host_workdir : Path? = nil
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-tarball [options]") do |p|
+        p.on("--output=PATH", "Tarball output path (default: <workdir>/rootfs.tar.gz)") { |path| output_path = path }
+        p.on("--workdir=PATH", "Host workdir (default: #{SysrootWorkspace::DEFAULT_HOST_WORKDIR})") { |path| host_workdir = Path[path] }
       end
       return CLI.print_help(parser) if help
-      STDERR.puts "sysroot-tarball is not yet wired up"
-      1
+
+      begin
+        workspace = SysrootWorkspace.new(host_workdir: host_workdir)
+      rescue ex
+        STDERR.puts "No valid workspace found: #{ex.message}"
+        return 1
+      end
+
+      rootfs_path = workspace.bq2_rootfs_path
+      unless Dir.exists?(rootfs_path)
+        STDERR.puts "Rootfs directory does not exist: #{rootfs_path}"
+        return 1
+      end
+
+      default_output = (workspace.host_workdir || Path["."]) / "rootfs.tar.gz"
+      target = output_path ? Path[output_path.not_nil!] : default_output
+
+      Log.info { "Creating rootfs tarball from #{rootfs_path} -> #{target}" }
+      TarWriter.write_gz(
+        sources: [rootfs_path],
+        output: target,
+        base_path: rootfs_path,
+        excludes: ["var/lib", SysrootWorkspace::ROOTFS_MARKER_NAME]
+      )
+      Log.info { "Wrote rootfs tarball to #{target}" }
+      puts target
+      0
     end
 
-    # TODO: Use SysrootWorkspace method for this
     private def self.inside_rootfs? : Bool
       marker = ENV["BQ2_ROOTFS_MARKER"]?
       return File.exists?(marker) if marker
       File.exists?(Path["/#{SysrootWorkspace::ROOTFS_MARKER_NAME}"])
     end
 
-    # TODO: Use SysrootWorkspace method for this
     # Return the namespace label for the current workspace.
     private def self.namespace_name(workspace : SysrootWorkspace) : String
       workspace.namespace.label
     end
 
-    # TODO: Use SysrootWorkspace method for this
     # Return true when the phase should execute in a different namespace.
     private def self.namespace_switch_required?(phase : BuildPhase, workspace : SysrootWorkspace) : Bool
       requested = SysrootWorkspace::Namespace.parse(phase.namespace)
       requested != workspace.namespace
     end
 
-    # TODO: Use SysrootWorkspace method for this
     # Enter the requested phase namespace, if needed.
     private def self.enter_phase_namespace(phase : BuildPhase, workspace : SysrootWorkspace) : Nil
       requested = SysrootWorkspace::Namespace.parse(phase.namespace)

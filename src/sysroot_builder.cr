@@ -988,7 +988,7 @@ module Bootstrap
         "PATH" => "#{sysroot_prefix}/bin:#{sysroot_prefix}/sbin:/usr/bin:/bin",
         "CC"   => "/usr/bin/clang",
         "CXX"  => "/usr/bin/clang++",
-        # TODO: determine if this should be here.
+        # Required for dynamically-linked sysroot tools (e.g. shards, crystal).
         "LD_LIBRARY_PATH" => "#{sysroot_prefix}/lib",
       }
     end
@@ -1009,8 +1009,6 @@ module Bootstrap
     private def host_setup_env : Hash(String, String)
       {
         "BQ2_ARCH" => @architecture,
-        # TODO
-        # "BQ2_SOURCE_BRANCH" => bootstrap_source_version,
       }
     end
 
