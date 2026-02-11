@@ -789,6 +789,9 @@ module Bootstrap
             "cmake" => {
               "LD_LIBRARY_PATH" => "#{sysroot_prefix}/lib:#{sysroot_prefix}/lib/#{sysroot_triple}",
             },
+            "llvm-project" => {
+              "LD_LIBRARY_PATH" => "#{sysroot_prefix}/lib:#{sysroot_prefix}/lib/#{sysroot_triple}",
+            },
             "libxml2" => libxml2_env,
             "zlib"    => {
               "CFLAGS"   => "-fPIC",
