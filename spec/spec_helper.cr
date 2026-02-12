@@ -20,6 +20,7 @@ require "../src/tar_writer"
 require "../src/patch_applier"
 # require "../src/hello-efi"
 require "../src/inproc_llvm"
+require "../src/efi_app_builder"
 
 Log.setup_from_env
 

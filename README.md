@@ -41,6 +41,16 @@ The rootfs output includes:
 - A serialized build plan consumed by the coordinator
 - bootstrap-qcow2 source staged to `/workspace/bootstrap-qcow2-master` (downloaded as a source package)
 
+### Build an EFI application from Crystal
+
+Use the `efi-app-builder` command to emit a `.efi` binary by cross-compiling to a Windows COFF object and linking it as `efi_application`:
+
+```bash
+./bin/bq2 efi-app-builder --input src/hello-efi.cr --output out/hello-efi.efi --arch aarch64
+```
+
+Supported architectures are `aarch64` and `x86_64`. Use `--keep-object` to retain the intermediate `.obj` file for linker/debug inspection.
+
 ### Busybox-style CLI (`bq2`)
 
 The single executable (`bin/bq2`) dispatches subcommands by argv[0] or the first argument. Symlinks in `bin/` mirror the subcommands (create them with `./bin/bq2 --install`).
