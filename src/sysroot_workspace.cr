@@ -49,15 +49,15 @@ module Bootstrap
       {namespace: Namespace::BQ2, path: Path["/#{ROOTFS_MARKER_NAME}"]},
     ]
 
-    getter host_workdir : Path?
-    getter seed_rootfs_path : Path?
-    getter sysroot_path : Path?
-    getter bq2_rootfs_path : Path
-    getter marker_path : Path
-    getter workspace_path : Path
-    getter log_path : Path
-    getter namespace : Namespace
-    @extra_binds : Array(Tuple(Path, Path))
+    property host_workdir : Path?
+    property seed_rootfs_path : Path?
+    property sysroot_path : Path?
+    property bq2_rootfs_path : Path
+    property marker_path : Path
+    property workspace_path : Path
+    property log_path : Path
+    property namespace : Namespace
+    property extra_binds : Array(Tuple(Path, Path))
 
     def initialize(@host_workdir : Path? = nil,
                    @extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path))
@@ -73,6 +73,7 @@ module Bootstrap
         @host_workdir = @host_workdir.not_nil!.expand
         @namespace = Namespace::Host
       end
+      Log.debug { "Initialized namespace (host_workdir=#{@host_workdir}, namespace=#{@namespace})" }
 
       raise "Invalid namespace: #{@namespace}" unless [Namespace::Host, Namespace::Seed, Namespace::BQ2].includes?(@namespace)
 
@@ -82,6 +83,9 @@ module Bootstrap
       @workspace_path = self.class.workspace_from(@namespace, @host_workdir)
       @marker_path = @bq2_rootfs_path / Path["#{ROOTFS_MARKER_NAME}"]
       @log_path = @bq2_rootfs_path / Path["#{LOG_DIR_NAME}"]
+
+      found_marker = File.exists?(@marker_path)
+      raise "Missing BQ2 rootfs marker at #{@marker_path}" if found_marker.nil?
     end
 
     def self.seed_rootfs_from(namespace : Namespace, host_workdir : Path? = nil)
@@ -114,7 +118,15 @@ module Bootstrap
 
     # Create a workspace rooted at *host_workdir*, ensuring marker + dirs exist.
     def self.create(host_workdir : Path = Path["#{DEFAULT_HOST_WORKDIR}"], extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path)) : SysrootWorkspace
-      workspace = SysrootWorkspace.new(host_workdir: host_workdir, extra_binds: extra_binds)
+      workspace = SysrootWorkspace.allocate
+      workspace.host_workdir = host_workdir
+      workspace.extra_binds = extra_binds
+      workspace.seed_rootfs_path = seed_rootfs_from(workspace.namespace, workspace.host_workdir)
+      workspace.sysroot_path = sysroot_from(workspace.namespace, workspace.host_workdir)
+      workspace.bq2_rootfs_path = bq2_rootfs_from(workspace.namespace, workspace.host_workdir)
+      workspace.workspace_path = workspace_from(workspace.namespace, workspace.host_workdir)
+      workspace.marker_path = workspace.bq2_rootfs_path / Path["#{ROOTFS_MARKER_NAME}"]
+      workspace.log_path = workspace.bq2_rootfs_path / Path["#{LOG_DIR_NAME}"]
       FileUtils.mkdir_p(workspace.sysroot_path.not_nil!)
       FileUtils.mkdir_p(workspace.workspace_path)
       FileUtils.mkdir_p(workspace.bq2_rootfs_path)
@@ -123,6 +135,7 @@ module Bootstrap
         File.write(workspace.marker_path, "bq2-rootfs\n")
       end
       FileUtils.mkdir_p(workspace.log_path)
+      Log.debug { "Created #{workspace} at #{workspace.host_workdir}" }
       workspace
     end
 
