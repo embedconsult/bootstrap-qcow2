@@ -60,6 +60,7 @@ def with_bq2_workspace(prefix : String = "bq2-spec", &)
   FileUtils.mkdir_p(path)
   begin
     Dir.cd(path) do
+      Log.debug { "Using workspace at relative path from ${path}" }
       Bootstrap::SysrootWorkspace.create
       yield
     end

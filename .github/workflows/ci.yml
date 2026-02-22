@@ -26,7 +26,7 @@ jobs:
         run: crystal tool format --check
 
       - name: Run specs
-        run: LOG_LEVEL=DEBUG crystal spec
+        run: LOG_LEVEL=DEBUG crystal spec -v
 
       - name: Build sysroot workspace and plan
         run: |
