@@ -5,8 +5,8 @@ describe Bootstrap::SysrootBuildState do
     with_bq2_workspace do
       state = Bootstrap::SysrootBuildState.new
       state.workspace.namespace.host?.should be_true
-      state.plan_path.should eq Path["data/sysroot/seed-rootfs/bq2-rootfs/var/lib/#{Bootstrap::SysrootBuildState::PLAN_FILE}"]
-      state.state_path.should eq Path["data/sysroot/seed-rootfs/bq2-rootfs/var/lib/#{Bootstrap::SysrootBuildState::STATE_FILE}"]
+      state.plan_path.to_s.should end_with Path["data/sysroot/seed-rootfs/bq2-rootfs/var/lib/#{Bootstrap::SysrootBuildState::PLAN_FILE}"].to_s
+      state.state_path.to_s.should end_with Path["data/sysroot/seed-rootfs/bq2-rootfs/var/lib/#{Bootstrap::SysrootBuildState::STATE_FILE}"].to_s
     end
   end
 

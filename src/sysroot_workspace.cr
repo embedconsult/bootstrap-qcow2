@@ -67,9 +67,10 @@ module Bootstrap
         marker_match = found_marker.not_nil!
         @namespace = marker_match[:namespace]
         if @namespace == Namespace::Host
-          @host_workdir = Path["#{DEFAULT_HOST_WORKDIR}"]
+          @host_workdir = Path["#{DEFAULT_HOST_WORKDIR}"].expand
         end
       else
+        @host_workdir = @host_workdir.not_nil!.expand
         @namespace = Namespace::Host
       end
 
