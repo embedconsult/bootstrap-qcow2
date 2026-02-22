@@ -117,7 +117,10 @@ module Bootstrap
       FileUtils.mkdir_p(workspace.sysroot_path.not_nil!)
       FileUtils.mkdir_p(workspace.workspace_path)
       FileUtils.mkdir_p(workspace.bq2_rootfs_path)
-      File.write(workspace.marker_path, "bq2-rootfs\n") unless File.exists?(workspace.marker_path)
+      unless File.exists?(workspace.marker_path)
+        Log.debug { "Generating #{workspace.marker_path}" }
+        File.write(workspace.marker_path, "bq2-rootfs\n")
+      end
       FileUtils.mkdir_p(workspace.log_path)
       workspace
     end

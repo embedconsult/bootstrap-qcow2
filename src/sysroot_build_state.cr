@@ -81,6 +81,7 @@ module Bootstrap
                    @format_version : Int32 = FORMAT_VERSION,
                    ignore_overrides : Bool = false,
                    invalidate_on_overrides : Bool = false)
+      Log.debug { "Initializing SysrootBuildState (workspace=#{@workspace} workspace.host_dir=#{@workspace.host_workdir})" }
       @plan = BuildPlan.new([] of BuildPhase)
       saved_plan = on_disk_plan
       @plan = saved_plan.not_nil! unless saved_plan.nil?
