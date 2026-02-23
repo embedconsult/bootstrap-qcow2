@@ -197,6 +197,8 @@ module Bootstrap
             "--exclude=dev/**",
             "--exclude=work",
             "--exclude=work/**",
+            "--exclude=tmp",
+            "--exclude=tmp/**",
             "--exclude=workspace",
             "--exclude=workspace/**",
             "--exclude=var/lib",
