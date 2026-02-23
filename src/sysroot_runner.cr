@@ -71,7 +71,7 @@ module Bootstrap
 
     # Execute a build plan from a preloaded build state.
     def run_plan
-      run_started_at = Time.instant
+      run_started_at = monotonic_now
       run_succeeded = false
       Log.debug { "Running plan filtered by_name: #{@phase}, by_state: #{@resume}, by_packages: #{@packages}" }
       selected_phases = @state.filtered_phases(by_name: @phase, by_state: @resume, by_packages: @packages)
@@ -103,7 +103,7 @@ module Bootstrap
 
         run_succeeded = true
       ensure
-        run_duration = Time.instant - run_started_at
+        run_duration = monotonic_elapsed_since(run_started_at)
         state = run_succeeded ? "Completed" : "Failed"
         Log.info { "#{state} sysroot run in #{format_duration(run_duration)}" }
       end
@@ -111,7 +111,7 @@ module Bootstrap
 
     # Run a single phase from the plan.
     private def run_phase(phase : BuildPhase)
-      phase_started_at = Time.instant
+      phase_started_at = monotonic_now
       phase_succeeded = false
       Log.info { "Executing phase #{phase.name} (namespace=#{phase.namespace})" }
       Log.info { "**** #{phase.description} ****" }
@@ -122,7 +122,7 @@ module Bootstrap
         run_steps(phase)
         phase_succeeded = true
       ensure
-        phase_duration = Time.instant - phase_started_at
+        phase_duration = monotonic_elapsed_since(phase_started_at)
         status = phase_succeeded ? "Completed" : "Failed"
         Log.info { "#{status} phase #{phase.name} in #{format_duration(phase_duration)}" }
       end
@@ -264,6 +264,20 @@ module Bootstrap
           io.puts payload.to_pretty_json
         end
       end
+    end
+
+    # Return a monotonic timestamp compatible with multiple Crystal versions.
+    private def monotonic_now
+      {% if Time.class.has_method?(:instant) %}
+        Time.instant
+      {% else %}
+        Time.monotonic
+      {% end %}
+    end
+
+    # Return elapsed monotonic time since +started_at+.
+    private def monotonic_elapsed_since(started_at) : Time::Span
+      monotonic_now - started_at
     end
 
     # Format elapsed monotonic duration in a stable human-readable form.
