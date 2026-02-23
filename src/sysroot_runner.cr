@@ -71,42 +71,61 @@ module Bootstrap
 
     # Execute a build plan from a preloaded build state.
     def run_plan
+      run_started_at = Time.instant
+      run_succeeded = false
       Log.debug { "Running plan filtered by_name: #{@phase}, by_state: #{@resume}, by_packages: #{@packages}" }
       selected_phases = @state.filtered_phases(by_name: @phase, by_state: @resume, by_packages: @packages)
       Log.debug { "selected_phases=#{selected_phases.map { |phase| phase.name }}" }
 
-      if @dry_run
-        print_dry_run(selected_phases)
-        return
-      end
+      begin
+        if @dry_run
+          print_dry_run(selected_phases)
+          run_succeeded = true
+          return
+        end
 
-      selected_phases.each_with_index do |phase_entry, idx|
-        if @resume
-          Log.debug { "Marking phase #{phase_entry.name} as current" }
-          @state.mark_current_phase(phase_entry.name)
+        selected_phases.each_with_index do |phase_entry, idx|
+          if @resume
+            Log.debug { "Marking phase #{phase_entry.name} as current" }
+            @state.mark_current_phase(phase_entry.name)
+          end
+          if @state.workspace.namespace_switch_required?(phase_entry.namespace)
+            Log.info { "Entering namespace #{phase_entry.namespace} for phase #{phase_entry.name}" }
+            @state.workspace.enter_namespace(phase_entry.namespace)
+          end
+          run_phase(phase_entry)
+          if @resume
+            next_phase = @state.plan.phases[idx + 1]?.try(&.name)
+            Log.debug { "Marking next phase #{next_phase} as current" }
+            @state.mark_current_phase(next_phase)
+          end
         end
-        if @state.workspace.namespace_switch_required?(phase_entry.namespace)
-          Log.info { "Entering namespace #{phase_entry.namespace} for phase #{phase_entry.name}" }
-          @state.workspace.enter_namespace(phase_entry.namespace)
-        end
-        run_phase(phase_entry)
-        if @resume
-          next_phase = @state.plan.phases[idx + 1]?.try(&.name)
-          Log.debug { "Marking next phase #{next_phase} as current" }
-          @state.mark_current_phase(next_phase)
-        end
+
+        run_succeeded = true
+      ensure
+        run_duration = Time.instant - run_started_at
+        state = run_succeeded ? "Completed" : "Failed"
+        Log.info { "#{state} sysroot run in #{format_duration(run_duration)}" }
       end
     end
 
     # Run a single phase from the plan.
     private def run_phase(phase : BuildPhase)
+      phase_started_at = Time.instant
+      phase_succeeded = false
       Log.info { "Executing phase #{phase.name} (namespace=#{phase.namespace})" }
       Log.info { "**** #{phase.description} ****" }
-      if destdir = phase.destdir
-        FileUtils.mkdir_p(destdir)
+      begin
+        if destdir = phase.destdir
+          FileUtils.mkdir_p(destdir)
+        end
+        run_steps(phase)
+        phase_succeeded = true
+      ensure
+        phase_duration = Time.instant - phase_started_at
+        status = phase_succeeded ? "Completed" : "Failed"
+        Log.info { "#{status} phase #{phase.name} in #{format_duration(phase_duration)}" }
       end
-      run_steps(phase)
-      Log.info { "Completed phase #{phase.name}" }
     end
 
     # Execute a list of BuildStep entries, stopping immediately on failure.
@@ -244,6 +263,16 @@ module Bootstrap
           }
           io.puts payload.to_pretty_json
         end
+      end
+    end
+
+    # Format elapsed monotonic duration in a stable human-readable form.
+    private def format_duration(duration : Time::Span) : String
+      milliseconds = duration.total_milliseconds
+      if milliseconds >= 1000
+        "#{"%.3f" % duration.total_seconds}s"
+      else
+        "#{milliseconds.round(1)}ms"
       end
     end
 
