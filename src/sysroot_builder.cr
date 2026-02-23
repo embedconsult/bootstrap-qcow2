@@ -1537,6 +1537,12 @@ module Bootstrap
         return -1
       end
 
+      if workspace.host_workdir.nil?
+        host_workdir ||= Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR]
+        STDERR.puts "Workspace does not include host workdir; defaulting to #{host_workdir} (pass --workdir to override)"
+        workspace = SysrootWorkspace.new(host_workdir: host_workdir)
+      end
+
       plan_path = workspace.log_path / SysrootBuildState::PLAN_FILE
       unless File.exists?(plan_path)
         STDERR.puts "No build plan found at #{plan_path}, run `bq2 sysroot-builder` first"
@@ -1544,13 +1550,7 @@ module Bootstrap
       end
 
       base_plan = BuildPlan.parse(File.read(plan_path))
-      host_workdir ||= workspace.host_workdir
-      if host_workdir.nil?
-        host_workdir = Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR]
-        STDERR.puts "Workspace does not include host workdir; defaulting to #{host_workdir} (pass --workdir to override)"
-      end
-      builder_workspace = SysrootWorkspace.new(host_workdir: host_workdir)
-      builder = SysrootBuilder.new(workspace: builder_workspace, architecture: architecture, seed: seed)
+      builder = SysrootBuilder.new(workspace: workspace, architecture: architecture, seed: seed)
       target_plan = builder.build_plan
       overrides = BuildPlanOverrides.from_diff(base_plan, target_plan)
 
