@@ -58,6 +58,7 @@ module Bootstrap
       override = @phases[phase.name]?
       return phase unless override
 
+      namespace = override.namespace || phase.namespace
       install_prefix = override.install_prefix || phase.install_prefix
       destdir = if override.destdir_clear
                   nil
@@ -76,7 +77,7 @@ module Bootstrap
       BuildPhase.new(
         name: phase.name,
         description: phase.description,
-        namespace: phase.namespace,
+        namespace: namespace,
         install_prefix: install_prefix,
         destdir: destdir,
         env: env,
@@ -158,6 +159,7 @@ module Bootstrap
 
     # Compute overrides for a single phase, returning nil if no changes exist.
     private def self.diff_phase(base_phase : BuildPhase, target_phase : BuildPhase) : PhaseOverride?
+      namespace = base_phase.namespace == target_phase.namespace ? nil : target_phase.namespace
       install_prefix = base_phase.install_prefix == target_phase.install_prefix ? nil : target_phase.install_prefix
       destdir_override = diff_nullable_path_override(
         "phase #{base_phase.name} destdir",
@@ -171,7 +173,8 @@ module Bootstrap
       packages = phase_packages[:packages]
       extra_steps = phase_packages[:extra_steps]
       steps = diff_phase_steps(base_phase, target_phase)
-      return nil if install_prefix.nil? &&
+      return nil if namespace.nil? &&
+                    install_prefix.nil? &&
                     destdir.nil? &&
                     destdir_clear.nil? &&
                     env.nil? &&
@@ -180,6 +183,7 @@ module Bootstrap
                     steps.nil?
 
       PhaseOverride.new(
+        namespace: namespace,
         install_prefix: install_prefix,
         destdir: destdir,
         destdir_clear: destdir_clear,
@@ -327,6 +331,7 @@ module Bootstrap
   struct PhaseOverride
     include JSON::Serializable
 
+    getter namespace : String?
     getter install_prefix : String?
     getter destdir : String?
     getter destdir_clear : Bool?
@@ -335,7 +340,8 @@ module Bootstrap
     getter extra_steps : Array(BuildStep)?
     getter steps : Hash(String, StepOverride)?
 
-    def initialize(@install_prefix : String? = nil,
+    def initialize(@namespace : String? = nil,
+                   @install_prefix : String? = nil,
                    @destdir : String? = nil,
                    @destdir_clear : Bool? = nil,
                    @env : Hash(String, String)? = nil,

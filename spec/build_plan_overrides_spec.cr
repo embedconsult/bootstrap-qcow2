@@ -44,6 +44,7 @@ describe Bootstrap::BuildPlanOverrides do
     overrides = Bootstrap::BuildPlanOverrides.new(
       phases: {
         "one" => Bootstrap::PhaseOverride.new(
+          namespace: "updated",
           install_prefix: "/usr",
           env: {"CC" => "clang"} of String => String,
           steps: {
@@ -54,6 +55,7 @@ describe Bootstrap::BuildPlanOverrides do
     )
 
     updated = overrides.apply(plan)
+    updated.phases.first.namespace.should eq "updated"
     updated.phases.first.install_prefix.should eq "/usr"
     updated.phases.first.env["PATH"].should eq "/bin"
     updated.phases.first.env["CC"].should eq "clang"
@@ -183,6 +185,31 @@ describe Bootstrap::BuildPlanOverrides do
     overrides.phases["one"].destdir_clear.should be_true
     updated = overrides.apply(base)
     updated.phases.first.destdir.should be_nil
+  end
+
+  it "builds overrides that replace namespace when the plan changes" do
+    base = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        namespace: "seed",
+        install_prefix: "/opt/sysroot",
+      ),
+    ])
+
+    target = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        namespace: "bq2",
+        install_prefix: "/opt/sysroot",
+      ),
+    ])
+
+    overrides = Bootstrap::BuildPlanOverrides.from_diff(base, target)
+    overrides.phases["one"].namespace.should eq "bq2"
+    updated = overrides.apply(base)
+    updated.phases.first.namespace.should eq "bq2"
   end
 
   it "builds overrides that replace step content when the plan changes" do
