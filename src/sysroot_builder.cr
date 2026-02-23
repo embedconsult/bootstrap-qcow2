@@ -392,11 +392,6 @@ module Bootstrap
       ENV["BQ2_SOURCE_BRANCH"]? || Bootstrap::VERSION
     end
 
-    # Return the expected rootfs tarball filename for the bootstrap source version.
-    def rootfs_tarball_name : String
-      "bq2-rootfs-#{bootstrap_source_version}.tar.gz"
-    end
-
     private def kernel_headers_arch : String
       case @architecture
       when "aarch64", "arm64"
