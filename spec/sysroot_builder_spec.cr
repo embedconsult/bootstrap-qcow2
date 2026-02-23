@@ -94,7 +94,7 @@ describe Bootstrap::SysrootBuilder do
       phases["system-from-sysroot"].workdir.should eq seed_workspace
       bq2_workspace = Bootstrap::SysrootWorkspace.workspace_from(Bootstrap::SysrootWorkspace::Namespace::BQ2, host_workdir).to_s
       phases["tools-from-system"].workdir.should eq bq2_workspace
-      phases["finalize-rootfs"].workdir.should eq seed_workspace
+      phases["finalize-rootfs"].workdir.should eq bq2_workspace
     end
   end
 

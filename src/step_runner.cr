@@ -189,6 +189,20 @@ module Bootstrap
           tar_excludes = [
             "--exclude=var/lib",
             "--exclude=var/lib/**",
+            "--exclude=workspace",
+            "--exclude=workspace/**",
+            "--exclude=work",
+            "--exclude=work/**",
+            "--exclude=proc",
+            "--exclude=proc/**",
+            "--exclude=sys",
+            "--exclude=sys/**",
+            "--exclude=dev",
+            "--exclude=dev/**",
+            "--exclude=run",
+            "--exclude=run/**",
+            "--exclude=tmp",
+            "--exclude=tmp/**",
             "--exclude=.bq2-rootfs",
           ]
           run_cmd(["tar", "-czf", output] + tar_excludes + ["-C", source_root, "."], env: env)

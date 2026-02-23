@@ -874,18 +874,18 @@ module Bootstrap
             },
           },
         ),
-        # Inputs: full bq2 rootfs staged in the seed namespace.
+        # Inputs: full bq2 rootfs staged in the bq2 namespace.
         # Outputs: finalized rootfs tarball emitted.
         PhaseSpec.new(
           BuildPhase.new(
             name: "finalize-rootfs",
             description: "Strip the sysroot prefix and emit a prefix-free rootfs tarball.",
-            namespace: SysrootWorkspace::Namespace::Seed.label,
+            namespace: SysrootWorkspace::Namespace::BQ2.label,
             install_prefix: "/usr",
-            destdir: bq2_from_seed,
-            env: rootfs_phase_env(sysroot_prefix),
+            destdir: nil,
+            env: bq2_phase_env,
           ),
-          workdir: workspace_from_seed,
+          workdir: workspace_from_bq2,
           package_allowlist: [] of String,
           extra_steps: [
             write_file_step("musl-ld-path-final", musl_ld_path, "/lib:/usr/lib\n"),
