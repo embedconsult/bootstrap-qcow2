@@ -1359,8 +1359,8 @@ module Bootstrap
                                   sysroot_triple : String,
                                   build_root : String,
                                   phase_env : Hash(String, String)) : Array(String)
-      cc_value = phase_env["CC"]? || "#{sysroot_prefix}/bin/clang"
-      cxx_value = phase_env["CXX"]? || "#{sysroot_prefix}/bin/clang++"
+      cc_value = "#{sysroot_prefix}/bin/clang"
+      cxx_value = "#{sysroot_prefix}/bin/clang++"
       cc, cc_flags = split_compiler_flags(cc_value)
       cxx, cxx_flags = split_compiler_flags(cxx_value)
 
