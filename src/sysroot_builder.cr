@@ -607,7 +607,7 @@ module Bootstrap
     #   musl's /etc/ld-musl-<arch>.path for runtime lookup.
     def phase_specs : Array(PhaseSpec)
       sysroot_prefix = "/#{SysrootWorkspace::SYSROOT_DIR_NAME}"
-      rootfs_tarball = "#{@workspace.workspace_path}/bq2-rootfs-#{bootstrap_source_version}.tar.gz"
+      rootfs_tarball = "/workspace/bq2-rootfs-#{bootstrap_source_version}.tar.gz"
       host_workdir = @workspace.host_workdir.not_nil!
       workspace_from_seed = SysrootWorkspace.workspace_from(SysrootWorkspace::Namespace::Seed, host_workdir).to_s
       workspace_from_bq2 = SysrootWorkspace.workspace_from(SysrootWorkspace::Namespace::BQ2, host_workdir).to_s
@@ -880,12 +880,12 @@ module Bootstrap
           BuildPhase.new(
             name: "finalize-rootfs",
             description: "Strip the sysroot prefix and emit a prefix-free rootfs tarball.",
-            namespace: SysrootWorkspace::Namespace::Seed.label,
+            namespace: SysrootWorkspace::Namespace::BQ2.label,
             install_prefix: "/usr",
-            destdir: bq2_from_seed,
+            destdir: nil,
             env: rootfs_phase_env(sysroot_prefix),
           ),
-          workdir: workspace_from_seed,
+          workdir: workspace_from_bq2,
           package_allowlist: [] of String,
           extra_steps: [
             write_file_step("musl-ld-path-final", musl_ld_path, "/lib:/usr/lib\n"),
