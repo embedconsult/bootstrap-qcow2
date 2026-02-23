@@ -607,10 +607,10 @@ module Bootstrap
     #   musl's /etc/ld-musl-<arch>.path for runtime lookup.
     def phase_specs : Array(PhaseSpec)
       sysroot_prefix = "/#{SysrootWorkspace::SYSROOT_DIR_NAME}"
-      rootfs_tarball = "#{@workspace.workspace_path}/bq2-rootfs-#{bootstrap_source_version}.tar.gz"
       host_workdir = @workspace.host_workdir.not_nil!
       workspace_from_seed = SysrootWorkspace.workspace_from(SysrootWorkspace::Namespace::Seed, host_workdir).to_s
       workspace_from_bq2 = SysrootWorkspace.workspace_from(SysrootWorkspace::Namespace::BQ2, host_workdir).to_s
+      rootfs_tarball = "#{workspace_from_bq2}/bq2-rootfs-#{bootstrap_source_version}.tar.gz"
       bq2_from_seed = SysrootWorkspace.bq2_rootfs_from(SysrootWorkspace::Namespace::Seed, host_workdir).to_s
       sysroot_triple = sysroot_target_triple
       sysroot_env = sysroot_phase_env(sysroot_prefix)
