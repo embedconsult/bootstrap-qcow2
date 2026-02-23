@@ -1270,6 +1270,7 @@ module Bootstrap
                                  spec : PhaseSpec,
                                  build_root : String,
                                  env : Hash(String, String)) : Array(BuildStep)
+      toolchain_prefix = "/#{SysrootWorkspace::SYSROOT_DIR_NAME}"
       env["CMAKE_SOURCE_DIR"] = "llvm"
       stage2_env = env.dup
       stage2_lib = File.join(build_root, "build-stage2", "lib")
@@ -1288,7 +1289,7 @@ module Bootstrap
       base_flags = configure_flags_for(pkg, spec)
       patches = patches_for(pkg, spec)
       stage1_flags = llvm_stage1_flags(base_flags, spec.phase.env)
-      stage2_flags = llvm_stage2_flags(base_flags, spec.phase.install_prefix, sysroot_target_triple, build_root, spec.phase.env)
+      stage2_flags = llvm_stage2_flags(base_flags, spec.phase.install_prefix, toolchain_prefix, sysroot_target_triple, build_root)
       [
         BuildStep.new(
           name: "#{pkg.name}-stage1",
@@ -1356,22 +1357,23 @@ module Bootstrap
     # Stage 2 LLVM flags use the sysroot compiler and link against the sysroot
     # libc++/libunwind runtimes for a self-contained toolchain.
     private def llvm_stage2_flags(base_flags : Array(String),
-                                  sysroot_prefix : String,
+                                  install_prefix : String,
+                                  toolchain_prefix : String,
                                   sysroot_triple : String,
-                                  build_root : String,
-                                  phase_env : Hash(String, String)) : Array(String)
-      cc_value = "#{sysroot_prefix}/bin/clang"
-      cxx_value = "#{sysroot_prefix}/bin/clang++"
+                                  build_root : String) : Array(String)
+      cc_value = "#{toolchain_prefix}/bin/clang"
+      cxx_value = "#{toolchain_prefix}/bin/clang++"
       cc, cc_flags = split_compiler_flags(cc_value)
       cxx, cxx_flags = split_compiler_flags(cxx_value)
 
-      libcxx_include = "#{sysroot_prefix}/include/c++/v1"
-      libcxx_target_include = "#{sysroot_prefix}/include/#{sysroot_triple}/c++/v1"
-      libcxx_libdir = "#{sysroot_prefix}/lib/#{sysroot_triple}"
+      toolchain_libcxx_include = "#{toolchain_prefix}/include/c++/v1"
+      toolchain_libcxx_target_include = "#{toolchain_prefix}/include/#{sysroot_triple}/c++/v1"
+      toolchain_libcxx_libdir = "#{toolchain_prefix}/lib/#{sysroot_triple}"
+      install_libdir = "#{install_prefix}/lib/#{sysroot_triple}"
       build_rpath = File.join(build_root, "build-stage2", "lib")
-      install_rpath = "#{libcxx_libdir}:#{sysroot_prefix}/lib"
+      install_rpath = "#{install_libdir}:#{install_prefix}/lib"
       cxx_standard_libs = "-lc++ -lc++abi -lunwind"
-      linker_flags = "--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{libcxx_libdir} -L#{sysroot_prefix}/lib"
+      linker_flags = "--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{toolchain_libcxx_libdir} -L#{toolchain_prefix}/lib"
 
       flags = base_flags.dup
       flags << "-DCMAKE_C_COMPILER=#{cc}"
@@ -1381,6 +1383,9 @@ module Bootstrap
       end
       unless cxx_flags.empty? || flags.any? { |flag| flag.starts_with?("-DCMAKE_CXX_FLAGS=") }
         flags << "-DCMAKE_CXX_FLAGS=#{cxx_flags}"
+      end
+      unless flags.any? { |flag| flag.starts_with?("-DCMAKE_CXX_FLAGS=") }
+        flags << "-DCMAKE_CXX_FLAGS=-nostdinc++ -isystem #{toolchain_libcxx_include} -isystem #{toolchain_libcxx_target_include}"
       end
       flags << "-DCMAKE_CXX_STANDARD_LIBRARIES=#{cxx_standard_libs}"
       flags << "-DCMAKE_EXE_LINKER_FLAGS=#{linker_flags}"
