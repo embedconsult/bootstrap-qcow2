@@ -60,12 +60,24 @@ def with_bq2_workspace(prefix : String = "bq2-spec", &)
   FileUtils.mkdir_p(path)
   begin
     Dir.cd(path) do
-      Log.debug { "Using workspace at relative path from ${path}" }
+      Log.debug { "Using workspace rooted at #{path}" }
       Bootstrap::SysrootWorkspace.create
       yield
     end
   ensure
     FileUtils.rm_rf(path)
+  end
+end
+
+def with_modified_env(key : String, value : String, &block : ->)
+  previous = ENV[key]?
+  ENV[key] = value
+  yield
+ensure
+  if previous
+    ENV[key] = previous
+  else
+    ENV.delete(key)
   end
 end
 
@@ -138,7 +150,7 @@ def with_recording_runner(plan : Bootstrap::BuildPlan, overrides : Bootstrap::Bu
     Log.debug { "Wrote plan to #{plan_path}" }
     unless overrides.nil?
       File.write(overrides_path, overrides.to_json)
-      Log.debug { "Wrote plan to #{overrides_path}" }
+      Log.debug { "Wrote overrides to #{overrides_path}" }
     end
     build_state = Bootstrap::SysrootBuildState.new(workspace: step_runner.workspace)
     yield build_state, step_runner
