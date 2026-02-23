@@ -59,7 +59,11 @@ module Bootstrap
       return phase unless override
 
       install_prefix = override.install_prefix || phase.install_prefix
-      destdir = override.destdir || phase.destdir
+      destdir = if override.destdir_clear
+                  nil
+                else
+                  override.destdir || phase.destdir
+                end
       env = merge_env(phase.env, override.env)
       steps = apply_phase_packages(phase.steps, override.packages)
       steps = steps.map { |step| apply_step(phase.name, step, override.steps) }
@@ -96,7 +100,11 @@ module Bootstrap
       workdir = override.workdir || step.workdir
       build_dir = override.build_dir || step.build_dir
       install_prefix = override.install_prefix || step.install_prefix
-      destdir = override.destdir || step.destdir
+      destdir = if override.destdir_clear
+                  nil
+                else
+                  override.destdir || step.destdir
+                end
       env = merge_env(step.env, override.env)
       sources = override.sources || step.sources
       extract_sources = override.extract_sources || step.extract_sources
@@ -151,17 +159,30 @@ module Bootstrap
     # Compute overrides for a single phase, returning nil if no changes exist.
     private def self.diff_phase(base_phase : BuildPhase, target_phase : BuildPhase) : PhaseOverride?
       install_prefix = base_phase.install_prefix == target_phase.install_prefix ? nil : target_phase.install_prefix
-      destdir = diff_nullable_path("phase #{base_phase.name} destdir", base_phase.destdir, target_phase.destdir)
+      destdir_override = diff_nullable_path_override(
+        "phase #{base_phase.name} destdir",
+        base_phase.destdir,
+        target_phase.destdir,
+      )
+      destdir = destdir_override[:value]
+      destdir_clear = destdir_override[:clear] ? true : nil
       env = diff_env("phase #{base_phase.name} env", base_phase.env, target_phase.env)
       phase_packages = diff_phase_packages(base_phase, target_phase)
       packages = phase_packages[:packages]
       extra_steps = phase_packages[:extra_steps]
       steps = diff_phase_steps(base_phase, target_phase)
-      return nil if install_prefix.nil? && destdir.nil? && env.nil? && packages.nil? && extra_steps.nil? && steps.nil?
+      return nil if install_prefix.nil? &&
+                    destdir.nil? &&
+                    destdir_clear.nil? &&
+                    env.nil? &&
+                    packages.nil? &&
+                    extra_steps.nil? &&
+                    steps.nil?
 
       PhaseOverride.new(
         install_prefix: install_prefix,
         destdir: destdir,
+        destdir_clear: destdir_clear,
         env: env,
         packages: packages,
         extra_steps: extra_steps,
@@ -224,7 +245,13 @@ module Bootstrap
       workdir = base_step.workdir == target_step.workdir ? nil : target_step.workdir
       build_dir = diff_nullable_path("phase #{phase_name} step #{base_step.name} build_dir", base_step.build_dir, target_step.build_dir)
       install_prefix = diff_nullable_path("phase #{phase_name} step #{base_step.name} install_prefix", base_step.install_prefix, target_step.install_prefix)
-      destdir = diff_nullable_path("phase #{phase_name} step #{base_step.name} destdir", base_step.destdir, target_step.destdir)
+      destdir_override = diff_nullable_path_override(
+        "phase #{phase_name} step #{base_step.name} destdir",
+        base_step.destdir,
+        target_step.destdir,
+      )
+      destdir = destdir_override[:value]
+      destdir_clear = destdir_override[:clear] ? true : nil
       env = diff_env("phase #{phase_name} step #{base_step.name} env", base_step.env, target_step.env)
       clean_build = base_step.clean_build == target_step.clean_build ? nil : target_step.clean_build
       configure_flags_override = diff_list_override("phase #{phase_name} step #{base_step.name} configure_flags", base_step.configure_flags, target_step.configure_flags)
@@ -233,6 +260,7 @@ module Bootstrap
                     build_dir.nil? &&
                     install_prefix.nil? &&
                     destdir.nil? &&
+                    destdir_clear.nil? &&
                     env.nil? &&
                     clean_build.nil? &&
                     sources.nil? &&
@@ -248,6 +276,7 @@ module Bootstrap
         build_dir: build_dir,
         install_prefix: install_prefix,
         destdir: destdir,
+        destdir_clear: destdir_clear,
         env: env,
         clean_build: clean_build,
         sources: sources,
@@ -286,6 +315,13 @@ module Bootstrap
       raise "Target plan clears #{context}, which overrides cannot remove" if base && target.nil?
       target
     end
+
+    # Return override value for nullable paths, allowing explicit clears.
+    private def self.diff_nullable_path_override(_context : String, base : String?, target : String?) : NamedTuple(value: String?, clear: Bool)
+      return {value: nil, clear: false} if base == target
+      return {value: nil, clear: true} if base && target.nil?
+      {value: target, clear: false}
+    end
   end
 
   struct PhaseOverride
@@ -293,6 +329,7 @@ module Bootstrap
 
     getter install_prefix : String?
     getter destdir : String?
+    getter destdir_clear : Bool?
     getter env : Hash(String, String)?
     getter packages : Array(String)?
     getter extra_steps : Array(BuildStep)?
@@ -300,6 +337,7 @@ module Bootstrap
 
     def initialize(@install_prefix : String? = nil,
                    @destdir : String? = nil,
+                   @destdir_clear : Bool? = nil,
                    @env : Hash(String, String)? = nil,
                    @packages : Array(String)? = nil,
                    @extra_steps : Array(BuildStep)? = nil,
@@ -314,6 +352,7 @@ module Bootstrap
     getter build_dir : String?
     getter install_prefix : String?
     getter destdir : String?
+    getter destdir_clear : Bool?
     getter env : Hash(String, String)?
     getter clean_build : Bool?
     getter sources : Array(SourceSpec)?
@@ -332,6 +371,7 @@ module Bootstrap
                    @build_dir : String? = nil,
                    @install_prefix : String? = nil,
                    @destdir : String? = nil,
+                   @destdir_clear : Bool? = nil,
                    @env : Hash(String, String)? = nil,
                    @clean_build : Bool? = nil,
                    @sources : Array(SourceSpec)? = nil,

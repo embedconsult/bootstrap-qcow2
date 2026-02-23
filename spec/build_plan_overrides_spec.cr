@@ -63,6 +63,27 @@ describe Bootstrap::BuildPlanOverrides do
     updated.phases.first.steps.first.configure_flags.should eq ["--with-foo"]
   end
 
+  it "clears phase destdir when overrides request removal" do
+    plan = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        namespace: "test",
+        install_prefix: "/opt/sysroot",
+        destdir: "/bq2-rootfs",
+      ),
+    ])
+
+    overrides = Bootstrap::BuildPlanOverrides.new(
+      phases: {
+        "one" => Bootstrap::PhaseOverride.new(destdir_clear: true),
+      },
+    )
+
+    updated = overrides.apply(plan)
+    updated.phases.first.destdir.should be_nil
+  end
+
   it "replaces configure flags when overrides provide a full list" do
     plan = Bootstrap::BuildPlan.new([
       Bootstrap::BuildPhase.new(
@@ -136,6 +157,32 @@ describe Bootstrap::BuildPlanOverrides do
     overrides = Bootstrap::BuildPlanOverrides.from_diff(base, target)
     updated = overrides.apply(base)
     updated.phases.first.steps.first.configure_flags.should eq ["--two", "--three"]
+  end
+
+  it "builds overrides that clear destdir when the plan changes" do
+    base = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        namespace: "test",
+        install_prefix: "/opt/sysroot",
+        destdir: "/bq2-rootfs",
+      ),
+    ])
+
+    target = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        namespace: "test",
+        install_prefix: "/opt/sysroot",
+      ),
+    ])
+
+    overrides = Bootstrap::BuildPlanOverrides.from_diff(base, target)
+    overrides.phases["one"].destdir_clear.should be_true
+    updated = overrides.apply(base)
+    updated.phases.first.destdir.should be_nil
   end
 
   it "builds overrides that replace step content when the plan changes" do
