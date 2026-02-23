@@ -109,6 +109,7 @@ module Bootstrap
       env = merge_env(step.env, override.env)
       sources = override.sources || step.sources
       extract_sources = override.extract_sources || step.extract_sources
+      sources_directory = step.sources_directory
       configure_flags = (override.configure_flags || step.configure_flags) + override.configure_flags_add
       patches = (override.patches || step.patches) + override.patches_add
       clean_build = override.clean_build.nil? ? step.clean_build : override.clean_build.not_nil!
@@ -126,6 +127,7 @@ module Bootstrap
         clean_build: clean_build,
         sources: sources,
         extract_sources: extract_sources,
+        sources_directory: sources_directory,
         packages: step.packages,
         content: content,
       )

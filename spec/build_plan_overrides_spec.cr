@@ -256,6 +256,43 @@ describe Bootstrap::BuildPlanOverrides do
     updated.phases.first.steps.first.content.should eq "beta"
   end
 
+  it "preserves sources_directory when applying unrelated step overrides" do
+    plan = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        namespace: "test",
+        install_prefix: "/opt/sysroot",
+        steps: [
+          Bootstrap::BuildStep.new(
+            name: "pkg",
+            strategy: "autotools",
+            workdir: "/tmp",
+            configure_flags: ["--one"],
+            patches: [] of String,
+            env: {"CC" => "clang"},
+            sources_directory: "/workspace/sources",
+          ),
+        ],
+      ),
+    ])
+
+    overrides = Bootstrap::BuildPlanOverrides.new(
+      phases: {
+        "one" => Bootstrap::PhaseOverride.new(
+          steps: {
+            "pkg" => Bootstrap::StepOverride.new(env: {"CFLAGS" => "-O2"}),
+          },
+        ),
+      },
+    )
+
+    updated = overrides.apply(plan)
+    updated_step = updated.phases.first.steps.first
+    updated_step.env["CC"].should eq "clang"
+    updated_step.env["CFLAGS"].should eq "-O2"
+    updated_step.sources_directory.should eq "/workspace/sources"
+  end
   it "appends extra steps from overrides" do
     plan = Bootstrap::BuildPlan.new([
       Bootstrap::BuildPhase.new(
