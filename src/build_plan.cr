@@ -1,4 +1,6 @@
 require "json"
+require "log"
+require "./sysroot_workspace"
 
 module Bootstrap
   # Common data structures for describing the sysroot build plan.
@@ -11,13 +13,13 @@ module Bootstrap
     getter name : String
     getter version : String
     getter filename : String
-    getter build_directory : String
+    getter build_directory : String?
 
     # Describes how a source archive should be extracted.
     def initialize(@name : String,
                    @version : String,
                    @filename : String,
-                   @build_directory : String)
+                   @build_directory : String? = nil)
     end
   end
 
@@ -33,6 +35,10 @@ module Bootstrap
     getter build_directory : String?
 
     # Describes a single downloadable source archive.
+    #
+    # `build_directory` names the extracted directory (for archives that unpack
+    # to a nonstandard top-level name) so the builder can resolve a stable
+    # workspace path.
     def initialize(@name : String,
                    @version : String,
                    @url : String,
@@ -48,7 +54,7 @@ module Bootstrap
 
     getter name : String
     getter strategy : String
-    getter workdir : String
+    getter workdir : String?
     getter configure_flags : Array(String)
     getter patches : Array(String)
     getter build_dir : String?
@@ -60,6 +66,7 @@ module Bootstrap
     getter extract_sources : Array(ExtractSpec)?
     getter packages : Array(String)?
     getter content : String?
+    getter sources_directory : String?
 
     # Creates a single step within a build phase.
     #
@@ -69,7 +76,7 @@ module Bootstrap
     # a `make clean` before building (when supported by the strategy).
     def initialize(@name : String,
                    @strategy : String,
-                   @workdir : String,
+                   @workdir : String?,
                    @configure_flags : Array(String),
                    @patches : Array(String),
                    @install_prefix : String? = nil,
@@ -80,7 +87,8 @@ module Bootstrap
                    @sources : Array(SourceSpec)? = nil,
                    @extract_sources : Array(ExtractSpec)? = nil,
                    @packages : Array(String)? = nil,
-                   @content : String? = nil)
+                   @content : String? = nil,
+                   @sources_directory : String? = nil)
     end
   end
 
@@ -89,21 +97,26 @@ module Bootstrap
   struct BuildPhase
     include JSON::Serializable
 
+    # Phase identifier used by the runner (e.g., "sysroot-from-alpine").
     getter name : String
+    # Human-readable description shown in logs.
     getter description : String
-    getter workspace : String
-    getter environment : String
+    # Namespace tag used to decide where this phase is allowed to execute.
+    getter namespace : String
+    # Install prefix used by build strategies that honor configure/CMake prefixes.
     getter install_prefix : String
+    # Optional DESTDIR staging root (used for rootfs assembly).
     getter destdir : String?
+    # Default environment variables applied to every step in the phase.
     getter env : Hash(String, String)
+    # Ordered list of build steps for this phase.
     getter steps : Array(BuildStep)
 
     # Creates a build phase containing steps plus shared install/environment
     # defaults.
     def initialize(@name : String,
                    @description : String,
-                   @workspace : String,
-                   @environment : String,
+                   @namespace : String,
                    @install_prefix : String,
                    @destdir : String? = nil,
                    @env : Hash(String, String) = {} of String => String,

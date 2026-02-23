@@ -7,8 +7,7 @@ describe Bootstrap::BuildPlanOverrides do
       Bootstrap::BuildPhase.new(
         name: "one",
         description: "phase",
-        workspace: "/workspace",
-        environment: "test",
+        namespace: "test",
         install_prefix: "/opt/sysroot",
         steps: [
           Bootstrap::BuildStep.new(name: "a", strategy: "autotools", workdir: "/a", configure_flags: [] of String, patches: [] of String),
@@ -33,8 +32,7 @@ describe Bootstrap::BuildPlanOverrides do
       Bootstrap::BuildPhase.new(
         name: "one",
         description: "phase",
-        workspace: "/workspace",
-        environment: "test",
+        namespace: "test",
         install_prefix: "/opt/sysroot",
         env: {"PATH" => "/bin"} of String => String,
         steps: [
@@ -46,6 +44,7 @@ describe Bootstrap::BuildPlanOverrides do
     overrides = Bootstrap::BuildPlanOverrides.new(
       phases: {
         "one" => Bootstrap::PhaseOverride.new(
+          namespace: "updated",
           install_prefix: "/usr",
           env: {"CC" => "clang"} of String => String,
           steps: {
@@ -56,6 +55,7 @@ describe Bootstrap::BuildPlanOverrides do
     )
 
     updated = overrides.apply(plan)
+    updated.phases.first.namespace.should eq "updated"
     updated.phases.first.install_prefix.should eq "/usr"
     updated.phases.first.env["PATH"].should eq "/bin"
     updated.phases.first.env["CC"].should eq "clang"
@@ -65,13 +65,33 @@ describe Bootstrap::BuildPlanOverrides do
     updated.phases.first.steps.first.configure_flags.should eq ["--with-foo"]
   end
 
+  it "clears phase destdir when overrides request removal" do
+    plan = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        namespace: "test",
+        install_prefix: "/opt/sysroot",
+        destdir: "/bq2-rootfs",
+      ),
+    ])
+
+    overrides = Bootstrap::BuildPlanOverrides.new(
+      phases: {
+        "one" => Bootstrap::PhaseOverride.new(destdir_clear: true),
+      },
+    )
+
+    updated = overrides.apply(plan)
+    updated.phases.first.destdir.should be_nil
+  end
+
   it "replaces configure flags when overrides provide a full list" do
     plan = Bootstrap::BuildPlan.new([
       Bootstrap::BuildPhase.new(
         name: "one",
         description: "phase",
-        workspace: "/workspace",
-        environment: "test",
+        namespace: "test",
         install_prefix: "/opt/sysroot",
         steps: [
           Bootstrap::BuildStep.new(
@@ -104,8 +124,7 @@ describe Bootstrap::BuildPlanOverrides do
       Bootstrap::BuildPhase.new(
         name: "one",
         description: "phase",
-        workspace: "/workspace",
-        environment: "test",
+        namespace: "test",
         install_prefix: "/opt/sysroot",
         steps: [
           Bootstrap::BuildStep.new(
@@ -123,8 +142,7 @@ describe Bootstrap::BuildPlanOverrides do
       Bootstrap::BuildPhase.new(
         name: "one",
         description: "phase",
-        workspace: "/workspace",
-        environment: "test",
+        namespace: "test",
         install_prefix: "/opt/sysroot",
         steps: [
           Bootstrap::BuildStep.new(
@@ -143,9 +161,199 @@ describe Bootstrap::BuildPlanOverrides do
     updated.phases.first.steps.first.configure_flags.should eq ["--two", "--three"]
   end
 
+  it "builds overrides that clear destdir when the plan changes" do
+    base = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        namespace: "test",
+        install_prefix: "/opt/sysroot",
+        destdir: "/bq2-rootfs",
+      ),
+    ])
+
+    target = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        namespace: "test",
+        install_prefix: "/opt/sysroot",
+      ),
+    ])
+
+    overrides = Bootstrap::BuildPlanOverrides.from_diff(base, target)
+    overrides.phases["one"].destdir_clear.should be_true
+    updated = overrides.apply(base)
+    updated.phases.first.destdir.should be_nil
+  end
+
+  it "builds overrides that replace namespace when the plan changes" do
+    base = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        namespace: "seed",
+        install_prefix: "/opt/sysroot",
+      ),
+    ])
+
+    target = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        namespace: "bq2",
+        install_prefix: "/opt/sysroot",
+      ),
+    ])
+
+    overrides = Bootstrap::BuildPlanOverrides.from_diff(base, target)
+    overrides.phases["one"].namespace.should eq "bq2"
+    updated = overrides.apply(base)
+    updated.phases.first.namespace.should eq "bq2"
+  end
+
+  it "builds overrides that replace step content when the plan changes" do
+    base = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        namespace: "test",
+        install_prefix: "/opt/sysroot",
+        steps: [
+          Bootstrap::BuildStep.new(
+            name: "file",
+            strategy: "write-file",
+            workdir: "/tmp",
+            configure_flags: [] of String,
+            patches: [] of String,
+            content: "alpha",
+          ),
+        ],
+      ),
+    ])
+
+    target = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        namespace: "test",
+        install_prefix: "/opt/sysroot",
+        steps: [
+          Bootstrap::BuildStep.new(
+            name: "file",
+            strategy: "write-file",
+            workdir: "/tmp",
+            configure_flags: [] of String,
+            patches: [] of String,
+            content: "beta",
+          ),
+        ],
+      ),
+    ])
+
+    overrides = Bootstrap::BuildPlanOverrides.from_diff(base, target)
+    updated = overrides.apply(base)
+    updated.phases.first.steps.first.content.should eq "beta"
+  end
+
+  it "preserves sources_directory when applying unrelated step overrides" do
+    plan = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        namespace: "test",
+        install_prefix: "/opt/sysroot",
+        steps: [
+          Bootstrap::BuildStep.new(
+            name: "pkg",
+            strategy: "autotools",
+            workdir: "/tmp",
+            configure_flags: ["--one"],
+            patches: [] of String,
+            env: {"CC" => "clang"},
+            sources_directory: "/workspace/sources",
+          ),
+        ],
+      ),
+    ])
+
+    overrides = Bootstrap::BuildPlanOverrides.new(
+      phases: {
+        "one" => Bootstrap::PhaseOverride.new(
+          steps: {
+            "pkg" => Bootstrap::StepOverride.new(env: {"CFLAGS" => "-O2"}),
+          },
+        ),
+      },
+    )
+
+    updated = overrides.apply(plan)
+    updated_step = updated.phases.first.steps.first
+    updated_step.env["CC"].should eq "clang"
+    updated_step.env["CFLAGS"].should eq "-O2"
+    updated_step.sources_directory.should eq "/workspace/sources"
+  end
+  it "appends extra steps from overrides" do
+    plan = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        namespace: "test",
+        install_prefix: "/opt/sysroot",
+        steps: [
+          Bootstrap::BuildStep.new(name: "a", strategy: "autotools", workdir: "/a", configure_flags: [] of String, patches: [] of String),
+        ],
+      ),
+    ])
+
+    overrides = Bootstrap::BuildPlanOverrides.new(
+      phases: {
+        "one" => Bootstrap::PhaseOverride.new(
+          extra_steps: [
+            Bootstrap::BuildStep.new(name: "b", strategy: "noop", workdir: "/b", configure_flags: [] of String, patches: [] of String),
+          ],
+        ),
+      },
+    )
+
+    updated = overrides.apply(plan)
+    updated.phases.first.steps.map(&.name).should eq ["a", "b"]
+  end
+
+  it "builds overrides that append new steps when the plan changes" do
+    base = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        namespace: "test",
+        install_prefix: "/opt/sysroot",
+        steps: [
+          Bootstrap::BuildStep.new(name: "a", strategy: "autotools", workdir: "/a", configure_flags: [] of String, patches: [] of String),
+        ],
+      ),
+    ])
+
+    target = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(
+        name: "one",
+        description: "phase",
+        namespace: "test",
+        install_prefix: "/opt/sysroot",
+        steps: [
+          Bootstrap::BuildStep.new(name: "a", strategy: "autotools", workdir: "/a", configure_flags: [] of String, patches: [] of String),
+          Bootstrap::BuildStep.new(name: "b", strategy: "noop", workdir: "/b", configure_flags: [] of String, patches: [] of String),
+        ],
+      ),
+    ])
+
+    overrides = Bootstrap::BuildPlanOverrides.from_diff(base, target)
+    updated = overrides.apply(base)
+    updated.phases.first.steps.map(&.name).should eq ["a", "b"]
+  end
+
   it "raises when overrides reference an unknown phase" do
     plan = Bootstrap::BuildPlan.new([
-      Bootstrap::BuildPhase.new(name: "one", description: "phase", workspace: "/workspace", environment: "test", install_prefix: "/opt/sysroot"),
+      Bootstrap::BuildPhase.new(name: "one", description: "phase", namespace: "test", install_prefix: "/opt/sysroot"),
     ])
 
     overrides = Bootstrap::BuildPlanOverrides.new(

@@ -10,3 +10,5 @@ This file tracks technical-debt tasks that should be handled in-repo (Crystal-fi
 - Move dependency fetching for Crystal/Shards into a dedicated download phase that pre-populates the shard cache inside the rootfs, so `shards install` never requires network during build phases.
 - Remove legacy build plan compatibility and related conditional logic in `SysrootRunner`/`SysrootResumeAll`, assuming plan format v1+ only.
 - Document the intended phase boundaries and artifacts (inputs/outputs) in `SysrootBuilder.phase_specs` to keep resumption deterministic and fully reproducible.
+- Make `StepRunner#download_sources` robust to mirror outages by accepting the first successful URL per package instead of failing when any mirror is down.
+- Write a minimal Kconfig reader/writer (Crystal) so we can update `.config` settings without external scripts during build steps.

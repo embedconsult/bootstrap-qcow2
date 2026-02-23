@@ -4,12 +4,12 @@
 These instructions apply to the entire repository unless overridden by a nested `AGENTS.md`.
 
 ## Terminology
-- Host repo: the Git checkout on the host (e.g. `/home/ubuntu/workspace/bootstrap-qcow2`).
-- Host sysroot workspace: `data/sysroot` under the host repo (the default workspace on the host).
-- Rootfs (outer): the current `/` when running inside the seed/rootfs namespace (initially Alpine-based, later the generated rootfs).
 - Rootfs workspace path: `data/sysroot/rootfs/workspace` on the host; inside the outer rootfs this appears at `/workspace`.
-- Rootfs (inner): the generated rootfs used for the prefix-free environment; on the host it is `data/sysroot/rootfs/workspace/rootfs`, and inside the outer rootfs it is `/workspace/rootfs`.
-- Rootfs marker: `/.bq2-rootfs` inside the inner rootfs (used to detect that we are in the inner rootfs).
+- Seed (outer) Rootfs: the current `/` when running inside the seed/rootfs namespace (initially Alpine-based, later the generated rootfs).
+- BQ2 (inner) Rootfs: the generated rootfs used for the prefix-free environment; on the host it is `data/sysroot/seed-rootfs/bq2-rootfs`, and inside the seed (outer) rootfs it is `/bq2-rootfs`.
+- Rootfs marker: `/.bq2-rootfs` inside the BQ2 (inner) rootfs (used to detect the namespace we are in).
+- Host workdir: `data/sysroot` under the host repo (the default working directory on the host).
+- Host repo: the Git checkout on the host (e.g. `/home/user/workspace/bootstrap-qcow2`).
 
 ## Project direction
 - Primary goal: build a reproducible QCOW2 disk image that boots via EFI across multiple architectures, with **aarch64** as the first-class target.
