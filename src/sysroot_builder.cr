@@ -1011,8 +1011,8 @@ module Bootstrap
     private def bq2_phase_env : Hash(String, String)
       {
         "PATH"   => "/usr/bin:/bin:/usr/sbin:/sbin",
-        "CC"     => "clang",
-        "CXX"    => "clang++",
+        "CC"     => "clang --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld",
+        "CXX"    => "clang++ --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld",
         "AR"     => "llvm-ar",
         "NM"     => "llvm-nm",
         "RANLIB" => "llvm-ranlib",
