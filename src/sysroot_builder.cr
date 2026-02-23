@@ -1104,7 +1104,6 @@ module Bootstrap
 
     # Persist the build plan JSON.
     def write_plan(plan : BuildPlan = build_plan) : Path
-      @workspace = SysrootWorkspace.create
       build_state = SysrootBuildState.new(workspace: @workspace)
       plan_json = plan.to_pretty_json
       plan_path = build_state.plan_path
@@ -1452,13 +1451,14 @@ module Bootstrap
 
     # Return command aliases handled by the sysroot builder CLI.
     def self.aliases : Array(String)
-      ["sysroot-builder-overrides"]
+      ["sysroot-builder-overrides", "sysroot-plan-write"]
     end
 
     # Describe help output entries for the sysroot builder CLI.
     def self.help_entries : Array(Tuple(String, String))
       [
         {"sysroot-builder", "Create workspace and build plan"},
+        {"sysroot-plan-write", "Write build plan into an existing workspace"},
         {"sysroot-builder-overrides", "Write overrides that match the current plan changes"},
       ]
     end
@@ -1468,6 +1468,8 @@ module Bootstrap
       case command_name
       when "sysroot-builder"
         run_builder(args)
+      when "sysroot-plan-write"
+        run_builder(args, plan_only_default: true)
       when "sysroot-builder-overrides"
         run_builder_overrides(args)
       else
@@ -1476,21 +1478,41 @@ module Bootstrap
     end
 
     # Build or reuse a sysroot workspace and optionally emit a tarball.
-    private def self.run_builder(args : Array(String)) : Int32
+    private def self.run_builder(args : Array(String), plan_only_default : Bool = false) : Int32
       architecture = DEFAULT_ARCH
       seed = DEFAULT_ROOTFS_SEED
+      plan_only = plan_only_default
+      host_workdir : Path? = nil
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-builder [options]") do |p|
         p.on("-a ARCH", "--arch=ARCH", "Target architecture (default: #{architecture})") { |val| architecture = val }
         p.on("-s SEED", "--seed=SEED", "Seed to use for initial rootfs (default: #{seed})") { |val| seed = val }
+        p.on("--workdir=PATH", "Host workdir for the sysroot workspace (default: #{SysrootWorkspace::DEFAULT_HOST_WORKDIR})") { |path| host_workdir = Path[path] }
+        p.on("--plan-only", "Write build plan into an existing workspace without preparing it") { plan_only = true }
       end
       return CLI.print_help(parser) if help
 
+      workspace = if plan_only
+                    begin
+                      SysrootWorkspace.new(host_workdir: host_workdir)
+                    rescue ex
+                      STDERR.puts "No valid workspace found, build out the workspace first with `bq2 sysroot-builder`: #{ex.message}"
+                      return -1
+                    end
+                  elsif host_workdir
+                    SysrootWorkspace.create(host_workdir.not_nil!)
+                  end
       builder = SysrootBuilder.new(
+        workspace: workspace,
         architecture: architecture,
         seed: seed,
       )
       plan_path = builder.write_plan
-      puts "Prepared sysroot workspace at #{builder.workspace.host_workdir}"
+      workspace_label = builder.workspace.host_workdir || builder.workspace.log_path
+      if plan_only
+        puts "Using existing sysroot workspace at #{workspace_label}"
+      else
+        puts "Prepared sysroot workspace at #{workspace_label}"
+      end
       puts "Wrote build plan at #{plan_path}"
       0
     end
