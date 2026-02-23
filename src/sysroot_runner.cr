@@ -222,7 +222,7 @@ module Bootstrap
         return -1
       end
 
-      state = SysrootBuildState.new
+      state = SysrootBuildState.new(workspace: workspace)
       next_phase, next_step = state.next_incomplete_step
       puts "plan_path=#{state.plan_path}"
       puts "state_path=#{state.state_path}"
