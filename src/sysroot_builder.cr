@@ -997,12 +997,13 @@ module Bootstrap
     # are immediately available to later steps in the same phase while ensuring
     # the seed rootfs uses Clang for all C/C++ compilation.
     private def sysroot_phase_env(sysroot_prefix : String) : Hash(String, String)
+      target = sysroot_target_triple
+      ld_library_path = "#{sysroot_prefix}/lib/#{target}:#{sysroot_prefix}/lib"
       {
-        "PATH" => "#{sysroot_prefix}/bin:#{sysroot_prefix}/sbin:/usr/bin:/bin",
-        "CC"   => "/usr/bin/clang",
-        "CXX"  => "/usr/bin/clang++",
-        # TODO: determine if this should be here.
-        "LD_LIBRARY_PATH" => "#{sysroot_prefix}/lib",
+        "PATH"            => "#{sysroot_prefix}/bin:#{sysroot_prefix}/sbin:/usr/bin:/bin",
+        "CC"              => "/usr/bin/clang",
+        "CXX"             => "/usr/bin/clang++",
+        "LD_LIBRARY_PATH" => ld_library_path,
       }
     end
 
