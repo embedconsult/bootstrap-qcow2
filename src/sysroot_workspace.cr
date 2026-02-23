@@ -85,7 +85,7 @@ module Bootstrap
       @log_path = @bq2_rootfs_path / Path["#{LOG_DIR_NAME}"]
 
       found_marker = File.exists?(@marker_path)
-      raise "Missing BQ2 rootfs marker at #{@marker_path}" if found_marker.nil?
+      raise "Missing BQ2 rootfs marker at #{@marker_path}" unless found_marker
     end
 
     def self.seed_rootfs_from(namespace : Namespace, host_workdir : Path? = nil)

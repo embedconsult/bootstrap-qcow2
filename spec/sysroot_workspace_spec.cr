@@ -104,6 +104,17 @@ describe Bootstrap::SysrootWorkspace do
         )
       end
     end
+
+    it "fails fast when the marker is missing" do
+      with_tempdir do |tmpdir|
+        host_workdir = tmpdir / "host-workdir"
+        FileUtils.mkdir_p(host_workdir / Path[Bootstrap::SysrootWorkspace::SEED_DIR_NAME])
+
+        expect_raises(Exception, /Missing BQ2 rootfs marker/) do
+          Bootstrap::SysrootWorkspace.new(host_workdir: host_workdir)
+        end
+      end
+    end
   end
 
   describe "#namespace_switch_required?" do
