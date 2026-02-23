@@ -276,4 +276,24 @@ describe Bootstrap::SysrootRunner do
       step_runner.calls.map { |call| call[:name] }.should eq ["a", "b"]
     end
   end
+
+  it "honors --workdir when printing sysroot status" do
+    with_tempdir("bq2-status-workdir") do |workspace_root|
+      workspace = Bootstrap::SysrootWorkspace.create(host_workdir: workspace_root)
+      phase = Bootstrap::BuildPhase.new(
+        name: "phase-a",
+        description: "status phase",
+        namespace: "host",
+        install_prefix: "/opt/sysroot",
+        steps: [Bootstrap::BuildStep.new(name: "a", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
+      )
+      File.write(workspace.log_path / Bootstrap::SysrootBuildState::PLAN_FILE, Bootstrap::BuildPlan.new([phase]).to_json)
+
+      with_tempdir("bq2-status-cwd") do |isolated_cwd|
+        Dir.cd(isolated_cwd) do
+          Bootstrap::SysrootRunner.run(["--workdir=#{workspace_root}"], "sysroot-status").should eq(0)
+        end
+      end
+    end
+  end
 end
