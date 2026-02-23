@@ -27,7 +27,7 @@ module Bootstrap
     getter format_version : Int32 = FORMAT_VERSION
 
     @[JSON::Field(ignore: true)]
-    @workspace : SysrootWorkspace
+    @workspace : SysrootWorkspace?
 
     @[JSON::Field(ignore: true)]
     property plan : BuildPlan = BuildPlan.new([] of BuildPhase)
@@ -66,7 +66,13 @@ module Bootstrap
 
     # Active workspace for this build state.
     @[JSON::Field(ignore: true)]
-    property workspace : SysrootWorkspace = SysrootWorkspace.new
+    def workspace : SysrootWorkspace
+      @workspace.not_nil!
+    end
+
+    def workspace=(workspace : SysrootWorkspace) : SysrootWorkspace
+      @workspace = workspace
+    end
 
     # Initialize the build state, loading any persisted state from disk.
     def initialize(@workspace : SysrootWorkspace = SysrootWorkspace.new,
@@ -81,7 +87,7 @@ module Bootstrap
                    @format_version : Int32 = FORMAT_VERSION,
                    ignore_overrides : Bool = false,
                    invalidate_on_overrides : Bool = false)
-      Log.debug { "Initializing SysrootBuildState (workspace=#{@workspace} workspace.host_dir=#{@workspace.host_workdir})" }
+      Log.debug { "Initializing SysrootBuildState (workspace=#{workspace} workspace.host_dir=#{workspace.host_workdir})" }
       @plan = BuildPlan.new([] of BuildPhase)
       saved_plan = on_disk_plan
       @plan = saved_plan.not_nil! unless saved_plan.nil?
@@ -102,22 +108,22 @@ module Bootstrap
 
     # Current rootfs-relative state path
     def state_path : Path
-      @workspace.log_path / STATE_FILE
+      workspace.log_path / STATE_FILE
     end
 
     # Resolve the plan path into the active namespace.
     def plan_path : Path
-      @workspace.log_path / PLAN_FILE
+      workspace.log_path / PLAN_FILE
     end
 
     # Resolve overrides path into the active namespace.
     def overrides_path : Path
-      @workspace.log_path / OVERRIDES_FILE
+      workspace.log_path / OVERRIDES_FILE
     end
 
     # Resolve report directory path into the active namespace.
     def report_dir : Path
-      @workspace.log_path / REPORT_DIR_NAME
+      workspace.log_path / REPORT_DIR_NAME
     end
 
     # Returns true when the build plan file exists for this workspace.
@@ -180,7 +186,7 @@ module Bootstrap
     def on_disk_state : SysrootBuildState?
       return nil unless state_exists?
       state = SysrootBuildState.from_json(File.read(state_path))
-      state.workspace = @workspace
+      state.workspace = workspace
       state
     end
 
