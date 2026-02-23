@@ -187,6 +187,20 @@ module Bootstrap
           raise "Missing tarball source #{source_root}" unless Dir.exists?(source_root)
           FileUtils.mkdir_p(File.dirname(output))
           tar_excludes = [
+            # Exclude mountpoints and runtime-managed paths so the rootfs tarball
+            # contains only the prefix-free filesystem payload.
+            "--exclude=proc",
+            "--exclude=proc/**",
+            "--exclude=sys",
+            "--exclude=sys/**",
+            "--exclude=dev",
+            "--exclude=dev/**",
+            "--exclude=work",
+            "--exclude=work/**",
+            "--exclude=tmp",
+            "--exclude=tmp/**",
+            "--exclude=workspace",
+            "--exclude=workspace/**",
             "--exclude=var/lib",
             "--exclude=var/lib/**",
             "--exclude=.bq2-rootfs",
