@@ -75,8 +75,6 @@ module Bootstrap
       end
       Log.debug { "Initialized namespace (host_workdir=#{@host_workdir}, namespace=#{@namespace})" }
 
-      raise "Invalid namespace: #{@namespace}" unless [Namespace::Host, Namespace::Seed, Namespace::BQ2].includes?(@namespace)
-
       @seed_rootfs_path = self.class.seed_rootfs_from(@namespace, @host_workdir)
       @sysroot_path = self.class.sysroot_from(@namespace, @host_workdir)
       @bq2_rootfs_path = self.class.bq2_rootfs_from(@namespace, @host_workdir)
@@ -84,8 +82,7 @@ module Bootstrap
       @marker_path = @bq2_rootfs_path / Path["#{ROOTFS_MARKER_NAME}"]
       @log_path = @bq2_rootfs_path / Path["#{LOG_DIR_NAME}"]
 
-      found_marker = File.exists?(@marker_path)
-      raise "Missing BQ2 rootfs marker at #{@marker_path}" unless found_marker
+      raise "Missing BQ2 rootfs marker at #{@marker_path}" unless File.exists?(@marker_path)
     end
 
     def self.seed_rootfs_from(namespace : Namespace, host_workdir : Path? = nil)
@@ -102,8 +99,7 @@ module Bootstrap
     def self.sysroot_from(namespace : Namespace, host_workdir : Path? = nil)
       seed_rootfs_path = seed_rootfs_from(namespace, host_workdir)
       return nil if seed_rootfs_path.nil?
-      prefix = seed_rootfs_path.not_nil!
-      prefix / Path["#{SYSROOT_DIR_NAME}"]
+      seed_rootfs_path.not_nil! / Path["#{SYSROOT_DIR_NAME}"]
     end
 
     def self.bq2_rootfs_from(namespace : Namespace, host_workdir : Path? = nil)
@@ -119,7 +115,8 @@ module Bootstrap
     # Create a workspace rooted at *host_workdir*, ensuring marker + dirs exist.
     def self.create(host_workdir : Path = Path["#{DEFAULT_HOST_WORKDIR}"], extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path)) : SysrootWorkspace
       workspace = SysrootWorkspace.allocate
-      workspace.host_workdir = host_workdir
+      workspace.namespace = Namespace::Host
+      workspace.host_workdir = host_workdir.expand
       workspace.extra_binds = extra_binds
       workspace.seed_rootfs_path = seed_rootfs_from(workspace.namespace, workspace.host_workdir)
       workspace.sysroot_path = sysroot_from(workspace.namespace, workspace.host_workdir)

@@ -326,7 +326,6 @@ module Bootstrap
       if by_state
         selected_phases = selected_phases.compact_map do |phase|
           steps = phase.steps.reject { |step| completed?(phase.name, step.name) }
-          Log.debug { "Remaining steps in phase '#{phase.name}': #{steps}" }
           steps.empty? ? nil : phase.with_steps(steps)
         end
       end
