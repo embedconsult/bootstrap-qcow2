@@ -108,6 +108,10 @@ describe Bootstrap::SysrootBuilder do
       system_phase = plan.phases.find(&.name.==("system-from-sysroot")).not_nil!
       system_stage1 = system_phase.steps.find(&.name.==("llvm-project-stage1")).not_nil!
       system_stage1.configure_flags.any? { |flag| flag.starts_with?("-DLLVM_ENABLE_RUNTIMES=") }.should be_false
+      system_stage2 = system_phase.steps.find(&.name.==("llvm-project-stage2")).not_nil!
+      system_stage2.configure_flags.any? do |flag|
+        flag.starts_with?("-DCMAKE_CXX_FLAGS=") && flag.includes?("-stdlib=libc++")
+      end.should be_true
     end
   end
 

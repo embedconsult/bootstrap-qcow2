@@ -1420,7 +1420,7 @@ module Bootstrap
         flags << "-DCMAKE_CXX_FLAGS=#{cxx_flags}"
       end
       unless flags.any? { |flag| flag.starts_with?("-DCMAKE_CXX_FLAGS=") }
-        flags << "-DCMAKE_CXX_FLAGS=-nostdinc++ -isystem #{toolchain_libcxx_include} -isystem #{toolchain_libcxx_target_include}"
+        flags << "-DCMAKE_CXX_FLAGS=-nostdinc++ -isystem #{toolchain_libcxx_include} -isystem #{toolchain_libcxx_target_include} -stdlib=libc++"
       end
       flags << "-DCMAKE_CXX_STANDARD_LIBRARIES=#{cxx_standard_libs}"
       flags << "-DCMAKE_EXE_LINKER_FLAGS=#{linker_flags}"
