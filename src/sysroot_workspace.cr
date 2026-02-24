@@ -203,7 +203,7 @@ module Bootstrap
     # Returns nil when the bind source cannot be resolved or does not follow
     # the expected <host_workdir>/seed-rootfs/bq2-rootfs layout.
     def infer_host_workdir_from_mounts : Path?
-      source = self.class.mount_source_for(@bq2_rootfs_path)
+      source = mount_source_for(@bq2_rootfs_path)
       return nil unless source
       return nil unless source.basename == BQ2_DIR_NAME
       seed_root = source.parent
@@ -212,7 +212,7 @@ module Bootstrap
     end
 
     # Resolve the bind-mount source for the given mount point using mountinfo.
-    private def self.mount_source_for(mount_point : Path) : Path?
+    private def mount_source_for(mount_point : Path) : Path?
       target = File.realpath(mount_point)
       File.read_lines("/proc/self/mountinfo").each do |line|
         fields = line.split
