@@ -139,21 +139,6 @@ module Bootstrap
       workspace
     end
 
-    def enter_seed_rootfs_namespace : Nil
-      raise "Expected host namespace" unless @namespace == Namespace::Host
-      rootfs = seed_rootfs_path || raise "Missing seed rootfs path"
-      SysrootNamespace.enter_rootfs(rootfs.to_s)
-      update_namespace(Namespace::Seed)
-    end
-
-    def enter_bq2_rootfs_namespace : Nil
-      unless @namespace == Namespace::Seed || @namespace == Namespace::Host
-        raise "Expected host or seed namespace"
-      end
-      SysrootNamespace.enter_rootfs(bq2_rootfs_path.to_s)
-      update_namespace(Namespace::BQ2)
-    end
-
     # Enter the requested namespace by label, if needed.
     def enter_namespace(requested_label : String) : Nil
       requested = Namespace.parse(requested_label)
@@ -164,10 +149,13 @@ module Bootstrap
         raise "Cannot enter host namespace from #{@namespace.label}"
       in .seed?
         raise "Cannot enter seed namespace from #{@namespace.label}" unless @namespace.host?
-        enter_seed_rootfs_namespace
+        rootfs = seed_rootfs_path || raise "Missing seed rootfs path"
+        SysrootNamespace.enter_rootfs(rootfs.to_s)
+        update_namespace(Namespace::Seed)
       in .bq2?
         raise "Cannot enter bq2 namespace from #{@namespace.label}" unless @namespace.host? || @namespace.seed?
-        enter_bq2_rootfs_namespace
+        SysrootNamespace.enter_rootfs(bq2_rootfs_path.to_s)
+        update_namespace(Namespace::BQ2)
       end
     end
 

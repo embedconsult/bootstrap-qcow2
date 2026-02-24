@@ -117,36 +117,6 @@ describe Bootstrap::SysrootWorkspace do
     end
   end
 
-  describe "#enter_seed_rootfs_namespace" do
-    it "rejects transitions when not in host namespace" do
-      with_tempdir do |tmpdir|
-        host_workdir = tmpdir / "host-workdir"
-        prepare_host_layout(host_workdir)
-        workspace = Bootstrap::SysrootWorkspace.new(host_workdir: host_workdir)
-        workspace.namespace = Bootstrap::SysrootWorkspace::Namespace::Seed
-
-        expect_raises(Exception, /Expected host namespace/) do
-          workspace.enter_seed_rootfs_namespace
-        end
-      end
-    end
-  end
-
-  describe "#enter_bq2_rootfs_namespace" do
-    it "rejects transitions when not in host or seed namespaces" do
-      with_tempdir do |tmpdir|
-        host_workdir = tmpdir / "host-workdir"
-        prepare_host_layout(host_workdir)
-        workspace = Bootstrap::SysrootWorkspace.new(host_workdir: host_workdir)
-        workspace.namespace = Bootstrap::SysrootWorkspace::Namespace::BQ2
-
-        expect_raises(Exception, /Expected host or seed namespace/) do
-          workspace.enter_bq2_rootfs_namespace
-        end
-      end
-    end
-  end
-
   describe "#enter_namespace" do
     it "is a no-op when requesting the current host namespace" do
       with_tempdir do |tmpdir|
