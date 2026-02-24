@@ -1408,7 +1408,8 @@ module Bootstrap
       build_rpath = File.join(build_root, "build-stage2", "lib")
       install_rpath = "#{install_libdir}:#{install_prefix}/lib"
       cxx_standard_libs = "-lc++ -lc++abi -lunwind"
-      runtime_c_flags = "--target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -Wno-unused-command-line-argument"
+      runtime_sysroot = "--sysroot=#{toolchain_prefix}"
+      runtime_c_flags = "#{runtime_sysroot} --target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -Wno-unused-command-line-argument"
       runtime_cxx_flags = "#{runtime_c_flags} -nostdinc++ -isystem #{toolchain_libcxx_include} -isystem #{toolchain_libcxx_target_include} -stdlib=libc++"
       linker_flags = "--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{toolchain_libcxx_libdir} -L#{toolchain_prefix}/lib"
       runtimes_cmake_args = [

@@ -115,7 +115,8 @@ describe Bootstrap::SysrootBuilder do
       system_stage2.configure_flags.any? do |flag|
         flag.starts_with?("-DRUNTIMES_CMAKE_ARGS=") &&
           flag.includes?("-DCMAKE_C_FLAGS=") &&
-          flag.includes?("-DCMAKE_CXX_FLAGS=")
+          flag.includes?("-DCMAKE_CXX_FLAGS=") &&
+          flag.includes?("--sysroot=/opt/sysroot")
       end.should be_true
     end
   end
