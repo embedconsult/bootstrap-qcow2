@@ -122,6 +122,19 @@ module Bootstrap
                    @env : Hash(String, String) = {} of String => String,
                    @steps : Array(BuildStep) = [] of BuildStep)
     end
+
+    # Return a phase copy with *steps* replaced and all other metadata retained.
+    def with_steps(steps : Array(BuildStep)) : BuildPhase
+      BuildPhase.new(
+        name: name,
+        description: description,
+        namespace: namespace,
+        install_prefix: install_prefix,
+        destdir: destdir,
+        env: env,
+        steps: steps,
+      )
+    end
   end
 
   # Root object written to disk inside the inner rootfs var/lib directory

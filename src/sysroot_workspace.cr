@@ -62,9 +62,8 @@ module Bootstrap
     def initialize(@host_workdir : Path? = nil,
                    @extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path))
       if @host_workdir.nil?
-        found_marker = PROBE_PATHS_FOR_MARKER.find { |s| File.exists?(s[:path]) }
-        raise "Missing BQ2 rootfs marker at one of these paths: #{PROBE_PATHS_FOR_MARKER}" if found_marker.nil?
-        marker_match = found_marker.not_nil!
+        marker_match = PROBE_PATHS_FOR_MARKER.find { |s| File.exists?(s[:path]) }
+        raise "Missing BQ2 rootfs marker at one of these paths: #{PROBE_PATHS_FOR_MARKER}" unless marker_match
         @namespace = marker_match[:namespace]
         if @namespace == Namespace::Host
           @host_workdir = Path["#{DEFAULT_HOST_WORKDIR}"].expand
@@ -75,8 +74,6 @@ module Bootstrap
       end
       Log.debug { "Initialized namespace (host_workdir=#{@host_workdir}, namespace=#{@namespace})" }
 
-      raise "Invalid namespace: #{@namespace}" unless [Namespace::Host, Namespace::Seed, Namespace::BQ2].includes?(@namespace)
-
       @seed_rootfs_path = self.class.seed_rootfs_from(@namespace, @host_workdir)
       @sysroot_path = self.class.sysroot_from(@namespace, @host_workdir)
       @bq2_rootfs_path = self.class.bq2_rootfs_from(@namespace, @host_workdir)
@@ -84,8 +81,7 @@ module Bootstrap
       @marker_path = @bq2_rootfs_path / Path["#{ROOTFS_MARKER_NAME}"]
       @log_path = @bq2_rootfs_path / Path["#{LOG_DIR_NAME}"]
 
-      found_marker = File.exists?(@marker_path)
-      raise "Missing BQ2 rootfs marker at #{@marker_path}" unless found_marker
+      raise "Missing BQ2 rootfs marker at #{@marker_path}" unless File.exists?(@marker_path)
     end
 
     def self.seed_rootfs_from(namespace : Namespace, host_workdir : Path? = nil)
@@ -102,8 +98,7 @@ module Bootstrap
     def self.sysroot_from(namespace : Namespace, host_workdir : Path? = nil)
       seed_rootfs_path = seed_rootfs_from(namespace, host_workdir)
       return nil if seed_rootfs_path.nil?
-      prefix = seed_rootfs_path.not_nil!
-      prefix / Path["#{SYSROOT_DIR_NAME}"]
+      seed_rootfs_path.not_nil! / Path["#{SYSROOT_DIR_NAME}"]
     end
 
     def self.bq2_rootfs_from(namespace : Namespace, host_workdir : Path? = nil)
@@ -119,7 +114,8 @@ module Bootstrap
     # Create a workspace rooted at *host_workdir*, ensuring marker + dirs exist.
     def self.create(host_workdir : Path = Path["#{DEFAULT_HOST_WORKDIR}"], extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path)) : SysrootWorkspace
       workspace = SysrootWorkspace.allocate
-      workspace.host_workdir = host_workdir
+      workspace.namespace = Namespace::Host
+      workspace.host_workdir = host_workdir.expand
       workspace.extra_binds = extra_binds
       workspace.seed_rootfs_path = seed_rootfs_from(workspace.namespace, workspace.host_workdir)
       workspace.sysroot_path = sysroot_from(workspace.namespace, workspace.host_workdir)
@@ -129,7 +125,6 @@ module Bootstrap
       workspace.log_path = workspace.bq2_rootfs_path / Path["#{LOG_DIR_NAME}"]
       FileUtils.mkdir_p(workspace.sysroot_path.not_nil!)
       FileUtils.mkdir_p(workspace.workspace_path)
-      FileUtils.mkdir_p(workspace.bq2_rootfs_path)
       unless File.exists?(workspace.marker_path)
         Log.debug { "Generating #{workspace.marker_path}" }
         File.write(workspace.marker_path, "bq2-rootfs\n")
@@ -139,50 +134,23 @@ module Bootstrap
       workspace
     end
 
-    def enter_seed_rootfs_namespace : Nil
-      raise "Expected host namespace" unless @namespace == Namespace::Host
-      rootfs = seed_rootfs_path || raise "Missing seed rootfs path"
-      SysrootNamespace.enter_rootfs(rootfs.to_s)
-      update_namespace(Namespace::Seed)
-    end
-
-    def enter_bq2_rootfs_namespace : Nil
-      unless @namespace == Namespace::Seed || @namespace == Namespace::Host
-        raise "Expected host or seed namespace"
-      end
-      SysrootNamespace.enter_rootfs(bq2_rootfs_path.to_s)
-      update_namespace(Namespace::BQ2)
-    end
-
-    def namespace_switch_required?(requested : String)
-      Log.debug { "Testing if #{requested} is #{@namespace}" }
-      @namespace != Namespace.parse(requested)
-    end
-
     # Enter the requested namespace by label, if needed.
     def enter_namespace(requested_label : String) : Nil
       requested = Namespace.parse(requested_label)
+      return if requested == @namespace
+
       case requested
       in .host?
-        raise "Cannot enter host namespace from #{@namespace.label}" unless @namespace.host?
+        raise "Cannot enter host namespace from #{@namespace.label}"
       in .seed?
-        if @namespace.host?
-          enter_seed_rootfs_namespace
-        elsif @namespace.seed?
-          # Already in seed namespace.
-        else
-          raise "Cannot enter seed namespace from #{@namespace.label}"
-        end
+        raise "Cannot enter seed namespace from #{@namespace.label}" unless @namespace.host?
+        rootfs = seed_rootfs_path || raise "Missing seed rootfs path"
+        SysrootNamespace.enter_rootfs(rootfs.to_s)
+        update_namespace(Namespace::Seed)
       in .bq2?
-        if @namespace.host?
-          enter_bq2_rootfs_namespace
-        elsif @namespace.seed?
-          enter_bq2_rootfs_namespace
-        elsif @namespace.bq2?
-          # Already in bq2 namespace.
-        else
-          raise "Cannot enter bq2 namespace from #{@namespace.label}"
-        end
+        raise "Cannot enter bq2 namespace from #{@namespace.label}" unless @namespace.host? || @namespace.seed?
+        SysrootNamespace.enter_rootfs(bq2_rootfs_path.to_s)
+        update_namespace(Namespace::BQ2)
       end
     end
 
