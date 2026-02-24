@@ -292,7 +292,7 @@ module Bootstrap
           DEFAULT_BDWGC,
           URI.parse("https://github.com/ivmai/bdwgc/releases/download/v#{DEFAULT_BDWGC}/gc-#{DEFAULT_BDWGC}.tar.gz"),
           build_directory: "gc-#{DEFAULT_BDWGC}",
-          phases: ["sysroot-from-seed", "system-from-sysroot"],
+          phases: ["sysroot-from-seed", "system-from-bq2"],
           patches: ["#{bootstrap_repo_dir}/patches/bdwgc-#{DEFAULT_BDWGC}/disable-libcord.patch"],
           configure_flags: ["--enable-shared", "--disable-static"],
         ),
@@ -300,21 +300,21 @@ module Bootstrap
           "pcre2",
           DEFAULT_PCRE2,
           URI.parse("https://github.com/PhilipHazel/pcre2/releases/download/pcre2-#{DEFAULT_PCRE2}/pcre2-#{DEFAULT_PCRE2}.tar.gz"),
-          phases: ["sysroot-from-seed", "system-from-sysroot"],
+          phases: ["sysroot-from-seed", "system-from-bq2"],
           configure_flags: ["--enable-shared", "--disable-static"],
         ),
         PackageSpec.new(
           "gmp",
           DEFAULT_GMP,
           URI.parse("https://ftp.gnu.org/gnu/gmp/gmp-#{DEFAULT_GMP}.tar.gz"),
-          phases: ["sysroot-from-seed", "system-from-sysroot"],
+          phases: ["sysroot-from-seed", "system-from-bq2"],
           configure_flags: ["--enable-shared", "--disable-static"],
         ),
         PackageSpec.new(
           "libiconv",
           DEFAULT_LIBICONV,
           URI.parse("https://ftp.gnu.org/pub/gnu/libiconv/libiconv-#{DEFAULT_LIBICONV}.tar.gz"),
-          phases: ["sysroot-from-seed", "system-from-sysroot"],
+          phases: ["sysroot-from-seed", "system-from-bq2"],
           configure_flags: ["--enable-shared", "--disable-static", "--disable-nls"],
         ),
         PackageSpec.new(
@@ -329,21 +329,21 @@ module Bootstrap
             "-DLIBXML2_WITH_TESTS=OFF",
             "-DLIBXML2_WITH_LZMA=OFF",
           ],
-          phases: ["sysroot-from-seed", "system-from-sysroot"],
+          phases: ["sysroot-from-seed", "system-from-bq2"],
         ),
         PackageSpec.new(
           "libyaml",
           DEFAULT_LIBYAML,
           URI.parse("https://pyyaml.org/download/libyaml/yaml-#{DEFAULT_LIBYAML}.tar.gz"),
           build_directory: "yaml-#{DEFAULT_LIBYAML}",
-          phases: ["sysroot-from-seed", "system-from-sysroot"],
+          phases: ["sysroot-from-seed", "system-from-bq2"],
           configure_flags: ["--enable-shared", "--disable-static"],
         ),
         PackageSpec.new(
           "libffi",
           DEFAULT_LIBFFI,
           URI.parse("https://github.com/libffi/libffi/releases/download/v#{DEFAULT_LIBFFI}/libffi-#{DEFAULT_LIBFFI}.tar.gz"),
-          phases: ["sysroot-from-seed", "system-from-sysroot"],
+          phases: ["sysroot-from-seed", "system-from-bq2"],
           configure_flags: ["--enable-shared", "--disable-static"],
         ),
         PackageSpec.new(
@@ -352,7 +352,7 @@ module Bootstrap
           URI.parse("https://github.com/crystal-lang/crystal/archive/refs/tags/#{DEFAULT_CRYSTAL}.tar.gz"),
           strategy: "crystal-compiler",
           patches: ["#{bootstrap_repo_dir}/patches/crystal-#{DEFAULT_CRYSTAL}/use-libcxx.patch"],
-          phases: ["sysroot-from-seed", "system-from-sysroot"],
+          phases: ["sysroot-from-seed", "system-from-bq2"],
         ),
         PackageSpec.new(
           "shards",
@@ -361,14 +361,14 @@ module Bootstrap
           strategy: "crystal-build",
           configure_flags: ["-o", "bin/shards", "src/shards.cr"],
           build_directory: "shards-#{DEFAULT_SHARDS}",
-          phases: ["sysroot-from-seed", "system-from-sysroot"],
+          phases: ["sysroot-from-seed", "system-from-bq2"],
         ),
         PackageSpec.new(
           "bootstrap-qcow2",
           bootstrap_source_version,
           URI.parse("https://github.com/embedconsult/bootstrap-qcow2/archive/refs/tags/#{bootstrap_source_version}.tar.gz"),
           strategy: "crystal",
-          phases: ["system-from-sysroot"],
+          phases: ["system-from-bq2"],
         ),
         PackageSpec.new(
           "git",
@@ -598,6 +598,7 @@ module Bootstrap
     # - sysroot-from-seed: build the sysroot using tools available in the seed rootfs.
     # - rootfs-from-sysroot: build the minimal rootfs using the new sysroot toolchain.
     # - system-from-sysroot: build core system packages inside the new rootfs.
+    # - system-from-bq2: rebuild higher-level userland directly inside the bq2 rootfs.
     # - tools-from-system: build developer tools inside the new rootfs.
     # - finalize-rootfs: strip /opt/sysroot and emit the tarball.
     #
@@ -837,6 +838,43 @@ module Bootstrap
             {clang_rt_atomic, "/usr/lib/libatomic.so.1"},
             {"libatomic.so.1", "/usr/lib/libatomic.so"},
           ]),
+        ),
+        # Inputs: base /usr toolchain and runtime from system-from-sysroot.
+        # Outputs: userland rebuilt in the bq2 namespace with runtime library
+        #          resolution constrained to /usr/lib and /lib.
+        PhaseSpec.new(
+          BuildPhase.new(
+            name: "system-from-bq2",
+            description: "Rebuild userland packages in the bq2 rootfs so runtime links resolve from /usr/lib and /lib.",
+            namespace: SysrootWorkspace::Namespace::BQ2.label,
+            install_prefix: "/usr",
+            destdir: nil,
+            env: bq2_phase_env,
+          ),
+          workdir: workspace_from_bq2,
+          package_allowlist: nil,
+          env_overrides: {
+            "libxml2" => {
+              "CPPFLAGS" => "-I/usr/include",
+              "LDFLAGS"  => "-L/usr/lib -L/lib",
+            },
+            "shards" => {
+              "SHARDS_CACHE_PATH" => "#{SHARDS_CACHE_DIR}",
+            },
+            "bootstrap-qcow2" => {
+              "SHARDS_CACHE_PATH" => "#{SHARDS_CACHE_DIR}",
+            },
+          },
+          configure_overrides: {
+            "libxml2" => [
+              "-DLIBXML2_WITH_ZLIB=ON",
+              "-DZLIB_LIBRARY=/usr/lib/libz.so.1",
+              "-DZLIB_INCLUDE_DIR=/usr/include",
+              "-DIconv_INCLUDE_DIR=/usr/include",
+              "-DIconv_LIBRARY=/usr/lib/libiconv.so",
+              "-DIconv_IS_BUILT_IN=OFF",
+            ],
+          },
         ),
         # Inputs: prefix-free system rootfs staged in the bq2 rootfs.
         # Outputs: developer tooling added to /usr in the bq2 rootfs.

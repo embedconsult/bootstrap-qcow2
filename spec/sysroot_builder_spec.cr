@@ -100,7 +100,7 @@ describe Bootstrap::SysrootBuilder do
   it "lists build phase names" do
     with_temp_workdir do |_dir|
       phases = Bootstrap::SysrootBuilder.new.phase_specs.map { |spec| spec.phase.name }
-      phases.should eq ["host-setup", "sysroot-from-seed", "rootfs-from-sysroot", "system-from-sysroot", "tools-from-system", "finalize-rootfs"]
+      phases.should eq ["host-setup", "sysroot-from-seed", "rootfs-from-sysroot", "system-from-sysroot", "system-from-bq2", "tools-from-system", "finalize-rootfs"]
     end
   end
 
@@ -115,6 +115,7 @@ describe Bootstrap::SysrootBuilder do
       phases["rootfs-from-sysroot"].workdir.should eq seed_workspace
       phases["system-from-sysroot"].workdir.should eq seed_workspace
       bq2_workspace = Bootstrap::SysrootWorkspace.workspace_from(Bootstrap::SysrootWorkspace::Namespace::BQ2, host_workdir).to_s
+      phases["system-from-bq2"].workdir.should eq bq2_workspace
       phases["tools-from-system"].workdir.should eq bq2_workspace
       phases["finalize-rootfs"].workdir.should eq bq2_workspace
     end
