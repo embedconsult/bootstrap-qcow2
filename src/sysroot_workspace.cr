@@ -26,13 +26,14 @@ module Bootstrap
   # To simplify coordination of path changes from namespace changes, this class should be used instead of
   # SysrootNamespace directly.
   class SysrootWorkspace
-    ROOTFS_MARKER_NAME   = ".bq2-rootfs"
-    DEFAULT_HOST_WORKDIR = "data/sysroot"
-    SEED_DIR_NAME        = "seed-rootfs"
-    BQ2_DIR_NAME         = "bq2-rootfs"
-    LOG_DIR_NAME         = "var/lib"
-    WORKSPACE_DIR_NAME   = "workspace"
-    SYSROOT_DIR_NAME     = "opt/sysroot"
+    ROOTFS_MARKER_NAME      = ".bq2-rootfs"
+    DEFAULT_HOST_WORKDIR    = "data/sysroot"
+    SEED_DIR_NAME           = "seed-rootfs"
+    BQ2_DIR_NAME            = "bq2-rootfs"
+    LOG_DIR_NAME            = "var/lib"
+    WORKSPACE_DIR_NAME      = "workspace"
+    SYSROOT_DIR_NAME        = "opt/sysroot"
+    BQ2_SYSROOT_BIND_TARGET = Path[SYSROOT_DIR_NAME]
     enum Namespace
       Host
       Seed
@@ -150,8 +151,23 @@ module Bootstrap
       unless @namespace == Namespace::Seed || @namespace == Namespace::Host
         raise "Expected host or seed namespace"
       end
-      SysrootNamespace.enter_rootfs(bq2_rootfs_path.to_s)
+      SysrootNamespace.enter_rootfs(bq2_rootfs_path.to_s, extra_binds: bq2_namespace_binds)
       update_namespace(Namespace::BQ2)
+    end
+
+    # Return bind mounts needed when entering the inner BQ2 rootfs.
+    #
+    # The BQ2 environment relies on the seed sysroot toolchain at /opt/sysroot,
+    # so we always bind the current namespace's sysroot path to
+    # `opt/sysroot` in the inner rootfs unless a caller already supplied a
+    # bind for that destination.
+    def bq2_namespace_binds : Array(Tuple(Path, Path))
+      binds = @extra_binds.dup
+      has_sysroot_target = binds.any? { |(_, destination)| destination == BQ2_SYSROOT_BIND_TARGET }
+      if (sysroot = @sysroot_path) && !has_sysroot_target
+        binds.unshift({sysroot, BQ2_SYSROOT_BIND_TARGET})
+      end
+      binds
     end
 
     def namespace_switch_required?(requested : String)
