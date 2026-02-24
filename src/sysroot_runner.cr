@@ -134,6 +134,7 @@ module Bootstrap
     private def run_steps(phase : BuildPhase)
       Log.info { "Executing #{phase.steps.size} build steps" }
       effective_report_dir = @report ? @state.report_dir : nil
+      @step_runner.report_dir = effective_report_dir.try(&.to_s)
       phase.steps.each do |step|
         if @resume && @state.completed?(phase.name, step.name)
           Log.info { "Skipping previously completed #{phase.name}/#{step.name}" }
@@ -153,6 +154,7 @@ module Bootstrap
           raise ex
         end
       end
+      @step_runner.report_dir = nil
       Log.info { "All build steps completed" }
     end
 
