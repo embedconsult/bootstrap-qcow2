@@ -158,6 +158,37 @@ describe Bootstrap::SysrootWorkspace do
         end
       end
     end
+
+    it "includes the seed sysroot bind by default" do
+      with_tempdir do |tmpdir|
+        host_workdir = tmpdir / "host-workdir"
+        prepare_host_layout(host_workdir)
+        workspace = Bootstrap::SysrootWorkspace.new(host_workdir: host_workdir)
+
+        workspace.bq2_namespace_binds.should eq([
+          {
+            host_workdir / Path["#{Bootstrap::SysrootWorkspace::SEED_DIR_NAME}/#{Bootstrap::SysrootWorkspace::SYSROOT_DIR_NAME}"],
+            Path[Bootstrap::SysrootWorkspace::SYSROOT_DIR_NAME],
+          },
+        ])
+      end
+    end
+
+    it "does not duplicate sysroot bind when a custom target is provided" do
+      with_tempdir do |tmpdir|
+        host_workdir = tmpdir / "host-workdir"
+        prepare_host_layout(host_workdir)
+        custom_sysroot = tmpdir / "custom-sysroot"
+        workspace = Bootstrap::SysrootWorkspace.new(
+          host_workdir: host_workdir,
+          extra_binds: [{custom_sysroot, Path[Bootstrap::SysrootWorkspace::SYSROOT_DIR_NAME]}]
+        )
+
+        workspace.bq2_namespace_binds.should eq([
+          {custom_sysroot, Path[Bootstrap::SysrootWorkspace::SYSROOT_DIR_NAME]},
+        ])
+      end
+    end
   end
 
   describe "#enter_namespace" do
