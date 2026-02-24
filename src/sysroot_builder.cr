@@ -524,11 +524,14 @@ module Bootstrap
       flags.concat([
         "-DLLVM_INCLUDE_TESTS=OFF",
         "-DLLVM_INCLUDE_EXAMPLES=OFF",
+        "-DLLVM_BUILD_EXAMPLES=OFF",
         "-DLLVM_INCLUDE_BENCHMARKS=OFF",
         "-DLLVM_BUILD_DOCS=OFF",
         "-DLLVM_ENABLE_DOXYGEN=OFF",
         "-DLLVM_ENABLE_SPHINX=OFF",
         "-DLLVM_ENABLE_LIBEDIT=OFF",
+        "-DLLVM_ENABLE_PLUGINS=OFF",
+        "-DLLVM_EXPORT_SYMBOLS_FOR_PLUGINS=OFF",
         "-DLLVM_ENABLE_SHARED=ON",
         "-DLLVM_BUILD_LLVM_DYLIB=ON",
         "-DLLVM_LINK_LLVM_DYLIB=ON",
@@ -632,6 +635,7 @@ module Bootstrap
       compiler_rt_arch = sysroot_triple.split("-").first
       clang_rt_dir = "/usr/lib/clang/#{llvm_major}/lib/#{sysroot_triple}"
       clang_rt_atomic = "#{clang_rt_dir}/libclang_rt.atomic.so"
+      sysroot_clang_rt_atomic = "#{sysroot_prefix}/lib/clang/#{llvm_major}/lib/#{sysroot_triple}/libclang_rt.atomic.so"
       libxml2_env = {
         "CPPFLAGS" => "-I#{sysroot_prefix}/include",
         "LDFLAGS"  => "-L#{sysroot_prefix}/lib",
@@ -689,6 +693,20 @@ module Bootstrap
           workdir: workspace_from_seed,
           pre_steps: seed_bootstrap_pre_steps(rootfs_resolv_conf_content),
           package_allowlist: nil,
+          extra_steps: [
+            build_step(
+              name: "sysroot-libatomic-link-0",
+              strategy: "symlink",
+              install_prefix: "#{sysroot_prefix}/lib/libatomic.so.1",
+              content: sysroot_clang_rt_atomic,
+            ),
+            build_step(
+              name: "sysroot-libatomic-link-1",
+              strategy: "symlink",
+              install_prefix: "#{sysroot_prefix}/lib/libatomic.so",
+              content: "libatomic.so.1",
+            ),
+          ],
           env_overrides: {
             "cmake" => {
               "CPPFLAGS" => "-I#{sysroot_prefix}/include -Wno-deprecated-literal-operator",
@@ -781,12 +799,12 @@ module Bootstrap
           BuildPhase.new(
             name: "system-from-sysroot",
             description: "Rebuild sysroot packages into /usr inside the new rootfs (prefix-free).",
-            namespace: SysrootWorkspace::Namespace::Seed.label,
+            namespace: SysrootWorkspace::Namespace::BQ2.label,
             install_prefix: "/usr",
-            destdir: bq2_from_seed,
+            destdir: nil,
             env: system_from_sysroot_env,
           ),
-          workdir: workspace_from_seed,
+          workdir: workspace_from_bq2,
           package_allowlist: nil,
           env_overrides: {
             "libxml2" => libxml2_env,
@@ -1507,7 +1525,7 @@ module Bootstrap
                     begin
                       SysrootWorkspace.new(host_workdir: host_workdir)
                     rescue ex
-                      STDERR.puts "No valid workspace found, build out the workspace first with `bq2 sysroot-builder`: #{ex.message}"
+                      Log.error { "No valid workspace found, build out the workspace first with `bq2 sysroot-builder`: #{ex.message}" }
                       return -1
                     end
                   elsif host_workdir
@@ -1521,11 +1539,11 @@ module Bootstrap
       plan_path = builder.write_plan
       workspace_label = builder.workspace.host_workdir || builder.workspace.log_path
       if plan_only
-        puts "Using existing sysroot workspace at #{workspace_label}"
+        Log.info { "Using existing sysroot workspace at #{workspace_label}" }
       else
-        puts "Prepared sysroot workspace at #{workspace_label}"
+        Log.info { "Prepared sysroot workspace at #{workspace_label}" }
       end
-      puts "Wrote build plan at #{plan_path}"
+      Log.info { "Wrote build plan at #{plan_path}" }
       0
     end
 
@@ -1545,19 +1563,18 @@ module Bootstrap
       begin
         workspace = SysrootWorkspace.new(host_workdir: host_workdir)
       rescue ex
-        STDERR.puts "No valid workspace found, build out the workspace first with `bq2 sysroot-builder`: #{ex.message}"
+        Log.error { "No valid workspace found, build out the workspace first with `bq2 sysroot-builder`: #{ex.message}" }
         return -1
       end
 
       if workspace.host_workdir.nil?
-        host_workdir ||= Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR]
-        STDERR.puts "Workspace does not include host workdir; defaulting to #{host_workdir} (pass --workdir to override)"
-        workspace = SysrootWorkspace.new(host_workdir: host_workdir)
+        Log.error { "Workspace does not include host workdir; pass --workdir to avoid incorrect overrides." }
+        return -1
       end
 
       plan_path = workspace.log_path / SysrootBuildState::PLAN_FILE
       unless File.exists?(plan_path)
-        STDERR.puts "No build plan found at #{plan_path}, run `bq2 sysroot-builder` first"
+        Log.error { "No build plan found at #{plan_path}, run `bq2 sysroot-builder` first" }
         return -1
       end
 
@@ -1575,8 +1592,8 @@ module Bootstrap
       build_state.overrides_digest = SysrootBuildState.digest_for?(overrides_path)
       build_state.touch
 
-      puts "Wrote build plan overrides to #{overrides_path}"
-      puts "Overrides phases=#{overrides.phases.size}"
+      Log.info { "Wrote build plan overrides to #{overrides_path}" }
+      Log.info { "Overrides phases=#{overrides.phases.size}" }
       0
     end
   end

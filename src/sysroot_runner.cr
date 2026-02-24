@@ -134,6 +134,7 @@ module Bootstrap
     private def run_steps(phase : BuildPhase)
       Log.info { "Executing #{phase.steps.size} build steps" }
       effective_report_dir = @report ? @state.report_dir : nil
+      @step_runner.report_dir = effective_report_dir.try(&.to_s)
       phase.steps.each do |step|
         if @resume && @state.completed?(phase.name, step.name)
           Log.info { "Skipping previously completed #{phase.name}/#{step.name}" }
@@ -153,6 +154,7 @@ module Bootstrap
           raise ex
         end
       end
+      @step_runner.report_dir = nil
       Log.info { "All build steps completed" }
     end
 
@@ -183,7 +185,7 @@ module Bootstrap
       begin
         workspace = SysrootWorkspace.new(host_workdir: host_workdir, extra_binds: extra_binds)
       rescue ex
-        STDERR.puts "Please build out the workspace first with `bq2 sysroot-builder`: #{ex.message}"
+        Log.error { "Please build out the workspace first with `bq2 sysroot-builder`: #{ex.message}" }
         return -1
       end
 
@@ -220,26 +222,26 @@ module Bootstrap
       begin
         workspace = SysrootWorkspace.new(host_workdir: host_workdir)
       rescue ex
-        STDERR.puts "No valid workspace found, build out the workspace first with `bq2 sysroot-builder`: #{ex.message}"
+        Log.error { "No valid workspace found, build out the workspace first with `bq2 sysroot-builder`: #{ex.message}" }
         return -1
       end
 
       state = SysrootBuildState.new(workspace: workspace)
       next_phase, next_step = state.next_incomplete_step
-      puts "plan_path=#{state.plan_path}"
-      puts "state_path=#{state.state_path}"
-      puts "report_dir=#{state.report_dir}"
-      puts "current_phase=#{state.progress.current_phase}" if state.progress.current_phase
+      Log.info { "plan_path=#{state.plan_path}" }
+      Log.info { "state_path=#{state.state_path}" }
+      Log.info { "report_dir=#{state.report_dir}" }
+      Log.info { "current_phase=#{state.progress.current_phase}" } if state.progress.current_phase
       if next_phase
-        puts "next_phase=#{next_phase}"
-        puts "next_step=#{next_step}" if next_step
+        Log.info { "next_phase=#{next_phase}" }
+        Log.info { "next_step=#{next_step}" } if next_step
       else
-        puts "next_phase=complete"
+        Log.info { "next_phase=complete" }
       end
       if (failure = state.progress.last_failure)
-        puts "last_failure=#{failure.phase}/#{failure.step}"
+        Log.info { "last_failure=#{failure.phase}/#{failure.step}" }
         if (report_path = failure.report_path)
-          puts "last_failure_report=#{report_path}"
+          Log.info { "last_failure_report=#{report_path}" }
         end
       end
       0
@@ -251,7 +253,7 @@ module Bootstrap
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-tarball [options]") do |p|
       end
       return CLI.print_help(parser) if help
-      STDERR.puts "sysroot-tarball is not yet wired up"
+      Log.error { "sysroot-tarball is not yet wired up" }
       1
     end
 
