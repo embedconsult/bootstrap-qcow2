@@ -96,6 +96,25 @@ describe Bootstrap::SysrootRunner do
     end
   end
 
+  it "sets up phase environment for each phase" do
+    steps = [Bootstrap::BuildStep.new(name: "step", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
+    plan = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(name: "one", description: "a", namespace: "host", install_prefix: "/opt/sysroot", env: {"BQ2_PHASE_MARKER" => "phase-one"}, steps: steps),
+      Bootstrap::BuildPhase.new(name: "two", description: "b", namespace: "host", install_prefix: "/usr", env: {"BQ2_PHASE_MARKER" => "phase-two"}, steps: steps),
+    ])
+
+    with_recording_runner(plan: plan) do |build_state, step_runner|
+      plan_runner = Bootstrap::SysrootRunner.new(state: build_state, step_runner: step_runner)
+      plan_runner.run_plan
+
+      inside_calls = step_runner.phase_environment_calls.select { |entry| entry[:value] }
+      inside_calls.should eq [
+        {phase: "one", value: "phase-one"},
+        {phase: "two", value: "phase-two"},
+      ]
+    end
+  end
+
   it "runs only the selected phase when requested" do
     steps = [Bootstrap::BuildStep.new(name: "step", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
     plan = Bootstrap::BuildPlan.new([
