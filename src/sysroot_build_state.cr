@@ -329,34 +329,31 @@ module Bootstrap
       selected_phases.reject! { |phase| phase.name != by_name } unless by_name == "all"
       Log.debug { "Phases #{phase_names(selected_phases)} remain after rejection by_name: #{by_name}" }
       raise "Unknown build phase #{by_name}" if selected_phases.empty?
+
       if by_state
         selected_phases = selected_phases.compact_map do |phase|
-          remaining = phase.steps.reject { |step| completed?(phase.name, step.name) }
-          Log.debug { "Remaining steps in phase '#{phase.name}': #{remaining}" }
-          next nil if remaining.empty?
-          phase.with_steps(remaining)
+          steps = phase.steps.reject { |step| completed?(phase.name, step.name) }
+          Log.debug { "Remaining steps in phase '#{phase.name}': #{steps}" }
+          steps.empty? ? nil : phase.with_steps(steps)
         end
       end
       Log.debug { "Phases #{phase_names(selected_phases)} remain after rejection by_state: #{by_state}" }
+
       if by_namespace
         selected_phases.reject! { |phase| phase.namespace == "host" } unless workspace.namespace.host?
         selected_phases.reject! { |phase| phase.namespace == "seed" } if workspace.namespace.bq2?
       end
       Log.debug { "Phases #{phase_names(selected_phases)} remain after rejection by_namespace: #{by_namespace}" }
+
       if by_packages.present?
-        matched = Set(String).new
-        selected_phases.each do |phase|
-          phase.steps.each do |step|
-            matched << step.name if by_packages.includes?(step.name)
-          end
-        end
-        missing = by_packages.uniq.reject { |name| matched.includes?(name) }
+        requested = by_packages.uniq.to_set
+        matched = selected_phases.flat_map(&.steps).map(&.name).select { |name| requested.includes?(name) }.to_set
+        missing = requested.reject { |name| matched.includes?(name) }
         raise "Requested package(s) not found in selected phases: #{missing.join(", ")}" unless missing.empty?
 
         selected_phases = selected_phases.compact_map do |phase|
-          steps = phase.steps.select { |step| by_packages.includes?(step.name) }
-          next nil if steps.empty?
-          phase.with_steps(steps)
+          steps = phase.steps.select { |step| requested.includes?(step.name) }
+          steps.empty? ? nil : phase.with_steps(steps)
         end
         raise "No matching packages found in selected phases: #{by_packages.join(", ")}" if selected_phases.empty?
       end

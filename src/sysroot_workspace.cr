@@ -162,27 +162,17 @@ module Bootstrap
     # Enter the requested namespace by label, if needed.
     def enter_namespace(requested_label : String) : Nil
       requested = Namespace.parse(requested_label)
+      return if requested == @namespace
+
       case requested
       in .host?
-        raise "Cannot enter host namespace from #{@namespace.label}" unless @namespace.host?
+        raise "Cannot enter host namespace from #{@namespace.label}"
       in .seed?
-        if @namespace.host?
-          enter_seed_rootfs_namespace
-        elsif @namespace.seed?
-          # Already in seed namespace.
-        else
-          raise "Cannot enter seed namespace from #{@namespace.label}"
-        end
+        raise "Cannot enter seed namespace from #{@namespace.label}" unless @namespace.host?
+        enter_seed_rootfs_namespace
       in .bq2?
-        if @namespace.host?
-          enter_bq2_rootfs_namespace
-        elsif @namespace.seed?
-          enter_bq2_rootfs_namespace
-        elsif @namespace.bq2?
-          # Already in bq2 namespace.
-        else
-          raise "Cannot enter bq2 namespace from #{@namespace.label}"
-        end
+        raise "Cannot enter bq2 namespace from #{@namespace.label}" unless @namespace.host? || @namespace.seed?
+        enter_bq2_rootfs_namespace
       end
     end
 
