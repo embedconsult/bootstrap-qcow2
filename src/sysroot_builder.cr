@@ -763,7 +763,7 @@ module Bootstrap
             write_file_step(
               "musl-ld-path",
               musl_ld_path,
-              "/lib:/usr/lib:/opt/sysroot/lib:/opt/sysroot/lib/#{sysroot_triple}:/opt/sysroot/usr/lib\n",
+              "/lib:/usr/lib:/usr/lib/#{sysroot_triple}:/opt/sysroot/lib:/opt/sysroot/lib/#{sysroot_triple}:/opt/sysroot/usr/lib\n",
             ),
             write_file_steps([
               {"/etc/os-release", os_release_content},
