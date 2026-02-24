@@ -112,6 +112,11 @@ describe Bootstrap::SysrootBuilder do
       system_stage2.configure_flags.any? do |flag|
         flag.starts_with?("-DCMAKE_CXX_FLAGS=") && flag.includes?("-stdlib=libc++")
       end.should be_true
+      system_stage2.configure_flags.any? do |flag|
+        flag.starts_with?("-DRUNTIMES_CMAKE_ARGS=") &&
+          flag.includes?("-DCMAKE_C_FLAGS=") &&
+          flag.includes?("-DCMAKE_CXX_FLAGS=")
+      end.should be_true
     end
   end
 

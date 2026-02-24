@@ -1408,7 +1408,17 @@ module Bootstrap
       build_rpath = File.join(build_root, "build-stage2", "lib")
       install_rpath = "#{install_libdir}:#{install_prefix}/lib"
       cxx_standard_libs = "-lc++ -lc++abi -lunwind"
+      runtime_c_flags = "--target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -Wno-unused-command-line-argument"
+      runtime_cxx_flags = "#{runtime_c_flags} -nostdinc++ -isystem #{toolchain_libcxx_include} -isystem #{toolchain_libcxx_target_include} -stdlib=libc++"
       linker_flags = "--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{toolchain_libcxx_libdir} -L#{toolchain_prefix}/lib"
+      runtimes_cmake_args = [
+        "-DCMAKE_C_FLAGS=#{runtime_c_flags}",
+        "-DCMAKE_CXX_FLAGS=#{runtime_cxx_flags}",
+        "-DCMAKE_CXX_STANDARD_LIBRARIES=#{cxx_standard_libs}",
+        "-DCMAKE_EXE_LINKER_FLAGS=#{linker_flags}",
+        "-DCMAKE_SHARED_LINKER_FLAGS=#{linker_flags}",
+        "-DCMAKE_MODULE_LINKER_FLAGS=#{linker_flags}",
+      ]
 
       flags = base_flags.dup
       flags << "-DCMAKE_C_COMPILER=#{cc}"
@@ -1429,6 +1439,7 @@ module Bootstrap
       flags << "-DCMAKE_BUILD_RPATH=#{build_rpath}:#{install_rpath}"
       flags << "-DCMAKE_INSTALL_RPATH=#{install_rpath}"
       flags << "-DCMAKE_POSITION_INDEPENDENT_CODE=ON"
+      flags << "-DRUNTIMES_CMAKE_ARGS=#{runtimes_cmake_args.join(";")}"
       flags
     end
 
