@@ -524,6 +524,7 @@ module Bootstrap
       flags.concat([
         "-DLLVM_INCLUDE_TESTS=OFF",
         "-DLLVM_INCLUDE_EXAMPLES=OFF",
+        "-DLLVM_BUILD_EXAMPLES=OFF",
         "-DLLVM_INCLUDE_BENCHMARKS=OFF",
         "-DLLVM_BUILD_DOCS=OFF",
         "-DLLVM_ENABLE_DOXYGEN=OFF",
@@ -1522,7 +1523,7 @@ module Bootstrap
                     begin
                       SysrootWorkspace.new(host_workdir: host_workdir)
                     rescue ex
-                      STDERR.puts "No valid workspace found, build out the workspace first with `bq2 sysroot-builder`: #{ex.message}"
+                      Log.error { "No valid workspace found, build out the workspace first with `bq2 sysroot-builder`: #{ex.message}" }
                       return -1
                     end
                   elsif host_workdir
@@ -1536,11 +1537,11 @@ module Bootstrap
       plan_path = builder.write_plan
       workspace_label = builder.workspace.host_workdir || builder.workspace.log_path
       if plan_only
-        puts "Using existing sysroot workspace at #{workspace_label}"
+        Log.info { "Using existing sysroot workspace at #{workspace_label}" }
       else
-        puts "Prepared sysroot workspace at #{workspace_label}"
+        Log.info { "Prepared sysroot workspace at #{workspace_label}" }
       end
-      puts "Wrote build plan at #{plan_path}"
+      Log.info { "Wrote build plan at #{plan_path}" }
       0
     end
 
@@ -1560,7 +1561,7 @@ module Bootstrap
       begin
         workspace = SysrootWorkspace.new(host_workdir: host_workdir)
       rescue ex
-        STDERR.puts "No valid workspace found, build out the workspace first with `bq2 sysroot-builder`: #{ex.message}"
+        Log.error { "No valid workspace found, build out the workspace first with `bq2 sysroot-builder`: #{ex.message}" }
         return -1
       end
 
@@ -1576,7 +1577,7 @@ module Bootstrap
 
       plan_path = workspace.log_path / SysrootBuildState::PLAN_FILE
       unless File.exists?(plan_path)
-        STDERR.puts "No build plan found at #{plan_path}, run `bq2 sysroot-builder` first"
+        Log.error { "No build plan found at #{plan_path}, run `bq2 sysroot-builder` first" }
         return -1
       end
 
@@ -1594,8 +1595,8 @@ module Bootstrap
       build_state.overrides_digest = SysrootBuildState.digest_for?(overrides_path)
       build_state.touch
 
-      puts "Wrote build plan overrides to #{overrides_path}"
-      puts "Overrides phases=#{overrides.phases.size}"
+      Log.info { "Wrote build plan overrides to #{overrides_path}" }
+      Log.info { "Overrides phases=#{overrides.phases.size}" }
       0
     end
   end

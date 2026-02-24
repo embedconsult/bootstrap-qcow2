@@ -185,7 +185,7 @@ module Bootstrap
       begin
         workspace = SysrootWorkspace.new(host_workdir: host_workdir, extra_binds: extra_binds)
       rescue ex
-        STDERR.puts "Please build out the workspace first with `bq2 sysroot-builder`: #{ex.message}"
+        Log.error { "Please build out the workspace first with `bq2 sysroot-builder`: #{ex.message}" }
         return -1
       end
 
@@ -253,7 +253,7 @@ module Bootstrap
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-tarball [options]") do |p|
       end
       return CLI.print_help(parser) if help
-      STDERR.puts "sysroot-tarball is not yet wired up"
+      Log.error { "sysroot-tarball is not yet wired up" }
       1
     end
 
