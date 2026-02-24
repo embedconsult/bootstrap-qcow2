@@ -97,7 +97,7 @@ module Bootstrap
   struct BuildPhase
     include JSON::Serializable
 
-    # Phase identifier used by the runner (e.g., "sysroot-from-alpine").
+    # Phase identifier used by the runner (e.g., "sysroot-from-seed").
     getter name : String
     # Human-readable description shown in logs.
     getter description : String

@@ -43,6 +43,7 @@ module Bootstrap
       DEFAULT_ARCH = "aarch64"
     {% end %}
     DEFAULT_ROOTFS_SEED    = "Alpine"
+    BQ2_SEED_NAME          = "bq2-rootfs-0.3.3"
     DEFAULT_ROOTFS_BRANCH  = "v3.23"
     DEFAULT_ROOTFS_VERSION = "3.23.2"
     DEFAULT_LLVM_VER       = "18.1.7"
@@ -67,7 +68,9 @@ module Bootstrap
     DEFAULT_FOSSIL         = "2.25"
     DEFAULT_GIT            = "2.45.2"
     DEFAULT_CRYSTAL        = "1.19.1"
-    SHARDS_CACHE_DIR       = "/tmp/.shards-cache" # Cache directory name for prefetched shards dependencies.
+    # Source: https://dl.beagle.cc/images/bq2-rootfs-0.3.3.tar.gz
+    DEFAULT_BQ2_SEED_URL = "https://dl.beagle.cc/images/bq2-rootfs-0.3.3.tar.gz"
+    SHARDS_CACHE_DIR     = "/tmp/.shards-cache" # Cache directory name for prefetched shards dependencies.
     # Source: https://curl.se/ca/cacert.pem (Mozilla CA certificate bundle).
     CA_BUNDLE_PEM      = {{ read_file("#{__DIR__}/../data/ca-bundle/ca-certificates.crt") }}
     DEFAULT_NAMESERVER = "8.8.8.8"
@@ -166,6 +169,9 @@ module Bootstrap
         url = URI.parse("https://dl-cdn.alpinelinux.org/alpine/#{DEFAULT_ROOTFS_BRANCH}/releases/#{@architecture}/#{file}")
         checksum_url = URI.parse("#{url}.sha256") rescue nil
         PackageSpec.new("bootstrap-rootfs", "#{DEFAULT_ROOTFS_VERSION}", url, nil, checksum_url)
+      elsif @seed == BQ2_SEED_NAME
+        url = URI.parse(DEFAULT_BQ2_SEED_URL)
+        PackageSpec.new("bootstrap-rootfs", BQ2_SEED_NAME, url)
       else
         raise "Not currently defined seed: #{@seed}"
       end
@@ -190,12 +196,12 @@ module Bootstrap
         PackageSpec.new("m4",
           DEFAULT_M4,
           URI.parse("https://ftp.gnu.org/gnu/m4/m4-#{DEFAULT_M4}.tar.gz"),
-          phases: ["sysroot-from-alpine", "system-from-sysroot"]
+          phases: ["sysroot-from-seed", "system-from-sysroot"]
         ),
         PackageSpec.new("musl",
           DEFAULT_MUSL,
           URI.parse("https://musl.libc.org/releases/musl-#{DEFAULT_MUSL}.tar.gz"),
-          phases: ["sysroot-from-alpine", "rootfs-from-sysroot"]
+          phases: ["sysroot-from-seed", "rootfs-from-sysroot"]
         ),
         PackageSpec.new(
           "busybox",
@@ -203,13 +209,13 @@ module Bootstrap
           URI.parse("https://github.com/mirror/busybox/archive/refs/tags/#{DEFAULT_BUSYBOX.tr(".", "_")}.tar.gz"),
           strategy: "busybox",
           patches: ["#{bootstrap_repo_dir}/patches/busybox-#{DEFAULT_BUSYBOX.tr(".", "_")}/tc-disable-cbq-when-missing-headers.patch"],
-          phases: ["sysroot-from-alpine", "rootfs-from-sysroot"],
+          phases: ["sysroot-from-seed", "rootfs-from-sysroot"],
         ),
-        PackageSpec.new("make", DEFAULT_GNU_MAKE, URI.parse("https://ftp.gnu.org/gnu/make/make-#{DEFAULT_GNU_MAKE}.tar.gz"), phases: ["sysroot-from-alpine", "system-from-sysroot"]),
+        PackageSpec.new("make", DEFAULT_GNU_MAKE, URI.parse("https://ftp.gnu.org/gnu/make/make-#{DEFAULT_GNU_MAKE}.tar.gz"), phases: ["sysroot-from-seed", "system-from-sysroot"]),
         PackageSpec.new("zlib",
           DEFAULT_ZLIB,
           URI.parse("https://zlib.net/zlib-#{DEFAULT_ZLIB}.tar.gz"),
-          phases: ["sysroot-from-alpine", "system-from-sysroot"],
+          phases: ["sysroot-from-seed", "system-from-sysroot"],
           configure_flags: ["--shared"]
         ),
         PackageSpec.new(
@@ -224,13 +230,13 @@ module Bootstrap
             "HOSTCC=clang",
             "HOSTCXX=clang++",
           ],
-          phases: ["sysroot-from-alpine", "rootfs-from-sysroot", "system-from-sysroot"],
+          phases: ["sysroot-from-seed", "rootfs-from-sysroot", "system-from-sysroot"],
         ),
         PackageSpec.new(
           "libressl",
           DEFAULT_LIBRESSL,
           URI.parse("https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-#{DEFAULT_LIBRESSL}.tar.gz"),
-          phases: ["sysroot-from-alpine", "system-from-sysroot"],
+          phases: ["sysroot-from-seed", "system-from-sysroot"],
           configure_flags: ["--enable-shared", "--disable-static"],
         ),
         PackageSpec.new(
@@ -256,13 +262,13 @@ module Bootstrap
             "-DOPENSSL_CRYPTO_LIBRARY=/opt/sysroot/lib/libcrypto.so",
           ],
           patches: ["#{bootstrap_repo_dir}/patches/cmake-#{DEFAULT_CMAKE}/cmcppdap-include-cstdint.patch"],
-          phases: ["sysroot-from-alpine", "system-from-sysroot"],
+          phases: ["sysroot-from-seed", "system-from-sysroot"],
         ),
         PackageSpec.new(
           "libatomic_ops",
           DEFAULT_LIBATOMIC_OPS,
           URI.parse("https://github.com/ivmai/libatomic_ops/releases/download/v#{DEFAULT_LIBATOMIC_OPS}/libatomic_ops-#{DEFAULT_LIBATOMIC_OPS}.tar.gz"),
-          phases: ["sysroot-from-alpine", "system-from-sysroot"],
+          phases: ["sysroot-from-seed", "system-from-sysroot"],
           configure_flags: ["--enable-shared", "--disable-static"],
         ),
         PackageSpec.new(
@@ -279,14 +285,14 @@ module Bootstrap
             "#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/runtimes-python-optional.patch",
             "#{bootstrap_repo_dir}/patches/llvm-project-llvmorg-#{DEFAULT_LLVM_VER}/runtimes-propagate-python-option.patch",
           ],
-          phases: ["sysroot-from-alpine", "system-from-sysroot"],
+          phases: ["sysroot-from-seed", "system-from-sysroot"],
         ),
         PackageSpec.new(
           "bdwgc",
           DEFAULT_BDWGC,
           URI.parse("https://github.com/ivmai/bdwgc/releases/download/v#{DEFAULT_BDWGC}/gc-#{DEFAULT_BDWGC}.tar.gz"),
           build_directory: "gc-#{DEFAULT_BDWGC}",
-          phases: ["sysroot-from-alpine", "system-from-sysroot"],
+          phases: ["sysroot-from-seed", "system-from-sysroot"],
           patches: ["#{bootstrap_repo_dir}/patches/bdwgc-#{DEFAULT_BDWGC}/disable-libcord.patch"],
           configure_flags: ["--enable-shared", "--disable-static"],
         ),
@@ -294,21 +300,21 @@ module Bootstrap
           "pcre2",
           DEFAULT_PCRE2,
           URI.parse("https://github.com/PhilipHazel/pcre2/releases/download/pcre2-#{DEFAULT_PCRE2}/pcre2-#{DEFAULT_PCRE2}.tar.gz"),
-          phases: ["sysroot-from-alpine", "system-from-sysroot"],
+          phases: ["sysroot-from-seed", "system-from-sysroot"],
           configure_flags: ["--enable-shared", "--disable-static"],
         ),
         PackageSpec.new(
           "gmp",
           DEFAULT_GMP,
           URI.parse("https://ftp.gnu.org/gnu/gmp/gmp-#{DEFAULT_GMP}.tar.gz"),
-          phases: ["sysroot-from-alpine", "system-from-sysroot"],
+          phases: ["sysroot-from-seed", "system-from-sysroot"],
           configure_flags: ["--enable-shared", "--disable-static"],
         ),
         PackageSpec.new(
           "libiconv",
           DEFAULT_LIBICONV,
           URI.parse("https://ftp.gnu.org/pub/gnu/libiconv/libiconv-#{DEFAULT_LIBICONV}.tar.gz"),
-          phases: ["sysroot-from-alpine", "system-from-sysroot"],
+          phases: ["sysroot-from-seed", "system-from-sysroot"],
           configure_flags: ["--enable-shared", "--disable-static", "--disable-nls"],
         ),
         PackageSpec.new(
@@ -323,21 +329,21 @@ module Bootstrap
             "-DLIBXML2_WITH_TESTS=OFF",
             "-DLIBXML2_WITH_LZMA=OFF",
           ],
-          phases: ["sysroot-from-alpine", "system-from-sysroot"],
+          phases: ["sysroot-from-seed", "system-from-sysroot"],
         ),
         PackageSpec.new(
           "libyaml",
           DEFAULT_LIBYAML,
           URI.parse("https://pyyaml.org/download/libyaml/yaml-#{DEFAULT_LIBYAML}.tar.gz"),
           build_directory: "yaml-#{DEFAULT_LIBYAML}",
-          phases: ["sysroot-from-alpine", "system-from-sysroot"],
+          phases: ["sysroot-from-seed", "system-from-sysroot"],
           configure_flags: ["--enable-shared", "--disable-static"],
         ),
         PackageSpec.new(
           "libffi",
           DEFAULT_LIBFFI,
           URI.parse("https://github.com/libffi/libffi/releases/download/v#{DEFAULT_LIBFFI}/libffi-#{DEFAULT_LIBFFI}.tar.gz"),
-          phases: ["sysroot-from-alpine", "system-from-sysroot"],
+          phases: ["sysroot-from-seed", "system-from-sysroot"],
           configure_flags: ["--enable-shared", "--disable-static"],
         ),
         PackageSpec.new(
@@ -346,7 +352,7 @@ module Bootstrap
           URI.parse("https://github.com/crystal-lang/crystal/archive/refs/tags/#{DEFAULT_CRYSTAL}.tar.gz"),
           strategy: "crystal-compiler",
           patches: ["#{bootstrap_repo_dir}/patches/crystal-#{DEFAULT_CRYSTAL}/use-libcxx.patch"],
-          phases: ["sysroot-from-alpine", "system-from-sysroot"],
+          phases: ["sysroot-from-seed", "system-from-sysroot"],
         ),
         PackageSpec.new(
           "shards",
@@ -355,7 +361,7 @@ module Bootstrap
           strategy: "crystal-build",
           configure_flags: ["-o", "bin/shards", "src/shards.cr"],
           build_directory: "shards-#{DEFAULT_SHARDS}",
-          phases: ["sysroot-from-alpine", "system-from-sysroot"],
+          phases: ["sysroot-from-seed", "system-from-sysroot"],
         ),
         PackageSpec.new(
           "bootstrap-qcow2",
@@ -584,12 +590,12 @@ module Bootstrap
     end
 
     # Define the multi-phase build in an LFS-inspired style:
-    # 1. build a complete sysroot from sources using Alpine's seed environment
+    # 1. build a complete sysroot from sources using the selected seed environment
     # 2. validate the sysroot by using it as the toolchain when assembling a rootfs
     #
     # Phases:
     # - host-setup: populate sources and seed the rootfs from the host.
-    # - sysroot-from-alpine: build the sysroot using Alpine tools in the seed rootfs.
+    # - sysroot-from-seed: build the sysroot using tools available in the seed rootfs.
     # - rootfs-from-sysroot: build the minimal rootfs using the new sysroot toolchain.
     # - system-from-sysroot: build core system packages inside the new rootfs.
     # - tools-from-system: build developer tools inside the new rootfs.
@@ -597,7 +603,7 @@ module Bootstrap
     #
     # Phase namespaces:
     # - host: runs on the host before entering any namespace.
-    # - seed: runs in the Alpine seed rootfs (host tools).
+    # - seed: runs in the seed rootfs (host tools).
     # - bq2: runs inside the bq2 rootfs, prefers /usr/bin, and relies on
     #   musl's /etc/ld-musl-<arch>.path for runtime lookup.
     def phase_specs : Array(PhaseSpec)
@@ -673,25 +679,15 @@ module Bootstrap
         # Outputs: /opt/sysroot toolchain prefix (compiler, libc, build tools).
         PhaseSpec.new(
           BuildPhase.new(
-            name: "sysroot-from-alpine",
-            description: "Build a self-contained sysroot using Alpine-hosted tools.",
+            name: "sysroot-from-seed",
+            description: "Build a self-contained sysroot using seed rootfs tools.",
             namespace: SysrootWorkspace::Namespace::Seed.label,
             install_prefix: sysroot_prefix,
             destdir: nil,
             env: sysroot_env,
           ),
           workdir: workspace_from_seed,
-          pre_steps: [
-            write_file_step(
-              "alpine-resolv-conf",
-              "/etc/resolv.conf",
-              rootfs_resolv_conf_content,
-            ),
-            apk_add_step(
-              "alpine-apk-add",
-              AlpineSetup::SYSROOT_RUNNER_PACKAGES,
-            ),
-          ],
+          pre_steps: seed_bootstrap_pre_steps(rootfs_resolv_conf_content),
           package_allowlist: nil,
           env_overrides: {
             "cmake" => {
@@ -1176,6 +1172,27 @@ module Bootstrap
       end
     end
 
+    # Build pre-steps for bootstrapping the seed namespace.
+    #
+    # Alpine seeds still require explicit package installation for build tools,
+    # while published bq2 seeds carry the toolchain already.
+    private def seed_bootstrap_pre_steps(resolv_conf_content : String) : Array(BuildStep)
+      steps = [
+        write_file_step(
+          "seed-resolv-conf",
+          "/etc/resolv.conf",
+          resolv_conf_content,
+        ),
+      ] of BuildStep
+      if @seed == DEFAULT_ROOTFS_SEED
+        steps << apk_add_step(
+          "alpine-apk-add",
+          AlpineSetup::SYSROOT_RUNNER_PACKAGES,
+        )
+      end
+      steps
+    end
+
     # Build an apk-add step with an explicit package list.
     private def apk_add_step(name : String, packages : Array(String)) : BuildStep
       build_step(
@@ -1256,7 +1273,7 @@ module Bootstrap
     # Ensure clean rebuilds when a package is installed into multiple prefixes.
     private def clean_build_for(pkg : PackageSpec, spec : PhaseSpec) : Bool
       return false unless pkg.name == "bdwgc" || pkg.name == "libatomic_ops"
-      spec.phase.name == "sysroot-from-alpine" || spec.phase.name == "system-from-sysroot"
+      spec.phase.name == "sysroot-from-seed" || spec.phase.name == "system-from-sysroot"
     end
 
     # Expand llvm-project into a two-stage CMake build using the sysroot toolchain.
@@ -1399,7 +1416,7 @@ module Bootstrap
       unless allowlist
         return packages.select do |pkg|
           phases = pkg.phases
-          phases ? phases.includes?(phase_name) : phase_name == "sysroot-from-alpine"
+          phases ? phases.includes?(phase_name) : phase_name == "sysroot-from-seed"
         end
       end
       allowlist.map do |name|

@@ -51,6 +51,28 @@ describe Bootstrap::SysrootBuilder do
     end
   end
 
+  it "builds a seed rootfs spec for the published bq2 seed tarball" do
+    with_temp_workdir do |_dir|
+      builder = Bootstrap::SysrootBuilder.new(seed: Bootstrap::SysrootBuilder::BQ2_SEED_NAME)
+      spec = builder.seed_rootfs_spec
+      spec.name.should eq "bootstrap-rootfs"
+      spec.version.should eq Bootstrap::SysrootBuilder::BQ2_SEED_NAME
+      spec.url.to_s.should eq Bootstrap::SysrootBuilder::DEFAULT_BQ2_SEED_URL
+    end
+  end
+
+  it "includes apk bootstrap only for Alpine seed" do
+    with_temp_workdir do |_dir|
+      alpine_builder = Bootstrap::SysrootBuilder.new
+      alpine_phase = alpine_builder.build_plan.phases.find(&.name.==("sysroot-from-seed")).not_nil!
+      alpine_phase.steps.any? { |step| step.name == "alpine-apk-add" }.should be_true
+
+      bq2_builder = Bootstrap::SysrootBuilder.new(seed: Bootstrap::SysrootBuilder::BQ2_SEED_NAME)
+      bq2_phase = bq2_builder.build_plan.phases.find(&.name.==("sysroot-from-seed")).not_nil!
+      bq2_phase.steps.any? { |step| step.name == "alpine-apk-add" }.should be_false
+    end
+  end
+
   it "lists default packages" do
     with_temp_workdir do |_dir|
       names = Bootstrap::SysrootBuilder.new.packages.map(&.name)
@@ -64,7 +86,7 @@ describe Bootstrap::SysrootBuilder do
     with_temp_workdir do |_dir|
       builder = Bootstrap::SysrootBuilder.new
       plan = builder.build_plan
-      sysroot_phase = plan.phases.find(&.name.==("sysroot-from-alpine")).not_nil!
+      sysroot_phase = plan.phases.find(&.name.==("sysroot-from-seed")).not_nil!
       llvm_steps = sysroot_phase.steps.select { |step| step.name.starts_with?("llvm-project-stage") }
       llvm_steps.map(&.name).should eq ["llvm-project-stage1", "llvm-project-stage2"]
       llvm_steps.all? { |step| step.strategy == "cmake-project" }.should be_true
@@ -78,7 +100,7 @@ describe Bootstrap::SysrootBuilder do
   it "lists build phase names" do
     with_temp_workdir do |_dir|
       phases = Bootstrap::SysrootBuilder.new.phase_specs.map { |spec| spec.phase.name }
-      phases.should eq ["host-setup", "sysroot-from-alpine", "rootfs-from-sysroot", "system-from-sysroot", "tools-from-system", "finalize-rootfs"]
+      phases.should eq ["host-setup", "sysroot-from-seed", "rootfs-from-sysroot", "system-from-sysroot", "tools-from-system", "finalize-rootfs"]
     end
   end
 
@@ -89,7 +111,7 @@ describe Bootstrap::SysrootBuilder do
       seed_workspace = Bootstrap::SysrootWorkspace.workspace_from(Bootstrap::SysrootWorkspace::Namespace::Seed, host_workdir).to_s
       phases = builder.phase_specs.to_h { |spec| {spec.phase.name, spec} }
       phases["host-setup"].workdir.should be_nil
-      phases["sysroot-from-alpine"].workdir.should eq seed_workspace
+      phases["sysroot-from-seed"].workdir.should eq seed_workspace
       phases["rootfs-from-sysroot"].workdir.should eq seed_workspace
       phases["system-from-sysroot"].workdir.should eq seed_workspace
       bq2_workspace = Bootstrap::SysrootWorkspace.workspace_from(Bootstrap::SysrootWorkspace::Namespace::BQ2, host_workdir).to_s
@@ -101,7 +123,7 @@ describe Bootstrap::SysrootBuilder do
   it "seeds rootfs profile, CA bundle, and final musl loader path" do
     with_temp_workdir do |_dir|
       builder = Bootstrap::SysrootBuilder.new
-      sysroot_phase = builder.phase_specs.find { |spec| spec.phase.name == "sysroot-from-alpine" }.not_nil!
+      sysroot_phase = builder.phase_specs.find { |spec| spec.phase.name == "sysroot-from-seed" }.not_nil!
       sysroot_zlib_env = sysroot_phase.env_overrides["zlib"]
       sysroot_zlib_env["CFLAGS"].should contain("-fPIC")
       rootfs_phase = builder.phase_specs.find { |spec| spec.phase.name == "rootfs-from-sysroot" }.not_nil!
@@ -134,14 +156,16 @@ describe Bootstrap::SysrootBuilder do
         strategy: "linux-headers",
         phases: ["rootfs-from-sysroot"],
       )
-      builder = StubBuilder.new
+      builder = StubBuilder.new(seed: Bootstrap::SysrootBuilder::BQ2_SEED_NAME)
       builder.override_packages = [pkg, musl, busybox, linux_headers]
       plan = builder.build_plan
-      plan.phases.map(&.name).should eq ["host-setup", "sysroot-from-alpine", "rootfs-from-sysroot", "system-from-sysroot", "finalize-rootfs"]
-      sysroot_phase = plan.phases.find(&.name.==("sysroot-from-alpine")).not_nil!
+      plan.phases.map(&.name).should eq ["host-setup", "sysroot-from-seed", "rootfs-from-sysroot", "system-from-sysroot", "finalize-rootfs"]
+      sysroot_phase = plan.phases.find(&.name.==("sysroot-from-seed")).not_nil!
       sysroot_phase.install_prefix.should eq "/opt/sysroot"
       sysroot_phase.destdir.should be_nil
-      sysroot_phase.steps.size.should eq 5
+      sysroot_phase.steps.size.should eq 4
+      sysroot_phase.steps.any? { |step| step.name == "seed-resolv-conf" }.should be_true
+      sysroot_phase.steps.any? { |step| step.strategy == "apk-add" }.should be_false
       sysroot_phase.steps.find(&.name.==("pkg")).not_nil!.configure_flags.should eq ["--foo"]
 
       rootfs_phase = plan.phases.find(&.name.==("rootfs-from-sysroot")).not_nil!
@@ -187,7 +211,7 @@ describe Bootstrap::SysrootBuilder do
       plan_path = builder.write_plan.not_nil!
       File.exists?(plan_path).should be_true
       plan = Bootstrap::BuildPlan.parse(File.read(plan_path))
-      plan.phases.map(&.name).should eq ["host-setup", "sysroot-from-alpine", "rootfs-from-sysroot", "system-from-sysroot", "finalize-rootfs"]
+      plan.phases.map(&.name).should eq ["host-setup", "sysroot-from-seed", "rootfs-from-sysroot", "system-from-sysroot", "finalize-rootfs"]
     end
   end
 end

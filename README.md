@@ -47,6 +47,12 @@ data/sysroot/seed-rootfs/
 7 directories, 1 file
 ```
 
+To validate self-hosting with the published 0.3.3 seed rootfs tarball, generate an alternate plan with:
+
+```console
+$ bin/sysroot-builder --seed bq2-rootfs-0.3.3
+```
+
 ### Build the target rootfs
 
 #### Just build everything
@@ -80,31 +86,18 @@ $ bin/sysroot-runner --phase host-setup
 #### Run individual steps
 
 ```console
-$ bin/sysroot-runner --phase sysroot-from-alpine --package alpine-resolv-conf
+$ bin/sysroot-runner --phase sysroot-from-seed --package seed-resolv-conf
 2026-02-23T15:12:35.841817Z   INFO - Running plan /home/ubuntu/workspace/bootstrap-qcow2/data/sysroot/seed-rootfs/bq2-rootfs/var/lib/sysroot-build-plan.json with overrides /home/ubuntu/worksp
 ace/bootstrap-qcow2/data/sysroot/seed-rootfs/bq2-rootfs/var/lib/sysroot-build-overrides.json (namespace=Host)
-2026-02-23T15:12:35.842025Z   INFO - Entering namespace seed for phase sysroot-from-alpine
-2026-02-23T15:12:35.843592Z   INFO - Executing phase sysroot-from-alpine (namespace=seed)
-2026-02-23T15:12:35.843595Z   INFO - **** Build a self-contained sysroot using Alpine-hosted tools. ****
+2026-02-23T15:12:35.842025Z   INFO - Entering namespace seed for phase sysroot-from-seed
+2026-02-23T15:12:35.843592Z   INFO - Executing phase sysroot-from-seed (namespace=seed)
+2026-02-23T15:12:35.843595Z   INFO - **** Build a self-contained sysroot using seed rootfs tools. ****
 2026-02-23T15:12:35.843597Z   INFO - Executing 1 build steps
-2026-02-23T15:12:35.843602Z   INFO - Building alpine-resolv-conf in  (phase=sysroot-from-alpine)
-2026-02-23T15:12:35.843624Z   INFO - Starting write-file build for alpine-resolv-conf in (no chdir) (cpus=48)
-2026-02-23T15:12:35.843696Z   INFO - Finished alpine-resolv-conf
+2026-02-23T15:12:35.843602Z   INFO - Building seed-resolv-conf in  (phase=sysroot-from-seed)
+2026-02-23T15:12:35.843624Z   INFO - Starting write-file build for seed-resolv-conf in (no chdir) (cpus=48)
+2026-02-23T15:12:35.843696Z   INFO - Finished seed-resolv-conf
 2026-02-23T15:12:35.843820Z   INFO - All build steps completed
-2026-02-23T15:12:35.843822Z   INFO - Completed phase sysroot-from-alpine
-$ bin/sysroot-runner --phase sysroot-from-alpine --package alpine-apk-add
-...
-2026-02-23T15:13:23.713723Z   INFO - Entering namespace seed for phase sysroot-from-alpine
-2026-02-23T15:13:23.715271Z   INFO - Executing phase sysroot-from-alpine (namespace=seed)
-2026-02-23T15:13:23.715274Z   INFO - **** Build a self-contained sysroot using Alpine-hosted tools. ****
-2026-02-23T15:13:23.715276Z   INFO - Executing 1 build steps
-2026-02-23T15:13:23.715282Z   INFO - Building alpine-apk-add in  (phase=sysroot-from-alpine)
-2026-02-23T15:13:23.715305Z   INFO - Starting apk-add build for alpine-apk-add in (no chdir) (cpus=48)
-2026-02-23T15:13:23.715323Z   INFO - apk add --no-cache bash binutils clang libgcc libstdc++-dev libressl-dev crystal lld llvm-libs linux-headers make musl-dev patch zlib-dev pcre2-dev gc-dev
- yaml-dev perl python3 shards
-2026-02-23T15:13:41.093045Z   INFO - Finished alpine-apk-add
-2026-02-23T15:13:41.093296Z   INFO - All build steps completed
-2026-02-23T15:13:41.093300Z   INFO - Completed phase sysroot-from-alpine
+2026-02-23T15:12:35.843822Z   INFO - Completed phase sysroot-from-seed
 ```
 
 #### Execute a command in the new namespace
@@ -125,8 +118,8 @@ $ bin/sysroot-status
 plan_path=/home/ubuntu/workspace/bootstrap-qcow2/data/sysroot/seed-rootfs/bq2-rootfs/var/lib/sysroot-build-plan.json
 state_path=/home/ubuntu/workspace/bootstrap-qcow2/data/sysroot/seed-rootfs/bq2-rootfs/var/lib/sysroot-build-state.json
 report_dir=/home/ubuntu/workspace/bootstrap-qcow2/data/sysroot/seed-rootfs/bq2-rootfs/var/lib/sysroot-build-reports
-current_phase=sysroot-from-alpine
-next_phase=sysroot-from-alpine
+current_phase=sysroot-from-seed
+next_phase=sysroot-from-seed
 next_step=m4
 $ bin/sysroot-runner
 ```
@@ -138,10 +131,10 @@ $ bin/sysroot-status
 plan_path=/home/ubuntu/workspace/bootstrap-qcow2/data/sysroot/seed-rootfs/bq2-rootfs/var/lib/sysroot-build-plan.json
 state_path=/home/ubuntu/workspace/bootstrap-qcow2/data/sysroot/seed-rootfs/bq2-rootfs/var/lib/sysroot-build-state.json
 report_dir=/home/ubuntu/workspace/bootstrap-qcow2/data/sysroot/seed-rootfs/bq2-rootfs/var/lib/sysroot-build-reports
-current_phase=sysroot-from-alpine
-next_phase=sysroot-from-alpine
+current_phase=sysroot-from-seed
+next_phase=sysroot-from-seed
 next_step=llvm-project-stage2
-last_failure=sysroot-from-alpine/llvm-project-stage2
+last_failure=sysroot-from-seed/llvm-project-stage2
 last_failure_report=/bq2-rootfs/var/lib/sysroot-build-reports/20260223T154034.392Z-sysroot_from_alpine-llvm_project_stage2-d64a9325.json
 ```
 
