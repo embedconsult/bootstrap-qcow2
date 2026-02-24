@@ -8,7 +8,7 @@ require "log"
 
 module Bootstrap
   # Semantic version of the bootstrap-qcow2 tooling.
-  VERSION = "0.3.3"
+  VERSION = "0.4.0"
 
   # Basic qcow2 wrapper that validates tools and triggers image builds.
   #
