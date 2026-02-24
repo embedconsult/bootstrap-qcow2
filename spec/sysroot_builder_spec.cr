@@ -116,7 +116,8 @@ describe Bootstrap::SysrootBuilder do
         flag.starts_with?("-DRUNTIMES_CMAKE_ARGS=") &&
           flag.includes?("-DCMAKE_C_FLAGS=") &&
           flag.includes?("-DCMAKE_CXX_FLAGS=") &&
-          flag.includes?("--sysroot=/opt/sysroot")
+          flag.includes?("--sysroot=/opt/sysroot") &&
+          !flag.includes?("/opt/sysroot/include/c++/v1")
       end.should be_true
     end
   end
