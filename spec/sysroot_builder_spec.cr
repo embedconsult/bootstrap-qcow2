@@ -145,6 +145,15 @@ describe Bootstrap::SysrootBuilder do
     end
   end
 
+  it "sets the system-from-sysroot linker" do
+    with_temp_workdir do |_dir|
+      builder = Bootstrap::SysrootBuilder.new
+      phase = builder.phase_specs.find { |spec| spec.phase.name == "system-from-sysroot" }.not_nil!
+      sysroot_prefix = "/#{Bootstrap::SysrootWorkspace::SYSROOT_DIR_NAME}"
+      phase.phase.env["LD"].should eq "#{sysroot_prefix}/bin/ld.lld"
+    end
+  end
+
   it "seeds rootfs profile, CA bundle, and final musl loader path" do
     with_temp_workdir do |_dir|
       builder = Bootstrap::SysrootBuilder.new

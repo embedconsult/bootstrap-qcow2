@@ -652,6 +652,7 @@ module Bootstrap
       system_from_sysroot_env = rootfs_env.dup
       existing_ld = system_from_sysroot_env["LD_LIBRARY_PATH"]?
       system_from_sysroot_env["LD_LIBRARY_PATH"] = existing_ld && !existing_ld.empty? ? "#{sysroot_ld_lib}:#{existing_ld}" : sysroot_ld_lib
+      system_from_sysroot_env["LD"] = "#{sysroot_prefix}/bin/ld.lld"
       musl_arch = case @architecture
                   when "aarch64", "arm64"
                     "aarch64"
