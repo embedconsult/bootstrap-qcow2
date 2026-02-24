@@ -1,15 +1,12 @@
 require "json"
 require "log"
 require "file_utils"
-require "process"
 require "random/secure"
-require "set"
 require "time"
 require "./build_plan"
 require "./cli"
 require "./sysroot_build_state"
 require "./sysroot_workspace"
-require "./sysroot_namespace"
 require "./step_runner"
 
 module Bootstrap

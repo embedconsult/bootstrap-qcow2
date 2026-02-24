@@ -316,7 +316,7 @@ module Bootstrap
       @progress = previous_state.progress.not_nil!
     end
 
-    private def phase_names(phases : Array(BuildPhase)) : Array(String)?
+    private def phase_names(phases : Array(BuildPhase)) : Array(String)
       phases.map { |phase| phase.name }
     end
 
@@ -340,8 +340,9 @@ module Bootstrap
 
       if by_packages.present?
         requested = by_packages.uniq.to_set
-        matched = selected_phases.flat_map(&.steps).map(&.name).select { |name| requested.includes?(name) }.to_set
-        missing = requested.reject { |name| matched.includes?(name) }
+        missing = requested.reject do |name|
+          selected_phases.any? { |phase| phase.steps.any? { |step| step.name == name } }
+        end
         raise "Requested package(s) not found in selected phases: #{missing.join(", ")}" unless missing.empty?
 
         selected_phases = selected_phases.compact_map do |phase|
