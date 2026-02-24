@@ -62,9 +62,8 @@ module Bootstrap
     def initialize(@host_workdir : Path? = nil,
                    @extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path))
       if @host_workdir.nil?
-        found_marker = PROBE_PATHS_FOR_MARKER.find { |s| File.exists?(s[:path]) }
-        raise "Missing BQ2 rootfs marker at one of these paths: #{PROBE_PATHS_FOR_MARKER}" if found_marker.nil?
-        marker_match = found_marker.not_nil!
+        marker_match = PROBE_PATHS_FOR_MARKER.find { |s| File.exists?(s[:path]) }
+        raise "Missing BQ2 rootfs marker at one of these paths: #{PROBE_PATHS_FOR_MARKER}" unless marker_match
         @namespace = marker_match[:namespace]
         if @namespace == Namespace::Host
           @host_workdir = Path["#{DEFAULT_HOST_WORKDIR}"].expand
@@ -126,7 +125,6 @@ module Bootstrap
       workspace.log_path = workspace.bq2_rootfs_path / Path["#{LOG_DIR_NAME}"]
       FileUtils.mkdir_p(workspace.sysroot_path.not_nil!)
       FileUtils.mkdir_p(workspace.workspace_path)
-      FileUtils.mkdir_p(workspace.bq2_rootfs_path)
       unless File.exists?(workspace.marker_path)
         Log.debug { "Generating #{workspace.marker_path}" }
         File.write(workspace.marker_path, "bq2-rootfs\n")
