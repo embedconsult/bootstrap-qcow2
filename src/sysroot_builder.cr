@@ -775,18 +775,18 @@ module Bootstrap
             ]),
           ].flatten,
         ),
-        # Inputs: minimal bq2 rootfs, sysroot toolchain in the seed rootfs.
+        # Inputs: minimal bq2 rootfs, sysroot toolchain mounted at /opt/sysroot in bq2.
         # Outputs: prefix-free /usr system packages staged into the bq2 rootfs.
         PhaseSpec.new(
           BuildPhase.new(
             name: "system-from-sysroot",
             description: "Rebuild sysroot packages into /usr inside the new rootfs (prefix-free).",
-            namespace: SysrootWorkspace::Namespace::Seed.label,
+            namespace: SysrootWorkspace::Namespace::BQ2.label,
             install_prefix: "/usr",
-            destdir: bq2_from_seed,
+            destdir: nil,
             env: system_from_sysroot_env,
           ),
-          workdir: workspace_from_seed,
+          workdir: workspace_from_bq2,
           package_allowlist: nil,
           env_overrides: {
             "libxml2" => libxml2_env,
