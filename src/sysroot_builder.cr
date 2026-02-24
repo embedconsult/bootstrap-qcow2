@@ -635,6 +635,7 @@ module Bootstrap
       compiler_rt_arch = sysroot_triple.split("-").first
       clang_rt_dir = "/usr/lib/clang/#{llvm_major}/lib/#{sysroot_triple}"
       clang_rt_atomic = "#{clang_rt_dir}/libclang_rt.atomic.so"
+      sysroot_clang_rt_atomic = "#{sysroot_prefix}/lib/clang/#{llvm_major}/lib/#{sysroot_triple}/libclang_rt.atomic.so"
       libxml2_env = {
         "CPPFLAGS" => "-I#{sysroot_prefix}/include",
         "LDFLAGS"  => "-L#{sysroot_prefix}/lib",
@@ -692,6 +693,20 @@ module Bootstrap
           workdir: workspace_from_seed,
           pre_steps: seed_bootstrap_pre_steps(rootfs_resolv_conf_content),
           package_allowlist: nil,
+          extra_steps: [
+            build_step(
+              name: "sysroot-libatomic-link-0",
+              strategy: "symlink",
+              install_prefix: "#{sysroot_prefix}/lib/libatomic.so.1",
+              content: sysroot_clang_rt_atomic,
+            ),
+            build_step(
+              name: "sysroot-libatomic-link-1",
+              strategy: "symlink",
+              install_prefix: "#{sysroot_prefix}/lib/libatomic.so",
+              content: "libatomic.so.1",
+            ),
+          ],
           env_overrides: {
             "cmake" => {
               "CPPFLAGS" => "-I#{sysroot_prefix}/include -Wno-deprecated-literal-operator",
@@ -784,12 +799,12 @@ module Bootstrap
           BuildPhase.new(
             name: "system-from-sysroot",
             description: "Rebuild sysroot packages into /usr inside the new rootfs (prefix-free).",
-            namespace: SysrootWorkspace::Namespace::Seed.label,
+            namespace: SysrootWorkspace::Namespace::BQ2.label,
             install_prefix: "/usr",
-            destdir: bq2_from_seed,
+            destdir: nil,
             env: system_from_sysroot_env,
           ),
-          workdir: workspace_from_seed,
+          workdir: workspace_from_bq2,
           package_allowlist: nil,
           env_overrides: {
             "libxml2" => libxml2_env,
@@ -1562,9 +1577,9 @@ module Bootstrap
       end
 
       if workspace.host_workdir.nil?
-        host_workdir ||= Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR]
+        host_workdir ||= workspace.bq2_rootfs_path.parent
         STDERR.puts "Workspace does not include host workdir; defaulting to #{host_workdir} (pass --workdir to override)"
-        workspace = SysrootWorkspace.new(host_workdir: host_workdir)
+        workspace.host_workdir = host_workdir
       end
 
       plan_path = workspace.log_path / SysrootBuildState::PLAN_FILE
