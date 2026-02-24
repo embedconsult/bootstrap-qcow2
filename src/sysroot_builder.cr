@@ -1568,13 +1568,8 @@ module Bootstrap
       end
 
       if workspace.host_workdir.nil?
-        host_workdir ||= workspace.infer_host_workdir_from_mounts
-        unless host_workdir
-          Log.error { "Workspace does not include host workdir and mount inference failed; pass --workdir to avoid incorrect overrides." }
-          return -1
-        end
-        Log.warn { "Workspace does not include host workdir; inferred #{host_workdir} from mountinfo (pass --workdir to override)" }
-        workspace.host_workdir = host_workdir
+        Log.error { "Workspace does not include host workdir; pass --workdir to avoid incorrect overrides." }
+        return -1
       end
 
       plan_path = workspace.log_path / SysrootBuildState::PLAN_FILE

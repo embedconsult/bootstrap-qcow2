@@ -198,58 +198,6 @@ module Bootstrap
       @log_path = @bq2_rootfs_path / Path["#{LOG_DIR_NAME}"]
     end
 
-    # Attempt to infer the host workdir from mount sources.
-    #
-    # Returns nil when mount sources cannot be resolved or do not follow the
-    # expected <host_workdir>/seed-rootfs[/bq2-rootfs] layout.
-    def infer_host_workdir_from_mounts : Path?
-      host_workdir = host_workdir_from_source(mount_source_for(@bq2_rootfs_path))
-      return host_workdir if host_workdir
-      if seed_root = @seed_rootfs_path
-        host_workdir = host_workdir_from_source(mount_source_for(seed_root))
-        return host_workdir if host_workdir
-      end
-      host_workdir_from_source(mount_source_for(Path["/"]))
-    end
-
-    private def host_workdir_from_source(source : Path?) : Path?
-      return nil unless source
-      if source.basename == BQ2_DIR_NAME
-        seed_root = source.parent
-        return nil unless seed_root.basename == SEED_DIR_NAME
-        return seed_root.parent
-      end
-      return source.parent if source.basename == SEED_DIR_NAME
-      nil
-    end
-
-    # Resolve the bind-mount source for the given mount point using mountinfo.
-    private def mount_source_for(mount_point : Path) : Path?
-      target = File.realpath(mount_point)
-      File.read_lines("/proc/self/mountinfo").each do |line|
-        fields = line.split
-        separator = fields.index("-")
-        next unless separator
-        mount_root = fields[3]?
-        mount_target = fields[4]?
-        next unless mount_target && mount_root
-        begin
-          next unless File.realpath(mount_target) == target
-        rescue
-          next
-        end
-        if mount_root.starts_with?("/")
-          return Path[mount_root]
-        end
-        source = fields[separator + 2]?
-        next unless source && source.starts_with?("/")
-        return Path[source]
-      end
-      nil
-    rescue
-      nil
-    end
-
     # Return bind mounts to apply when entering the bq2 rootfs namespace.
     #
     # The system-from-sysroot phase relies on the sysroot toolchain from the
