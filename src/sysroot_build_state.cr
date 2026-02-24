@@ -322,7 +322,6 @@ module Bootstrap
 
     def filtered_phases(by_name : String = "all",
                         by_state : Bool = false,
-                        by_namespace : SysrootWorkspace? = nil,
                         by_packages : Array(String) = [] of String,) : Array(BuildPhase)
       selected_phases = @plan.phases.dup
       Log.debug { "Testing #{phase_names(selected_phases)} for inclusion in selected_phases" }
@@ -338,12 +337,6 @@ module Bootstrap
         end
       end
       Log.debug { "Phases #{phase_names(selected_phases)} remain after rejection by_state: #{by_state}" }
-
-      if by_namespace
-        selected_phases.reject! { |phase| phase.namespace == "host" } unless workspace.namespace.host?
-        selected_phases.reject! { |phase| phase.namespace == "seed" } if workspace.namespace.bq2?
-      end
-      Log.debug { "Phases #{phase_names(selected_phases)} remain after rejection by_namespace: #{by_namespace}" }
 
       if by_packages.present?
         requested = by_packages.uniq.to_set

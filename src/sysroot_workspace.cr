@@ -154,11 +154,6 @@ module Bootstrap
       update_namespace(Namespace::BQ2)
     end
 
-    def namespace_switch_required?(requested : String)
-      Log.debug { "Testing if #{requested} is #{@namespace}" }
-      @namespace != Namespace.parse(requested)
-    end
-
     # Enter the requested namespace by label, if needed.
     def enter_namespace(requested_label : String) : Nil
       requested = Namespace.parse(requested_label)

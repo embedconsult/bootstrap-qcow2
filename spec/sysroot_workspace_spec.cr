@@ -117,19 +117,6 @@ describe Bootstrap::SysrootWorkspace do
     end
   end
 
-  describe "#namespace_switch_required?" do
-    it "returns true only when a switch is required" do
-      with_tempdir do |tmpdir|
-        host_workdir = tmpdir / "host-workdir"
-        prepare_host_layout(host_workdir)
-        workspace = Bootstrap::SysrootWorkspace.new(host_workdir: host_workdir)
-
-        workspace.namespace_switch_required?("host").should be_false
-        workspace.namespace_switch_required?("seed").should be_true
-      end
-    end
-  end
-
   describe "#enter_seed_rootfs_namespace" do
     it "rejects transitions when not in host namespace" do
       with_tempdir do |tmpdir|

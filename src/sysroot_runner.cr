@@ -89,10 +89,10 @@ module Bootstrap
             Log.debug { "Marking phase #{phase_entry.name} as current" }
             @state.mark_current_phase(phase_entry.name)
           end
-          if @state.workspace.namespace_switch_required?(phase_entry.namespace)
+          if @state.workspace.namespace.label != phase_entry.namespace
             Log.info { "Entering namespace #{phase_entry.namespace} for phase #{phase_entry.name}" }
-            @state.workspace.enter_namespace(phase_entry.namespace)
           end
+          @state.workspace.enter_namespace(phase_entry.namespace)
           run_phase(phase_entry)
           if @resume
             next_phase = @state.plan.phases[idx + 1]?.try(&.name)
