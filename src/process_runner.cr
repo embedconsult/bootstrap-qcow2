@@ -155,6 +155,11 @@ module Bootstrap
         end
         yield buffer[0, read]
       end
+    rescue ex : IO::Error
+      # Concurrent process shutdown can race with pipe readers and surface as
+      # a transient "Closed stream" while draining output. Treat this as EOF so
+      # sysroot-runner continues reporting the real subprocess exit status.
+      raise ex unless ex.message == "Closed stream"
     end
 
     private class ThrottledOutput
