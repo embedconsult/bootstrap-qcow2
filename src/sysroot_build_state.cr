@@ -334,15 +334,7 @@ module Bootstrap
           remaining = phase.steps.reject { |step| completed?(phase.name, step.name) }
           Log.debug { "Remaining steps in phase '#{phase.name}': #{remaining}" }
           next nil if remaining.empty?
-          BuildPhase.new(
-            name: phase.name,
-            description: phase.description,
-            namespace: phase.namespace,
-            install_prefix: phase.install_prefix,
-            destdir: phase.destdir,
-            env: phase.env,
-            steps: remaining,
-          )
+          phase.with_steps(remaining)
         end
       end
       Log.debug { "Phases #{phase_names(selected_phases)} remain after rejection by_state: #{by_state}" }
@@ -364,15 +356,7 @@ module Bootstrap
         selected_phases = selected_phases.compact_map do |phase|
           steps = phase.steps.select { |step| by_packages.includes?(step.name) }
           next nil if steps.empty?
-          BuildPhase.new(
-            name: phase.name,
-            description: phase.description,
-            namespace: phase.namespace,
-            install_prefix: phase.install_prefix,
-            destdir: phase.destdir,
-            env: phase.env,
-            steps: steps,
-          )
+          phase.with_steps(steps)
         end
         raise "No matching packages found in selected phases: #{by_packages.join(", ")}" if selected_phases.empty?
       end
