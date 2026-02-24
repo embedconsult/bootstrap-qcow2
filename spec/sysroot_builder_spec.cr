@@ -113,8 +113,8 @@ describe Bootstrap::SysrootBuilder do
       phases["host-setup"].workdir.should be_nil
       phases["sysroot-from-seed"].workdir.should eq seed_workspace
       phases["rootfs-from-sysroot"].workdir.should eq seed_workspace
-      phases["system-from-sysroot"].workdir.should eq seed_workspace
       bq2_workspace = Bootstrap::SysrootWorkspace.workspace_from(Bootstrap::SysrootWorkspace::Namespace::BQ2, host_workdir).to_s
+      phases["system-from-sysroot"].workdir.should eq bq2_workspace
       phases["tools-from-system"].workdir.should eq bq2_workspace
       phases["finalize-rootfs"].workdir.should eq bq2_workspace
     end
@@ -163,8 +163,10 @@ describe Bootstrap::SysrootBuilder do
       sysroot_phase = plan.phases.find(&.name.==("sysroot-from-seed")).not_nil!
       sysroot_phase.install_prefix.should eq "/opt/sysroot"
       sysroot_phase.destdir.should be_nil
-      sysroot_phase.steps.size.should eq 4
+      sysroot_phase.steps.size.should eq 6
       sysroot_phase.steps.any? { |step| step.name == "seed-resolv-conf" }.should be_true
+      sysroot_phase.steps.any? { |step| step.name == "sysroot-libatomic-link-0" }.should be_true
+      sysroot_phase.steps.any? { |step| step.name == "sysroot-libatomic-link-1" }.should be_true
       sysroot_phase.steps.any? { |step| step.strategy == "apk-add" }.should be_false
       sysroot_phase.steps.find(&.name.==("pkg")).not_nil!.configure_flags.should eq ["--foo"]
 
