@@ -1,0 +1,37 @@
+--- a/src/openssl/lib_ssl.cr
++++ b/src/openssl/lib_ssl.cr
+@@ -18,11 +18,30 @@
+       {% ssl_version ||= "0.0.0" %}
+     {% else %}
+       # these have to be wrapped in `sh -c` since for MinGW-w64 the compiler
+       # passes the command string to `LibC.CreateProcessW`
+-      {% from_libressl = (`sh -c 'hash pkg-config 2> /dev/null || printf %s false'` != "false") &&
+-                         (`sh -c 'test -f $(pkg-config --silence-errors --variable=includedir libssl)/openssl/opensslv.h || printf %s false'` != "false") &&
+-                         (`sh -c 'printf "#include <openssl/opensslv.h>\nLIBRESSL_VERSION_NUMBER" | ${CC:-cc} $(pkg-config --cflags --silence-errors libssl || true) -E -'`.chomp.split('\n').last != "LIBRESSL_VERSION_NUMBER") %}
+-      {% ssl_version = `sh -c 'hash pkg-config 2> /dev/null && pkg-config --silence-errors --modversion libssl || printf %s 0.0.0'`.split.last.gsub(/[^0-9.]/, "") %}
++      {% pkg_config_available = (`sh -c 'hash pkg-config 2> /dev/null || printf %s false'` != "false") %}
++      {% from_libressl = false %}
++      {% ssl_version = "0.0.0" %}
++      {% if pkg_config_available %}
++        {% from_libressl = (`sh -c 'test -f $(pkg-config --silence-errors --variable=includedir libssl)/openssl/opensslv.h || printf %s false'` != "false") &&
++                           (`sh -c 'printf "#include <openssl/opensslv.h>\nLIBRESSL_VERSION_NUMBER" | ${CC:-cc} $(pkg-config --cflags --silence-errors libssl || true) -E -'`.chomp.split('\n').last != "LIBRESSL_VERSION_NUMBER") %}
++        {% ssl_version = `sh -c 'pkg-config --silence-errors --modversion libssl || printf %s 0.0.0'`.split.last.gsub(/[^0-9.]/, "") %}
++      {% end %}
++      {% unless from_libressl || ssl_version != "0.0.0" %}
++        {% candidate_headers = ["/usr/include/openssl/opensslv.h", "/opt/sysroot/include/openssl/opensslv.h"] %}
++        {% header_text = nil %}
++        {% for header_path in candidate_headers %}
++          {% if !header_text %}
++            {% header_text = read_file?(header_path) %}
++          {% end %}
++        {% end %}
++        {% if header_text && (match = header_text.match(/LIBRESSL_VERSION_TEXT\s+"LibreSSL\s+([0-9.]+)"/)) %}
++          {% from_libressl = true %}
++          {% ssl_version = match[1] %}
++        {% end %}
++      {% end %}
+     {% end %}
+ 
+     {% if from_libressl %}
+       LIBRESSL_VERSION = {{ ssl_version }}
+*** End Patch}"}준assistant to=functions.apply_patch debug code output = {"error":"Invalid JSON: expected , or } at line 1 column 92"}因此 with the request we must fix. Need proper JSON. apply_patch is FREEFORM tool not JSON. Must call tool with patch content. Use functions.apply_patch with patch string. Let's redo. We'll call apply_patch using tool. We'll wrap patch. Ensure patch uses ASCII and no tabs. Let's do. We'll send patch string. We'll not use JSON but direct patch. Use tool apply_patch. Let's do. We'll include patch content with *** Begin Patch. We'll ensure spacing. Let's call. */

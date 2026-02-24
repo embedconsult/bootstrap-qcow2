@@ -351,7 +351,10 @@ module Bootstrap
           DEFAULT_CRYSTAL,
           URI.parse("https://github.com/crystal-lang/crystal/archive/refs/tags/#{DEFAULT_CRYSTAL}.tar.gz"),
           strategy: "crystal-compiler",
-          patches: ["#{bootstrap_repo_dir}/patches/crystal-#{DEFAULT_CRYSTAL}/use-libcxx.patch"],
+          patches: [
+            "#{bootstrap_repo_dir}/patches/crystal-#{DEFAULT_CRYSTAL}/use-libcxx.patch",
+            "#{bootstrap_repo_dir}/patches/crystal-#{DEFAULT_CRYSTAL}/detect-libressl-without-pkg-config.patch",
+          ],
           phases: ["sysroot-from-seed", "system-from-sysroot"],
         ),
         PackageSpec.new(
@@ -907,18 +910,23 @@ module Bootstrap
 
     # Return the /etc/profile content for the generated rootfs.
     private def rootfs_profile_content : String
+      target = sysroot_target_triple
+      cc = "clang --target=#{target} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld"
+      cxx = "clang++ --target=#{target} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -stdlib=libc++"
       lines = [
         "# /etc/profile for bootstrap-qcow2 rootfs.",
         "export PATH=\"/usr/sbin:/usr/bin:/sbin:/bin\"",
         "export HOME=\"${HOME:-/root}\"",
         "export CODEX_HOME=\"${CODEX_HOME:-/work}\"",
-        "export CC=clang",
-        "export CXX=clang++",
+        "export BQ2_TARGET_TRIPLE=\"#{target}\"",
+        "export CC=\"#{cc}\"",
+        "export CXX=\"#{cxx}\"",
         "export AR=llvm-ar",
         "export NM=llvm-nm",
         "export RANLIB=llvm-ranlib",
         "export STRIP=llvm-strip",
         "export CRYSTAL_PATH=\"/usr/share/crystal/src\"",
+        "export CRYSTAL_CONFIG_TARGET=\"#{target}\"",
         "export CHARSET=UTF-8",
         "export LANG=C.UTF-8",
         "export LC_COLLATE=C",
@@ -1000,14 +1008,18 @@ module Bootstrap
 
     # Return environment variables for the prefix-free toolchain in the bq2 rootfs.
     private def bq2_phase_env : Hash(String, String)
+      target = sysroot_target_triple
+      cc = "clang --target=#{target} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld"
+      cxx = "clang++ --target=#{target} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -stdlib=libc++"
       {
-        "PATH"   => "/usr/bin:/bin:/usr/sbin:/sbin",
-        "CC"     => "clang --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld",
-        "CXX"    => "clang++ --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld",
-        "AR"     => "llvm-ar",
-        "NM"     => "llvm-nm",
-        "RANLIB" => "llvm-ranlib",
-        "STRIP"  => "llvm-strip",
+        "PATH"                  => "/usr/bin:/bin:/usr/sbin:/sbin",
+        "CC"                    => cc,
+        "CXX"                   => cxx,
+        "AR"                    => "llvm-ar",
+        "NM"                    => "llvm-nm",
+        "RANLIB"                => "llvm-ranlib",
+        "STRIP"                 => "llvm-strip",
+        "CRYSTAL_CONFIG_TARGET" => target,
       }
     end
 
