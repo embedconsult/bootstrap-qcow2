@@ -3,8 +3,8 @@ require "json"
 require "uri"
 
 module Bootstrap
-  # Utility helpers for interacting with Codex-adjacent services.
-  module CodexUtils
+  # Utility helpers for interacting with GitHub services.
+  module GitHubUtils
     # Extracts a GitHub token from a git-credentials file. Supports the standard
     # x-access-token entry format used by the CLI.
     #
@@ -41,7 +41,7 @@ module Bootstrap
       }.to_json
 
       headers = HTTP::Headers{
-        "User-Agent"    => "codex-cli",
+        "User-Agent"    => "bq2-cli",
         "Authorization" => "token #{token}",
         "Accept"        => "application/vnd.github+json",
       }
@@ -156,7 +156,7 @@ module Bootstrap
 
     private def self.github_headers(token : String) : HTTP::Headers
       HTTP::Headers{
-        "User-Agent"    => "codex-cli",
+        "User-Agent"    => "bq2-cli",
         "Authorization" => "token #{token}",
         "Accept"        => "application/vnd.github+json",
       }

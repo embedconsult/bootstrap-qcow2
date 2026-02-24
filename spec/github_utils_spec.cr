@@ -1,7 +1,7 @@
 require "./spec_helper"
 require "json"
 
-describe Bootstrap::CodexUtils do
+describe Bootstrap::GitHubUtils do
   it "extracts the GitHub token from git-credentials" do
     token = "github_pat_TEST"
     credentials = "https://x-access-token:#{token}@github.com"
@@ -10,7 +10,7 @@ describe Bootstrap::CodexUtils do
       file.print(credentials)
       file.flush
 
-      Bootstrap::CodexUtils.extract_github_token(Path[file.path]).should eq token
+      Bootstrap::GitHubUtils.extract_github_token(Path[file.path]).should eq token
     ensure
       file.close
     end
@@ -31,7 +31,7 @@ describe Bootstrap::CodexUtils do
         HTTP::Client::Response.new(201, response_body)
       end
 
-      url = Bootstrap::CodexUtils.create_pull_request(
+      url = Bootstrap::GitHubUtils.create_pull_request(
         "org/repo",
         "title",
         "head-branch",
@@ -66,7 +66,7 @@ describe Bootstrap::CodexUtils do
         HTTP::Client::Response.new(201, response_body)
       end
 
-      url = Bootstrap::CodexUtils.create_issue_comment(
+      url = Bootstrap::GitHubUtils.create_issue_comment(
         "org/repo",
         40,
         "hello",
@@ -131,7 +131,7 @@ describe Bootstrap::CodexUtils do
         end
       end
 
-      feedback = Bootstrap::CodexUtils.fetch_pull_request_feedback(
+      feedback = Bootstrap::GitHubUtils.fetch_pull_request_feedback(
         "org/repo",
         40,
         credentials_path: Path[file.path],
