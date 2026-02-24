@@ -142,7 +142,7 @@ module Bootstrap
     def enter_seed_rootfs_namespace : Nil
       raise "Expected host namespace" unless @namespace == Namespace::Host
       rootfs = seed_rootfs_path || raise "Missing seed rootfs path"
-      SysrootNamespace.enter_rootfs(rootfs.to_s)
+      SysrootNamespace.enter_rootfs_with_setup(rootfs.to_s, extra_binds: extra_binds)
       update_namespace(Namespace::Seed)
     end
 
@@ -150,7 +150,7 @@ module Bootstrap
       unless @namespace == Namespace::Seed || @namespace == Namespace::Host
         raise "Expected host or seed namespace"
       end
-      SysrootNamespace.enter_rootfs(bq2_rootfs_path.to_s)
+      SysrootNamespace.enter_rootfs_with_setup(bq2_rootfs_path.to_s, extra_binds: extra_binds)
       update_namespace(Namespace::BQ2)
     end
 

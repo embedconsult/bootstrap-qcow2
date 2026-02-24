@@ -155,10 +155,13 @@ module Bootstrap
         return 1
       end
 
-      SysrootNamespace.enter_rootfs(rootfs_value, extra_binds: extra_binds)
-      reset_environment(home, extra_env)
-      apply_toolchain_env_defaults
-      AlpineSetup.install_sysroot_runner_packages if run_alpine_setup
+      SysrootNamespace.enter_rootfs_with_setup(
+        rootfs_value,
+        extra_binds: extra_binds,
+        home: home,
+        extra_env: extra_env,
+        run_alpine_setup: run_alpine_setup,
+      )
       Log.info { "Executing command: #{command.join(" ")}" }
       STDERR.puts "Executing command: #{command.join(" ")}"
       Process.exec(command.first, command[1..])
