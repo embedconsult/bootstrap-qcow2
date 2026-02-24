@@ -109,6 +109,7 @@ end
 
 class RecordingRunner < Bootstrap::StepRunner
   getter calls = [] of NamedTuple(phase: String, name: String, workdir: String?, strategy: String, configure_flags: Array(String), env: Hash(String, String))
+  getter phase_environment_calls = [] of NamedTuple(phase: String, value: String?)
   property status : Bool = true
   property exit_code : Int32 = 0
   getter workdir : Path
@@ -125,6 +126,15 @@ class RecordingRunner < Bootstrap::StepRunner
     @calls << {phase: phase.name, name: step.name, workdir: step.workdir, strategy: step.strategy, configure_flags: step.configure_flags, env: step.env}
     raise "Command failed (#{@exit_code})" unless @status
     FakeStatus.new(@status, @exit_code)
+  end
+
+  # Record phase environment setup calls while preserving base behavior.
+  def with_phase_environment(phase : Bootstrap::BuildPhase, &block : ->)
+    @phase_environment_calls << {phase: phase.name, value: ENV["BQ2_PHASE_MARKER"]?}
+    super(phase) do
+      @phase_environment_calls << {phase: phase.name, value: ENV["BQ2_PHASE_MARKER"]?}
+      yield
+    end
   end
 
   struct FakeStatus

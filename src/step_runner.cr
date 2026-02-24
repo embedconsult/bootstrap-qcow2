@@ -49,6 +49,21 @@ module Bootstrap
       @report_dir = nil
     end
 
+    # Apply phase-level environment variables for the duration of *block*.
+    #
+    # This ensures phase-scoped environment values are available to helper
+    # routines that might spawn processes without an explicit env hash.
+    # The prior environment is restored after *block* returns (or raises).
+    def with_phase_environment(phase : BuildPhase, &block : ->)
+      previous_env = Hash(String, String).new
+      ENV.each { |key, value| previous_env[key] = value }
+      phase.env.each { |key, value| ENV[key] = value }
+      yield
+    ensure
+      ENV.clear
+      previous_env.try(&.each { |key, value| ENV[key] = value })
+    end
+
     # Run a build step using the selected strategy.
     #
     # The effective install destination is computed from the phase defaults

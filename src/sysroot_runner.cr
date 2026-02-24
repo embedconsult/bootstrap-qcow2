@@ -119,7 +119,9 @@ module Bootstrap
         if destdir = phase.destdir
           FileUtils.mkdir_p(destdir)
         end
-        run_steps(phase)
+        @step_runner.with_phase_environment(phase) do
+          run_steps(phase)
+        end
         phase_succeeded = true
       ensure
         phase_duration = monotonic_elapsed_since(phase_started_at)
