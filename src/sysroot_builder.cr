@@ -1578,7 +1578,7 @@ module Bootstrap
 
       if workspace.host_workdir.nil?
         host_workdir ||= workspace.bq2_rootfs_path.parent
-        STDERR.puts "Workspace does not include host workdir; defaulting to #{host_workdir} (pass --workdir to override)"
+        Log.warn { "Workspace does not include host workdir; defaulting to #{host_workdir} (pass --workdir to override)" }
         workspace.host_workdir = host_workdir
       end
 
