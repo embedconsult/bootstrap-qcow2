@@ -124,4 +124,43 @@ describe Bootstrap::StepRunner do
     pending "fails download_and_verify on non-success HTTP responses (HTTP server unavailable: #{server_reason || "unknown"})" do
     end
   end
+
+  it "excludes /opt from tarball payloads" do
+    with_tempdir do |dir|
+      host_workdir = dir / "sysroot"
+      workspace = Bootstrap::SysrootWorkspace.create(host_workdir: host_workdir)
+      rootfs = dir / "rootfs"
+      FileUtils.mkdir_p(rootfs / "opt/sysroot")
+      FileUtils.mkdir_p(rootfs / "usr/bin")
+      File.write(rootfs / "opt/sysroot/tool", "tool")
+      File.write(rootfs / "usr/bin/hello", "hello")
+
+      output = dir / "rootfs.tar.gz"
+      step = Bootstrap::BuildStep.new(
+        name: "rootfs-tarball",
+        strategy: "tarball",
+        workdir: "/",
+        configure_flags: [] of String,
+        patches: [] of String,
+        install_prefix: output.to_s,
+        destdir: rootfs.to_s,
+      )
+      phase = Bootstrap::BuildPhase.new(
+        name: "finalize-rootfs",
+        description: "tar",
+        namespace: "bq2",
+        install_prefix: "/usr",
+        steps: [step],
+      )
+
+      runner = Bootstrap::StepRunner.new(workspace: workspace)
+      runner.run(phase, step)
+
+      listing = IO::Memory.new
+      Process.run("tar", ["-tzf", output.to_s], output: listing)
+      listing_str = listing.to_s
+      listing_str.should contain("./usr/bin/hello")
+      listing_str.should_not contain("./opt/sysroot/tool")
+    end
+  end
 end

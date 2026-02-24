@@ -109,12 +109,12 @@ describe Bootstrap::SysrootBuilder do
       builder = Bootstrap::SysrootBuilder.new
       host_workdir = builder.host_workdir
       seed_workspace = Bootstrap::SysrootWorkspace.workspace_from(Bootstrap::SysrootWorkspace::Namespace::Seed, host_workdir).to_s
+      bq2_workspace = Bootstrap::SysrootWorkspace.workspace_from(Bootstrap::SysrootWorkspace::Namespace::BQ2, host_workdir).to_s
       phases = builder.phase_specs.to_h { |spec| {spec.phase.name, spec} }
       phases["host-setup"].workdir.should be_nil
       phases["sysroot-from-seed"].workdir.should eq seed_workspace
       phases["rootfs-from-sysroot"].workdir.should eq seed_workspace
-      phases["system-from-sysroot"].workdir.should eq seed_workspace
-      bq2_workspace = Bootstrap::SysrootWorkspace.workspace_from(Bootstrap::SysrootWorkspace::Namespace::BQ2, host_workdir).to_s
+      phases["system-from-sysroot"].workdir.should eq bq2_workspace
       phases["tools-from-system"].workdir.should eq bq2_workspace
       phases["finalize-rootfs"].workdir.should eq bq2_workspace
     end
@@ -135,6 +135,7 @@ describe Bootstrap::SysrootBuilder do
       ca_bundle.should contain("BEGIN CERTIFICATE")
 
       system_phase = builder.phase_specs.find { |spec| spec.phase.name == "system-from-sysroot" }.not_nil!
+      system_phase.phase.namespace.should eq("bq2")
       system_zlib_env = system_phase.env_overrides["zlib"]
       system_zlib_env["CFLAGS"].should contain("-fPIC")
 

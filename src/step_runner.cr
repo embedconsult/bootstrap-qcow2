@@ -199,6 +199,8 @@ module Bootstrap
             "--exclude=./run/**",
             "--exclude=./tmp",
             "--exclude=./tmp/**",
+            "--exclude=./opt",
+            "--exclude=./opt/**",
             "--exclude=./workspace",
             "--exclude=./workspace/**",
             "--exclude=./work",

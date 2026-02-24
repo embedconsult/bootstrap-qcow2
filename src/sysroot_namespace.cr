@@ -233,6 +233,7 @@ module Bootstrap
 
     # Reset the environment to a minimal expected set before entering the rootfs.
     private def self.reset_environment(home : String, extra_env : Hash(String, String) = {} of String => String) : Nil
+      Log.debug { "Resetting environment" }
       ENV.clear
       ENV["HOME"] = home
       ENV["PATH"] = DEFAULT_PATH
@@ -383,6 +384,7 @@ module Bootstrap
                           extra_binds : Array(Tuple(Path, Path)) = [] of Tuple(Path, Path),
                           bind_host_dev : Bool = true,
                           unmount_old_root : Bool = true)
+      Log.debug { "enter_rootfs(#{rootfs}, #{extra_binds}, #{bind_host_dev}, #{unmount_old_root}" }
       unshare_namespaces
       root_path = Path[rootfs].expand
       bind_mount_rootfs(root_path)

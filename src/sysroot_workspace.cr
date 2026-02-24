@@ -146,11 +146,24 @@ module Bootstrap
       update_namespace(Namespace::Seed)
     end
 
+    # Return bind mounts required before entering the bq2 namespace.
+    #
+    # This always binds the seed sysroot prefix into /opt/sysroot inside bq2 so
+    # the system-from-sysroot phase can run in bq2 while still reusing the
+    # toolchain produced in the seed rootfs.
+    def bq2_namespace_binds : Array(Tuple(Path, Path))
+      binds = @extra_binds.dup
+      if source_sysroot = @sysroot_path
+        binds << {source_sysroot, Path[SYSROOT_DIR_NAME]}
+      end
+      binds.uniq
+    end
+
     def enter_bq2_rootfs_namespace : Nil
       unless @namespace == Namespace::Seed || @namespace == Namespace::Host
         raise "Expected host or seed namespace"
       end
-      SysrootNamespace.enter_rootfs(bq2_rootfs_path.to_s)
+      SysrootNamespace.enter_rootfs(bq2_rootfs_path.to_s, extra_binds: bq2_namespace_binds)
       update_namespace(Namespace::BQ2)
     end
 

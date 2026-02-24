@@ -117,6 +117,21 @@ describe Bootstrap::SysrootWorkspace do
     end
   end
 
+  describe "#bq2_namespace_binds" do
+    it "includes the seed sysroot bind and caller-provided binds" do
+      with_tempdir do |tmpdir|
+        host_workdir = tmpdir / "host-workdir"
+        prepare_host_layout(host_workdir)
+        custom_src = tmpdir / "custom"
+        workspace = Bootstrap::SysrootWorkspace.new(host_workdir: host_workdir, extra_binds: [{custom_src, Path["custom"]}])
+
+        binds = workspace.bq2_namespace_binds
+        binds.should contain({host_workdir / Path["seed-rootfs/opt/sysroot"], Path["opt/sysroot"]})
+        binds.should contain({custom_src, Path["custom"]})
+      end
+    end
+  end
+
   describe "#namespace_switch_required?" do
     it "returns true only when a switch is required" do
       with_tempdir do |tmpdir|
