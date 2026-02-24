@@ -51,6 +51,16 @@ describe Bootstrap::SysrootBuilder do
     end
   end
 
+  it "builds a seed rootfs spec for the published bq2 seed tarball" do
+    with_temp_workdir do |_dir|
+      builder = Bootstrap::SysrootBuilder.new(seed: Bootstrap::SysrootBuilder::BQ2_SEED_NAME)
+      spec = builder.seed_rootfs_spec
+      spec.name.should eq "bootstrap-rootfs"
+      spec.version.should eq Bootstrap::SysrootBuilder::BQ2_SEED_NAME
+      spec.url.to_s.should eq Bootstrap::SysrootBuilder::DEFAULT_BQ2_SEED_URL
+    end
+  end
+
   it "lists default packages" do
     with_temp_workdir do |_dir|
       names = Bootstrap::SysrootBuilder.new.packages.map(&.name)

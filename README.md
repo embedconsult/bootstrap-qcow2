@@ -47,6 +47,12 @@ data/sysroot/seed-rootfs/
 7 directories, 1 file
 ```
 
+To validate self-hosting with the published 0.3.3 seed rootfs tarball, generate an alternate plan with:
+
+```console
+$ bin/sysroot-builder --seed bq2-rootfs-0.3.3
+```
+
 ### Build the target rootfs
 
 #### Just build everything
