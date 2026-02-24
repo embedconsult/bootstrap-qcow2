@@ -34,6 +34,12 @@ shards build
 $ bin/sysroot-builder
 Prepared sysroot workspace at data/sysroot
 Wrote build plan at data/sysroot/seed-rootfs/bq2-rootfs/var/lib/sysroot-build-plan.json
+
+To validate self-hosting with the published 0.3.3 seed rootfs tarball, generate an alternate plan with:
+
+```console
+$ bin/sysroot-builder --seed bq2-rootfs-0.3.3
+```
 $ tree data/sysroot/seed-rootfs/
 data/sysroot/seed-rootfs/
 ├── bq2-rootfs

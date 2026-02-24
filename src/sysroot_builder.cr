@@ -43,6 +43,7 @@ module Bootstrap
       DEFAULT_ARCH = "aarch64"
     {% end %}
     DEFAULT_ROOTFS_SEED    = "Alpine"
+    BQ2_SEED_NAME          = "bq2-rootfs-0.3.3"
     DEFAULT_ROOTFS_BRANCH  = "v3.23"
     DEFAULT_ROOTFS_VERSION = "3.23.2"
     DEFAULT_LLVM_VER       = "18.1.7"
@@ -67,7 +68,9 @@ module Bootstrap
     DEFAULT_FOSSIL         = "2.25"
     DEFAULT_GIT            = "2.45.2"
     DEFAULT_CRYSTAL        = "1.19.1"
-    SHARDS_CACHE_DIR       = "/tmp/.shards-cache" # Cache directory name for prefetched shards dependencies.
+    # Source: https://dl.beagle.cc/images/bq2-rootfs-0.3.3.tar.gz
+    DEFAULT_BQ2_SEED_URL = "https://dl.beagle.cc/images/bq2-rootfs-0.3.3.tar.gz"
+    SHARDS_CACHE_DIR     = "/tmp/.shards-cache" # Cache directory name for prefetched shards dependencies.
     # Source: https://curl.se/ca/cacert.pem (Mozilla CA certificate bundle).
     CA_BUNDLE_PEM      = {{ read_file("#{__DIR__}/../data/ca-bundle/ca-certificates.crt") }}
     DEFAULT_NAMESERVER = "8.8.8.8"
@@ -166,6 +169,9 @@ module Bootstrap
         url = URI.parse("https://dl-cdn.alpinelinux.org/alpine/#{DEFAULT_ROOTFS_BRANCH}/releases/#{@architecture}/#{file}")
         checksum_url = URI.parse("#{url}.sha256") rescue nil
         PackageSpec.new("bootstrap-rootfs", "#{DEFAULT_ROOTFS_VERSION}", url, nil, checksum_url)
+      elsif @seed == BQ2_SEED_NAME
+        url = URI.parse(DEFAULT_BQ2_SEED_URL)
+        PackageSpec.new("bootstrap-rootfs", BQ2_SEED_NAME, url)
       else
         raise "Not currently defined seed: #{@seed}"
       end
