@@ -268,13 +268,8 @@ module Bootstrap
       end
     end
 
-    # Return a monotonic timestamp compatible with multiple Crystal versions.
     private def monotonic_now
-      {% if Time.class.has_method?(:instant) %}
-        Time.instant
-      {% else %}
-        Time.monotonic
-      {% end %}
+      Time.monotonic
     end
 
     # Return elapsed monotonic time since +started_at+.

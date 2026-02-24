@@ -67,7 +67,7 @@ module Bootstrap
         marker_match = found_marker.not_nil!
         @namespace = marker_match[:namespace]
         if @namespace == Namespace::Host
-          @host_workdir = Path["#{DEFAULT_HOST_WORKDIR}"].expand
+          @host_workdir = Path[DEFAULT_HOST_WORKDIR].expand
         end
       else
         @host_workdir = @host_workdir.not_nil!.expand
@@ -81,8 +81,8 @@ module Bootstrap
       @sysroot_path = self.class.sysroot_from(@namespace, @host_workdir)
       @bq2_rootfs_path = self.class.bq2_rootfs_from(@namespace, @host_workdir)
       @workspace_path = self.class.workspace_from(@namespace, @host_workdir)
-      @marker_path = @bq2_rootfs_path / Path["#{ROOTFS_MARKER_NAME}"]
-      @log_path = @bq2_rootfs_path / Path["#{LOG_DIR_NAME}"]
+      @marker_path = @bq2_rootfs_path / Path[ROOTFS_MARKER_NAME]
+      @log_path = @bq2_rootfs_path / Path[LOG_DIR_NAME]
 
       found_marker = File.exists?(@marker_path)
       raise "Missing BQ2 rootfs marker at #{@marker_path}" unless found_marker
@@ -91,7 +91,7 @@ module Bootstrap
     def self.seed_rootfs_from(namespace : Namespace, host_workdir : Path? = nil)
       case namespace
       in .host?
-        host_workdir.not_nil! / Path["#{SEED_DIR_NAME}"]
+        host_workdir.not_nil! / Path[SEED_DIR_NAME]
       in .seed?
         Path["/"]
       in .bq2?
@@ -103,17 +103,17 @@ module Bootstrap
       seed_rootfs_path = seed_rootfs_from(namespace, host_workdir)
       return nil if seed_rootfs_path.nil?
       prefix = seed_rootfs_path.not_nil!
-      prefix / Path["#{SYSROOT_DIR_NAME}"]
+      prefix / Path[SYSROOT_DIR_NAME]
     end
 
     def self.bq2_rootfs_from(namespace : Namespace, host_workdir : Path? = nil)
       return Path["/"] if namespace.bq2?
       seed_rootfs_path = seed_rootfs_from(namespace, host_workdir)
-      seed_rootfs_path.not_nil! / Path["#{BQ2_DIR_NAME}"]
+      seed_rootfs_path.not_nil! / Path[BQ2_DIR_NAME]
     end
 
     def self.workspace_from(namespace : Namespace, host_workdir : Path? = nil)
-      bq2_rootfs_from(namespace, host_workdir) / Path["#{WORKSPACE_DIR_NAME}"]
+      bq2_rootfs_from(namespace, host_workdir) / Path[WORKSPACE_DIR_NAME]
     end
 
     # Create a workspace rooted at *host_workdir*, ensuring marker + dirs exist.
@@ -125,8 +125,8 @@ module Bootstrap
       workspace.sysroot_path = sysroot_from(workspace.namespace, workspace.host_workdir)
       workspace.bq2_rootfs_path = bq2_rootfs_from(workspace.namespace, workspace.host_workdir)
       workspace.workspace_path = workspace_from(workspace.namespace, workspace.host_workdir)
-      workspace.marker_path = workspace.bq2_rootfs_path / Path["#{ROOTFS_MARKER_NAME}"]
-      workspace.log_path = workspace.bq2_rootfs_path / Path["#{LOG_DIR_NAME}"]
+      workspace.marker_path = workspace.bq2_rootfs_path / Path[ROOTFS_MARKER_NAME]
+      workspace.log_path = workspace.bq2_rootfs_path / Path[LOG_DIR_NAME]
       FileUtils.mkdir_p(workspace.sysroot_path.not_nil!)
       FileUtils.mkdir_p(workspace.workspace_path)
       FileUtils.mkdir_p(workspace.bq2_rootfs_path)
@@ -192,8 +192,8 @@ module Bootstrap
       @sysroot_path = self.class.sysroot_from(@namespace, @host_workdir)
       @bq2_rootfs_path = self.class.bq2_rootfs_from(@namespace, @host_workdir)
       @workspace_path = self.class.workspace_from(@namespace, @host_workdir)
-      @marker_path = @bq2_rootfs_path / Path["#{ROOTFS_MARKER_NAME}"]
-      @log_path = @bq2_rootfs_path / Path["#{LOG_DIR_NAME}"]
+      @marker_path = @bq2_rootfs_path / Path[ROOTFS_MARKER_NAME]
+      @log_path = @bq2_rootfs_path / Path[LOG_DIR_NAME]
     end
   end
 end

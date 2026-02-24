@@ -149,11 +149,6 @@ module Bootstrap
       STDERR.puts "Entering namespace with rootfs=#{rootfs_value}"
       STDERR.puts "Bind mounts: #{extra_binds.map { |(src, dst)| "#{src}:#{dst}" }.join(", ")}"
       STDERR.puts "Command: #{command.join(" ")}"
-      unless Dir.exists?(rootfs_value)
-        Log.error { "Rootfs path does not exist: #{rootfs_value}" }
-        STDERR.puts "Rootfs path does not exist: #{rootfs_value}"
-        return 1
-      end
 
       SysrootNamespace.enter_rootfs(rootfs_value, extra_binds: extra_binds)
       reset_environment(home, extra_env)

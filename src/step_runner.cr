@@ -76,212 +76,248 @@ module Bootstrap
       workdir = step.workdir
       cpus = (System.cpu_count || 1).to_i32
       Log.info { "Starting #{step.strategy} build for #{step.name} in #{workdir || "(no chdir)"} (cpus=#{cpus})" }
-      run_block = -> {
-        @command_log_prefix = log_prefix_for(phase, step)
+      @command_log_prefix = log_prefix_for(phase, step)
+      env = effective_env(phase, step)
+      install_prefix = step.install_prefix || phase.install_prefix
+      destdir = step.destdir || phase.destdir
+      execute = -> {
         apply_patches(step.patches)
-        env = effective_env(phase, step)
-        install_prefix = step.install_prefix || phase.install_prefix
-        destdir = step.destdir || phase.destdir
-        case step.strategy
-        when "cmake"
-          step_root = workdir || "."
-          build_dir = step.build_dir || step_root
-          bootstrap_path = File.join(step_root, "bootstrap")
-          had_build_files = File.exists?(File.join(build_dir, "CMakeCache.txt")) ||
-                            File.exists?(File.join(build_dir, "Makefile")) ||
-                            Dir.exists?(File.join(build_dir, "CMakeFiles"))
-          FileUtils.mkdir_p(build_dir)
-          Dir.cd(build_dir) do
-            # CMake's bootstrap script only parallelizes when --parallel is set.
-            bootstrap_argv = [bootstrap_path, "--parallel=#{cpus}", "--prefix=#{install_prefix}"]
-            if step.configure_flags.size > 0
-              bootstrap_argv << "--"
-              bootstrap_argv.concat(step.configure_flags)
-            end
-            run_cmd(bootstrap_argv, env: env)
-            if (step.clean_build || had_build_files) && File.exists?("Makefile")
-              run_cmd(["make", "clean"], env: env)
-            end
-            run_cmd(["make", "-j#{cpus}"], env: env)
-            run_make_install(destdir, env)
-          end
-        when "busybox"
-          run_cmd(["make", "defconfig"], env: env)
-          if (config_tool = env["BQ2_KCONFIG_CONFIG_TOOL"]?) && File.exists?(config_tool)
-            run_cmd([config_tool, "--file", ".config", "--disable", "STATIC_LIBGCC"], env: env)
-            run_cmd(["make", "silentoldconfig"], env: env)
-          else
-            Log.warn { "Skipping BusyBox Kconfig update; set BQ2_KCONFIG_CONFIG_TOOL to disable STATIC_LIBGCC" }
-          end
-          run_cmd(["make", "-j#{cpus}"], env: env)
-          install_root = destdir || install_prefix
-          run_cmd(["make", "CONFIG_PREFIX=#{install_root}", "install"], env: env)
-        when "makefile-classic"
-          makefile = "Makefile.bq2"
-          raise "Missing #{makefile} in #{workdir || Dir.current}" unless File.exists?(makefile)
-          run_cmd(["make", "-f", makefile, "-j#{cpus}"], env: env)
-          if destdir
-            run_cmd(["make", "-f", makefile, "DESTDIR=#{destdir}", "install"], env: env)
-          else
-            run_cmd(["make", "-f", makefile, "install"], env: env)
-          end
-        when "copy-tree"
-          raise "copy-tree requires step.install_prefix (destination path)" unless step.install_prefix
-          install_root = destdir ? "#{destdir}#{install_prefix}" : install_prefix
-          FileUtils.mkdir_p(install_root)
-          run_cmd(["cp", "-a", ".", install_root], env: env)
-        when "write-file"
-          raise "write-file requires step.install_prefix (file path)" unless step.install_prefix
-          content = step.content || step.env["CONTENT"]?
-          raise "write-file requires env CONTENT" unless content
-          target = destdir ? "#{destdir}#{install_prefix}" : install_prefix
-          FileUtils.mkdir_p(File.dirname(target))
-          File.write(target, content)
-        when "alpine-setup"
-          AlpineSetup.install_sysroot_runner_packages
-        when "apk-add"
-          packages = step.packages
-          raise "apk-add requires step.packages" unless packages
-          AlpineSetup.apk_add(packages)
-        when "download-sources"
-          download_sources(step)
-        when "extract-sources"
-          extract_sources(step)
-        when "populate-seed"
-          extract_sources(step)
-        when "prefetch-shards"
-          prefetch_shards(step, env)
-        when "prepare-rootfs"
-          idx = 0
-          wrote = false
-          loop do
-            path_key = "FILE_#{idx}_PATH"
-            content_key = "FILE_#{idx}_CONTENT"
-            path = step.env[path_key]?
-            content = step.env[content_key]?
-            break unless path || content
-            raise "prepare-rootfs requires #{path_key}" unless path
-            raise "prepare-rootfs requires #{content_key}" unless content
-            target = destdir ? "#{destdir}#{path}" : path
-            FileUtils.mkdir_p(File.dirname(target))
-            File.write(target, content)
-            wrote = true
-            idx += 1
-          end
-          raise "prepare-rootfs wrote no files" unless wrote
-        when "symlink"
-          raise "symlink requires step.install_prefix (destination)" unless step.install_prefix
-          source = step.content || step.env["CONTENT"]?
-          raise "symlink requires content (source path)" unless source
-          target = destdir ? "#{destdir}#{install_prefix}" : install_prefix
-          FileUtils.mkdir_p(File.dirname(target))
-          FileUtils.rm_rf(target) if File.exists?(target) || File.symlink?(target)
-          File.symlink(source, target)
-        when "remove-tree"
-          raise "remove-tree requires step.install_prefix (path to remove)" unless step.install_prefix
-          remove_root = destdir ? "#{destdir}#{install_prefix}" : install_prefix
-          raise "Refusing to remove #{remove_root}" if remove_root == "/" || remove_root.empty?
-          FileUtils.rm_rf(remove_root)
-        when "tarball"
-          output = step.install_prefix
-          raise "tarball requires step.install_prefix (output path)" unless output
-          output = output.not_nil!
-          source_root = workdir || "/"
-          if destdir
-            if source_root.starts_with?(destdir)
-              # Already rooted at the destdir.
-            elsif source_root == "/"
-              source_root = destdir
-            elsif source_root.starts_with?("/")
-              source_root = "#{destdir}#{source_root}"
-            else
-              source_root = File.join(destdir, source_root)
-            end
-          end
-          # TODO: Replace this logic with call to TarWriter.write_gz
-          raise "Missing tarball source #{source_root}" unless Dir.exists?(source_root)
-          FileUtils.mkdir_p(File.dirname(output))
-          tar_excludes = [
-            # Exclude mountpoints and runtime-managed paths so the rootfs tarball
-            # contains only the prefix-free filesystem payload.
-            "--exclude=./proc",
-            "--exclude=./proc/**",
-            "--exclude=./sys",
-            "--exclude=./sys/**",
-            "--exclude=./dev",
-            "--exclude=./dev/**",
-            "--exclude=./run",
-            "--exclude=./run/**",
-            "--exclude=./tmp",
-            "--exclude=./tmp/**",
-            "--exclude=./workspace",
-            "--exclude=./workspace/**",
-            "--exclude=./work",
-            "--exclude=./work/**",
-            "--exclude=./var/lib",
-            "--exclude=./var/lib/**",
-            "--exclude=./.bq2-rootfs",
-          ]
-          run_cmd(["tar", "-czf", output] + tar_excludes + ["-C", source_root, "."], env: env)
-        when "linux-headers"
-          install_root = destdir ? "#{destdir}#{install_prefix}" : install_prefix
-          run_cmd(["make"] + step.configure_flags + ["headers"], env: env)
-          include_dest = File.join(install_root, "include")
-          FileUtils.mkdir_p(include_dest)
-          run_cmd(["cp", "-a", "usr/include/.", include_dest], env: env)
-        when "cmake-project"
-          run_cmake_project(step, env, install_prefix, destdir, cpus)
-        when "crystal"
-          run_cmd(["shards", "build"], env: env)
-          bin_prefix = destdir ? "#{destdir}#{install_prefix}" : install_prefix
-          run_cmd(["install", "-d", "#{bin_prefix}/bin"], env: env)
-          Dir.glob("bin/*").each do |artifact|
-            run_cmd(["install", "-m", "0755", artifact, "#{bin_prefix}/bin/"], env: env)
-          end
-        when "crystal-build"
-          if File.exists?("shard.yml") && run_shards_install?(env)
-            run_cmd(["shards", "install"], env: env)
-          elsif File.exists?("shard.yml")
-            Log.info { "Skipping shards install for #{step.name} (prefetched during host setup)" }
-          end
-          run_cmd(["crystal", "build"] + step.configure_flags, env: env)
-          bin_prefix = destdir ? "#{destdir}#{install_prefix}" : install_prefix
-          run_cmd(["install", "-d", "#{bin_prefix}/bin"], env: env)
-          Dir.glob("bin/*").each do |artifact|
-            run_cmd(["install", "-m", "0755", artifact, "#{bin_prefix}/bin/"], env: env)
-          end
-        when "crystal-compiler"
-          FileUtils.rm_rf(".build") if Dir.exists?(".build")
-          run_cmd(["make", "-j#{cpus}", "crystal"], env: env)
-          install_env = destdir ? env.merge({"DESTDIR" => destdir}) : env
-          run_cmd(["make", "install", "PREFIX=#{install_prefix}"], env: install_env)
-        else # autotools/default
-          if File.exists?("configure")
-            if step.clean_build && File.exists?("Makefile")
-              status = run_cmd_status(["make", "distclean"], env: env)
-              unless status.success?
-                Log.warn { "make distclean failed (#{status.exit_code}); attempting make clean" }
-                status = run_cmd_status(["make", "clean"], env: env)
-                Log.warn { "make clean failed (#{status.exit_code}); continuing" } unless status.success?
-              end
-            end
-            normalize_autotools_timestamps
-            run_cmd(["./configure", "--prefix=#{install_prefix}"] + step.configure_flags, env: env)
-            run_cmd(["make", "-j#{cpus}"], env: env)
-            run_make_install(destdir, env)
-          elsif cmake_lists_present?(step)
-            run_cmake_project(step, env, install_prefix, destdir, cpus)
-          else
-            raise "Unknown build strategy #{step.strategy} and missing ./configure in #{step.workdir}"
-          end
-        end
+        execute_strategy(step, env, install_prefix, destdir, cpus)
         Log.info { "Finished #{step.name}" }
       }
-      if workdir
-        Dir.cd(workdir, &run_block)
-      else
-        run_block.call
+      workdir ? Dir.cd(workdir, &execute) : execute.call
+    end
+
+    # Dispatch a build step to the matching strategy implementation.
+    private def execute_strategy(step : BuildStep,
+                                 env : Hash(String, String),
+                                 install_prefix : String,
+                                 destdir : String?,
+                                 cpus : Int32) : Nil
+      case step.strategy
+      when "cmake"
+        run_cmake_bootstrap(step, env, install_prefix, destdir, cpus)
+      when "busybox"
+        run_cmd(["make", "defconfig"], env: env)
+        if (config_tool = env["BQ2_KCONFIG_CONFIG_TOOL"]?) && File.exists?(config_tool)
+          run_cmd([config_tool, "--file", ".config", "--disable", "STATIC_LIBGCC"], env: env)
+          run_cmd(["make", "silentoldconfig"], env: env)
+        else
+          Log.warn { "Skipping BusyBox Kconfig update; set BQ2_KCONFIG_CONFIG_TOOL to disable STATIC_LIBGCC" }
+        end
+        run_cmd(["make", "-j#{cpus}"], env: env)
+        # BusyBox uses CONFIG_PREFIX as the install root, not DESTDIR.
+        install_root = destdir || install_prefix
+        run_cmd(["make", "CONFIG_PREFIX=#{install_root}", "install"], env: env)
+      when "makefile-classic"
+        makefile = "Makefile.bq2"
+        raise "Missing #{makefile} in #{step.workdir || Dir.current}" unless File.exists?(makefile)
+        run_cmd(["make", "-f", makefile, "-j#{cpus}"], env: env)
+        if destdir
+          run_cmd(["make", "-f", makefile, "DESTDIR=#{destdir}", "install"], env: env)
+        else
+          run_cmd(["make", "-f", makefile, "install"], env: env)
+        end
+      when "copy-tree"
+        raise "copy-tree requires step.install_prefix (destination path)" unless step.install_prefix
+        install_root = stage_path(destdir, install_prefix)
+        FileUtils.mkdir_p(install_root)
+        run_cmd(["cp", "-a", ".", install_root], env: env)
+      when "write-file"
+        raise "write-file requires step.install_prefix (file path)" unless step.install_prefix
+        content = step.content || step.env["CONTENT"]?
+        raise "write-file requires env CONTENT" unless content
+        target = stage_path(destdir, install_prefix)
+        FileUtils.mkdir_p(File.dirname(target))
+        File.write(target, content)
+      when "alpine-setup"
+        AlpineSetup.install_sysroot_runner_packages
+      when "apk-add"
+        packages = step.packages
+        raise "apk-add requires step.packages" unless packages
+        AlpineSetup.apk_add(packages)
+      when "download-sources"
+        download_sources(step)
+      when "extract-sources"
+        extract_sources(step)
+      when "populate-seed"
+        extract_sources(step)
+      when "prefetch-shards"
+        prefetch_shards(step, env)
+      when "prepare-rootfs"
+        run_prepare_rootfs(step, destdir)
+      when "symlink"
+        raise "symlink requires step.install_prefix (destination)" unless step.install_prefix
+        source = step.content || step.env["CONTENT"]?
+        raise "symlink requires content (source path)" unless source
+        target = stage_path(destdir, install_prefix)
+        FileUtils.mkdir_p(File.dirname(target))
+        FileUtils.rm_rf(target) if File.exists?(target) || File.symlink?(target)
+        File.symlink(source, target)
+      when "remove-tree"
+        raise "remove-tree requires step.install_prefix (path to remove)" unless step.install_prefix
+        remove_root = stage_path(destdir, install_prefix)
+        raise "Refusing to remove #{remove_root}" if remove_root == "/" || remove_root.empty?
+        FileUtils.rm_rf(remove_root)
+      when "tarball"
+        run_tarball_strategy(step, env, destdir)
+      when "linux-headers"
+        install_root = stage_path(destdir, install_prefix)
+        run_cmd(["make"] + step.configure_flags + ["headers"], env: env)
+        include_dest = File.join(install_root, "include")
+        FileUtils.mkdir_p(include_dest)
+        run_cmd(["cp", "-a", "usr/include/.", include_dest], env: env)
+      when "cmake-project"
+        run_cmake_project(step, env, install_prefix, destdir, cpus)
+      when "crystal"
+        run_cmd(["shards", "build"], env: env)
+        bin_prefix = stage_path(destdir, install_prefix)
+        run_cmd(["install", "-d", "#{bin_prefix}/bin"], env: env)
+        Dir.glob("bin/*").each do |artifact|
+          run_cmd(["install", "-m", "0755", artifact, "#{bin_prefix}/bin/"], env: env)
+        end
+      when "crystal-build"
+        if File.exists?("shard.yml") && run_shards_install?(env)
+          run_cmd(["shards", "install"], env: env)
+        elsif File.exists?("shard.yml")
+          Log.info { "Skipping shards install for #{step.name} (prefetched during host setup)" }
+        end
+        run_cmd(["crystal", "build"] + step.configure_flags, env: env)
+        bin_prefix = stage_path(destdir, install_prefix)
+        run_cmd(["install", "-d", "#{bin_prefix}/bin"], env: env)
+        Dir.glob("bin/*").each do |artifact|
+          run_cmd(["install", "-m", "0755", artifact, "#{bin_prefix}/bin/"], env: env)
+        end
+      when "crystal-compiler"
+        FileUtils.rm_rf(".build") if Dir.exists?(".build")
+        run_cmd(["make", "-j#{cpus}", "crystal"], env: env)
+        install_env = destdir ? env.merge({"DESTDIR" => destdir}) : env
+        run_cmd(["make", "install", "PREFIX=#{install_prefix}"], env: install_env)
+      else # autotools/default
+        run_autotools(step, env, install_prefix, destdir, cpus)
       end
+    end
+
+    # Bootstrap CMake using its own bundled bootstrap script.
+    private def run_cmake_bootstrap(step : BuildStep,
+                                    env : Hash(String, String),
+                                    install_prefix : String,
+                                    destdir : String?,
+                                    cpus : Int32) : Nil
+      source_dir = Dir.current
+      build_dir = step.build_dir || source_dir
+      bootstrap_path = File.join(source_dir, "bootstrap")
+      had_build_files = File.exists?(File.join(build_dir, "CMakeCache.txt")) ||
+                        File.exists?(File.join(build_dir, "Makefile")) ||
+                        Dir.exists?(File.join(build_dir, "CMakeFiles"))
+      FileUtils.mkdir_p(build_dir)
+      Dir.cd(build_dir) do
+        # CMake's bootstrap script only parallelizes when --parallel is set.
+        bootstrap_argv = [bootstrap_path, "--parallel=#{cpus}", "--prefix=#{install_prefix}"]
+        unless step.configure_flags.empty?
+          bootstrap_argv << "--"
+          bootstrap_argv.concat(step.configure_flags)
+        end
+        run_cmd(bootstrap_argv, env: env)
+        if (step.clean_build || had_build_files) && File.exists?("Makefile")
+          run_cmd(["make", "clean"], env: env)
+        end
+        run_cmd(["make", "-j#{cpus}"], env: env)
+        run_make_install(destdir, env)
+      end
+    end
+
+    # Create a rootfs tarball from the staged filesystem.
+    # TODO: Replace this logic with a call to TarWriter.write_gz
+    private def run_tarball_strategy(step : BuildStep,
+                                     env : Hash(String, String),
+                                     destdir : String?) : Nil
+      output = step.install_prefix || raise "tarball requires step.install_prefix (output path)"
+      source_root = resolve_tarball_source_root(step.workdir, destdir)
+      raise "Missing tarball source #{source_root}" unless Dir.exists?(source_root)
+      FileUtils.mkdir_p(File.dirname(output))
+      # Exclude mountpoints and runtime-managed paths so the rootfs tarball
+      # contains only the prefix-free filesystem payload.
+      tar_excludes = [
+        "--exclude=./proc", "--exclude=./proc/**",
+        "--exclude=./sys", "--exclude=./sys/**",
+        "--exclude=./dev", "--exclude=./dev/**",
+        "--exclude=./run", "--exclude=./run/**",
+        "--exclude=./tmp", "--exclude=./tmp/**",
+        "--exclude=./workspace", "--exclude=./workspace/**",
+        "--exclude=./work", "--exclude=./work/**",
+        "--exclude=./var/lib", "--exclude=./var/lib/**",
+        "--exclude=./.bq2-rootfs",
+      ]
+      run_cmd(["tar", "-czf", output] + tar_excludes + ["-C", source_root, "."], env: env)
+    end
+
+    # Resolve the filesystem root for a tarball by merging workdir and destdir.
+    private def resolve_tarball_source_root(workdir : String?, destdir : String?) : String
+      source_root = workdir || "/"
+      return source_root unless destdir
+      if source_root.starts_with?(destdir)
+        source_root # Already rooted at destdir.
+      elsif source_root == "/"
+        destdir
+      elsif source_root.starts_with?("/")
+        "#{destdir}#{source_root}"
+      else
+        File.join(destdir, source_root)
+      end
+    end
+
+    # Write indexed FILE_N_PATH/FILE_N_CONTENT pairs from step env into the rootfs.
+    private def run_prepare_rootfs(step : BuildStep, destdir : String?) : Nil
+      idx = 0
+      wrote = false
+      loop do
+        path_key = "FILE_#{idx}_PATH"
+        content_key = "FILE_#{idx}_CONTENT"
+        path = step.env[path_key]?
+        content = step.env[content_key]?
+        break unless path || content
+        raise "prepare-rootfs requires #{path_key}" unless path
+        raise "prepare-rootfs requires #{content_key}" unless content
+        target = stage_path(destdir, path)
+        FileUtils.mkdir_p(File.dirname(target))
+        File.write(target, content)
+        wrote = true
+        idx += 1
+      end
+      raise "prepare-rootfs wrote no files" unless wrote
+    end
+
+    # Run a standard autotools configure/make/install build.
+    private def run_autotools(step : BuildStep,
+                              env : Hash(String, String),
+                              install_prefix : String,
+                              destdir : String?,
+                              cpus : Int32) : Nil
+      if File.exists?("configure")
+        if step.clean_build && File.exists?("Makefile")
+          status = run_cmd_status(["make", "distclean"], env: env)
+          unless status.success?
+            Log.warn { "make distclean failed (#{status.exit_code}); attempting make clean" }
+            status = run_cmd_status(["make", "clean"], env: env)
+            Log.warn { "make clean failed (#{status.exit_code}); continuing" } unless status.success?
+          end
+        end
+        normalize_autotools_timestamps
+        run_cmd(["./configure", "--prefix=#{install_prefix}"] + step.configure_flags, env: env)
+        run_cmd(["make", "-j#{cpus}"], env: env)
+        run_make_install(destdir, env)
+      elsif cmake_lists_present?(step)
+        run_cmake_project(step, env, install_prefix, destdir, cpus)
+      else
+        raise "Unknown build strategy #{step.strategy} and missing ./configure in #{step.workdir}"
+      end
+    end
+
+    # Combine an optional destdir staging root with an absolute install prefix.
+    # Returns "#{destdir}#{prefix}" when destdir is set, otherwise just prefix.
+    private def stage_path(destdir : String?, prefix : String) : String
+      destdir ? "#{destdir}#{prefix}" : prefix
     end
 
     # Returns true when shards install should be performed during build steps.
