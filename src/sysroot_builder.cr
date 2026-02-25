@@ -936,7 +936,7 @@ module Bootstrap
           workdir: workspace_from_bq2,
           package_allowlist: [] of String,
           extra_steps: [
-            write_file_step("musl-ld-path-final", musl_ld_path, "/lib:/usr/lib\n"),
+            write_file_step("musl-ld-path-final", musl_ld_path, "/lib:/usr/lib:/usr/lib/#{sysroot_triple}\n"),
             build_step(
               name: "rootfs-tarball",
               strategy: "tarball",
