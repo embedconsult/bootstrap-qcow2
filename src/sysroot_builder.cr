@@ -891,6 +891,7 @@ module Bootstrap
             "libxml2" => libxml2_cmake_flags,
           },
           extra_steps: symlink_steps([
+            {"/usr/bin/ld.lld", "/usr/bin/ld"},
             {clang_rt_atomic, "/usr/lib/libclang_rt.atomic.so"},
             {clang_rt_atomic, "/usr/lib/libatomic.so.1"},
             {"libatomic.so.1", "/usr/lib/libatomic.so"},
