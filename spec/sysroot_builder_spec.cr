@@ -186,11 +186,15 @@ describe Bootstrap::SysrootBuilder do
       phase = builder.phase_specs.find { |spec| spec.phase.name == "system-from-sysroot" }.not_nil!
       env = phase.env_overrides["bootstrap-qcow2"]
       sysroot_triple = sysroot_triple_for(Bootstrap::SysrootBuilder::DEFAULT_ARCH)
+      cmake_c_flags = "--target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -Wno-unused-command-line-argument"
+      usr_cxx_flags = "#{cmake_c_flags} -nostdinc++ -isystem /usr/include/c++/v1 -isystem /usr/include/#{sysroot_triple}/c++/v1 -nostdlib++ -stdlib=libc++ -L/usr/lib/#{sysroot_triple} -L/usr/lib -Wl,--start-group -lc++ -lc++abi -lunwind -Wl,--end-group"
       clang_rt_dir = "/usr/lib/clang/#{Bootstrap::SysrootBuilder::DEFAULT_LLVM_VER.split(".").first}/lib/#{sysroot_triple}"
       env["SHARDS_CACHE_PATH"].should eq Bootstrap::SysrootBuilder::SHARDS_CACHE_DIR
       env["LDFLAGS"].should eq "-L#{clang_rt_dir} -L/usr/lib/#{sysroot_triple} -L/usr/lib"
       env["LIBRARY_PATH"].should eq "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib"
       env["LD_LIBRARY_PATH"].should eq "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib"
+      env["CC"].should eq "/usr/bin/clang #{cmake_c_flags}"
+      env["CXX"].should eq "/usr/bin/clang++ #{usr_cxx_flags}"
     end
   end
 

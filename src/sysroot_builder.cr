@@ -626,8 +626,12 @@ module Bootstrap
       libcxx_include = "#{sysroot_prefix}/include/c++/v1"
       libcxx_target_include = "#{sysroot_prefix}/include/#{sysroot_triple}/c++/v1"
       libcxx_libdir = "#{sysroot_prefix}/lib/#{sysroot_triple}"
+      usr_libcxx_include = "/usr/include/c++/v1"
+      usr_libcxx_target_include = "/usr/include/#{sysroot_triple}/c++/v1"
+      usr_libcxx_libdir = "/usr/lib/#{sysroot_triple}"
       cmake_c_flags = "--target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -Wno-unused-command-line-argument"
       cmake_cxx_flags = "#{cmake_c_flags} -nostdinc++ -isystem #{libcxx_include} -isystem #{libcxx_target_include} -nostdlib++ -stdlib=libc++ -L#{libcxx_libdir} -L#{sysroot_prefix}/lib -Wl,--start-group -lc++ -lc++abi -lunwind -Wl,--end-group"
+      usr_cxx_flags = "#{cmake_c_flags} -nostdinc++ -isystem #{usr_libcxx_include} -isystem #{usr_libcxx_target_include} -nostdlib++ -stdlib=libc++ -L#{usr_libcxx_libdir} -L/usr/lib -Wl,--start-group -lc++ -lc++abi -lunwind -Wl,--end-group"
       cmake_archive_create = "#{sysroot_prefix}/bin/llvm-ar qc <TARGET> <OBJECTS>"
       cmake_archive_append = "#{sysroot_prefix}/bin/llvm-ar q <TARGET> <OBJECTS>"
       cmake_archive_finish = "#{sysroot_prefix}/bin/llvm-ranlib <TARGET>"
@@ -653,6 +657,17 @@ module Bootstrap
       existing_ld = system_from_sysroot_env["LD_LIBRARY_PATH"]?
       system_from_sysroot_env["LD_LIBRARY_PATH"] = existing_ld && !existing_ld.empty? ? "#{sysroot_ld_lib}:#{existing_ld}" : sysroot_ld_lib
       system_from_sysroot_env["LD"] = "#{sysroot_prefix}/bin/ld.lld"
+      post_llvm_env = {
+        "CC"  => "/usr/bin/clang #{cmake_c_flags}",
+        "CXX" => "/usr/bin/clang++ #{usr_cxx_flags}",
+      }
+      system_from_sysroot_packages = packages.select do |pkg|
+        phases = pkg.phases
+        phases && phases.includes?("system-from-sysroot")
+      end
+      llvm_index = system_from_sysroot_packages.index { |pkg| pkg.name == "llvm-project" }
+      post_llvm_packages = llvm_index ? system_from_sysroot_packages[(llvm_index + 1)..].map(&.name) : [] of String
+      post_llvm_env_overrides = post_llvm_packages.to_h { |name| {name, post_llvm_env} }
       musl_arch = case @architecture
                   when "aarch64", "arm64"
                     "aarch64"
@@ -662,6 +677,34 @@ module Bootstrap
                     @architecture
                   end
       musl_ld_path = "/etc/ld-musl-#{musl_arch}.path"
+      system_from_sysroot_env_overrides = {
+        "libxml2" => libxml2_env,
+        "zlib"    => {
+          "CFLAGS"   => "-fPIC",
+          "LDSHARED" => "#{system_from_sysroot_env["CC"]} -shared -Wl,-soname,libz.so.1",
+        },
+        "m4" => {
+          "INSTALL" => "./build-aux/install-sh",
+        },
+        "crystal" => {
+          "CRYSTAL_CACHE_DIR" => "/tmp/crystal_cache",
+          "CRYSTAL"           => "#{sysroot_prefix}/bin/crystal",
+          "LLVM_CONFIG"       => "/usr/bin/llvm-config",
+          "LDFLAGS"           => "-L/usr/lib/#{sysroot_triple} -L/usr/lib",
+          "LIBRARY_PATH"      => "/usr/lib/#{sysroot_triple}:/usr/lib",
+          "LD_LIBRARY_PATH"   => "/usr/lib/#{sysroot_triple}:/usr/lib:#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
+        },
+        "bootstrap-qcow2" => {
+          "SHARDS_CACHE_PATH" => "#{SHARDS_CACHE_DIR}",
+          "LDFLAGS"           => "-L#{clang_rt_dir} -L/usr/lib/#{sysroot_triple} -L/usr/lib",
+          "LIBRARY_PATH"      => "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib",
+          "LD_LIBRARY_PATH"   => "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib",
+        },
+      }
+      post_llvm_env_overrides.each do |name, overrides|
+        existing = system_from_sysroot_env_overrides[name]? || ({} of String => String)
+        system_from_sysroot_env_overrides[name] = existing.merge(overrides)
+      end
       [
         # Inputs: host repo workspace, source tarballs cache, seed rootfs spec.
         # Outputs: populated workspace sources, seed rootfs filesystem tree,
@@ -807,30 +850,7 @@ module Bootstrap
           ),
           workdir: workspace_from_bq2,
           package_allowlist: nil,
-          env_overrides: {
-            "libxml2" => libxml2_env,
-            "zlib"    => {
-              "CFLAGS"   => "-fPIC",
-              "LDSHARED" => "#{system_from_sysroot_env["CC"]} -shared -Wl,-soname,libz.so.1",
-            },
-            "m4" => {
-              "INSTALL" => "./build-aux/install-sh",
-            },
-            "crystal" => {
-              "CRYSTAL_CACHE_DIR" => "/tmp/crystal_cache",
-              "CRYSTAL"           => "#{sysroot_prefix}/bin/crystal",
-              "LLVM_CONFIG"       => "/usr/bin/llvm-config",
-              "LDFLAGS"           => "-L/usr/lib/#{sysroot_triple} -L/usr/lib",
-              "LIBRARY_PATH"      => "/usr/lib/#{sysroot_triple}:/usr/lib",
-              "LD_LIBRARY_PATH"   => "/usr/lib/#{sysroot_triple}:/usr/lib:#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
-            },
-            "bootstrap-qcow2" => {
-              "SHARDS_CACHE_PATH" => "#{SHARDS_CACHE_DIR}",
-              "LDFLAGS"           => "-L#{clang_rt_dir} -L/usr/lib/#{sysroot_triple} -L/usr/lib",
-              "LIBRARY_PATH"      => "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib",
-              "LD_LIBRARY_PATH"   => "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib",
-            },
-          },
+          env_overrides: system_from_sysroot_env_overrides,
           configure_overrides: {
             "cmake" => [
               "-DOPENSSL_ROOT_DIR=/usr",
