@@ -17,6 +17,17 @@ private def with_temp_workdir(&block : Path ->)
   end
 end
 
+private def sysroot_triple_for(arch : String) : String
+  case arch
+  when "aarch64", "arm64"
+    "aarch64-bq2-linux-musl"
+  when "x86_64", "amd64"
+    "x86_64-bq2-linux-musl"
+  else
+    "#{arch}-bq2-linux-musl"
+  end
+end
+
 describe Bootstrap::SysrootBuilder do
   it "exposes workspace directories" do
     with_temp_workdir do |dir|
@@ -151,6 +162,30 @@ describe Bootstrap::SysrootBuilder do
       phase = builder.phase_specs.find { |spec| spec.phase.name == "system-from-sysroot" }.not_nil!
       sysroot_prefix = "/#{Bootstrap::SysrootWorkspace::SYSROOT_DIR_NAME}"
       phase.phase.env["LD"].should eq "#{sysroot_prefix}/bin/ld.lld"
+    end
+  end
+
+  it "sets crystal env for system-from-sysroot" do
+    with_temp_workdir do |_dir|
+      builder = Bootstrap::SysrootBuilder.new
+      phase = builder.phase_specs.find { |spec| spec.phase.name == "system-from-sysroot" }.not_nil!
+      env = phase.env_overrides["crystal"]
+      sysroot_triple = sysroot_triple_for(Bootstrap::SysrootBuilder::DEFAULT_ARCH)
+      env["CRYSTAL_CACHE_DIR"].should eq "/tmp/crystal_cache"
+      env["CRYSTAL"].should eq "/opt/sysroot/bin/crystal"
+      env["LLVM_CONFIG"].should eq "/usr/bin/llvm-config"
+      env["LDFLAGS"].should eq "-L/usr/lib/#{sysroot_triple} -L/usr/lib"
+      env["LIBRARY_PATH"].should eq "/usr/lib/#{sysroot_triple}:/usr/lib"
+      env["LD_LIBRARY_PATH"].should eq "/usr/lib/#{sysroot_triple}:/usr/lib:/opt/sysroot/lib/#{sysroot_triple}:/opt/sysroot/lib"
+    end
+  end
+
+  it "sets bootstrap-qcow2 crystal opts in system-from-sysroot" do
+    with_temp_workdir do |_dir|
+      builder = Bootstrap::SysrootBuilder.new
+      phase = builder.phase_specs.find { |spec| spec.phase.name == "system-from-sysroot" }.not_nil!
+      env = phase.env_overrides["bootstrap-qcow2"]
+      env["CRYSTAL_OPTS"].should eq "-Dwithout_openssl -Dwithout_zlib"
     end
   end
 
