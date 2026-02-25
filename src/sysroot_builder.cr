@@ -826,6 +826,9 @@ module Bootstrap
             },
             "bootstrap-qcow2" => {
               "SHARDS_CACHE_PATH" => "#{SHARDS_CACHE_DIR}",
+              "LDFLAGS"           => "-L/usr/lib/#{sysroot_triple} -L/usr/lib",
+              "LIBRARY_PATH"      => "/usr/lib/#{sysroot_triple}:/usr/lib",
+              "LD_LIBRARY_PATH"   => "/usr/lib/#{sysroot_triple}:/usr/lib",
             },
           },
           configure_overrides: {

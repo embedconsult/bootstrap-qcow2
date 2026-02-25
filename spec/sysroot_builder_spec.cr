@@ -185,7 +185,11 @@ describe Bootstrap::SysrootBuilder do
       builder = Bootstrap::SysrootBuilder.new
       phase = builder.phase_specs.find { |spec| spec.phase.name == "system-from-sysroot" }.not_nil!
       env = phase.env_overrides["bootstrap-qcow2"]
+      sysroot_triple = sysroot_triple_for(Bootstrap::SysrootBuilder::DEFAULT_ARCH)
       env["SHARDS_CACHE_PATH"].should eq Bootstrap::SysrootBuilder::SHARDS_CACHE_DIR
+      env["LDFLAGS"].should eq "-L/usr/lib/#{sysroot_triple} -L/usr/lib"
+      env["LIBRARY_PATH"].should eq "/usr/lib/#{sysroot_triple}:/usr/lib"
+      env["LD_LIBRARY_PATH"].should eq "/usr/lib/#{sysroot_triple}:/usr/lib"
     end
   end
 
