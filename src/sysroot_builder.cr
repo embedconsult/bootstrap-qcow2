@@ -888,7 +888,7 @@ module Bootstrap
             "libxml2" => libxml2_cmake_flags,
           },
           patch_overrides: {
-            "bootstrap-qcow2" => [
+            "crystal" => [
               "#{bootstrap_repo_dir}/patches/crystal-#{DEFAULT_CRYSTAL}/libressl-force-flag.patch",
             ],
           },
