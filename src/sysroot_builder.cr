@@ -664,6 +664,7 @@ module Bootstrap
         "NM"     => "/usr/bin/llvm-nm",
         "RANLIB" => "/usr/bin/llvm-ranlib",
         "STRIP"  => "/usr/bin/llvm-strip",
+        "LD"     => "/usr/bin/ld.lld",
       }
       system_from_sysroot_packages = packages.select do |pkg|
         phases = pkg.phases
@@ -703,6 +704,7 @@ module Bootstrap
           "LDFLAGS"           => "-L#{clang_rt_dir} -L/usr/lib/#{sysroot_triple} -L/usr/lib",
           "LIBRARY_PATH"      => "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib",
           "LD_LIBRARY_PATH"   => "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib",
+          "CRYSTAL_OPTS"      => "-L#{clang_rt_dir} -L/usr/lib/#{sysroot_triple} -L/usr/lib",
         },
       }
       post_llvm_env_overrides.each do |name, overrides|
