@@ -535,6 +535,7 @@ module Bootstrap
 
     # Run a command array and raise if it fails.
     private def run_cmd(argv : Array(String), env : Hash(String, String) = {} of String => String)
+      Log.debug { "run_cmd(#{argv}, #{env})" }
       result = run_cmd_result(argv, env: env)
       unless result.status.success?
         Log.error { "Command failed (#{result.status.exit_code}): #{argv.join(" ")}" }
