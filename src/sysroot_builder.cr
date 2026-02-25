@@ -699,9 +699,9 @@ module Bootstrap
           "CRYSTAL_CACHE_DIR" => "/tmp/crystal_cache",
           "CRYSTAL"           => "#{sysroot_prefix}/bin/crystal",
           "LLVM_CONFIG"       => "/usr/bin/llvm-config",
-          "LDFLAGS"           => "-L/usr/lib/#{sysroot_triple} -L/usr/lib",
-          "LIBRARY_PATH"      => "/usr/lib/#{sysroot_triple}:/usr/lib",
-          "LD_LIBRARY_PATH"   => "/usr/lib/#{sysroot_triple}:/usr/lib:#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
+          "LDFLAGS"           => "-L#{clang_rt_dir} -L/usr/lib/#{sysroot_triple} -L/usr/lib",
+          "LIBRARY_PATH"      => "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib",
+          "LD_LIBRARY_PATH"   => "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib:#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
         },
         "bootstrap-qcow2" => {
           "SHARDS_CACHE_PATH" => "#{SHARDS_CACHE_DIR}",

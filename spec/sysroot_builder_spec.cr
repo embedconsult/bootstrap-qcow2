@@ -174,9 +174,10 @@ describe Bootstrap::SysrootBuilder do
       env["CRYSTAL_CACHE_DIR"].should eq "/tmp/crystal_cache"
       env["CRYSTAL"].should eq "/opt/sysroot/bin/crystal"
       env["LLVM_CONFIG"].should eq "/usr/bin/llvm-config"
-      env["LDFLAGS"].should eq "-L/usr/lib/#{sysroot_triple} -L/usr/lib"
-      env["LIBRARY_PATH"].should eq "/usr/lib/#{sysroot_triple}:/usr/lib"
-      env["LD_LIBRARY_PATH"].should eq "/usr/lib/#{sysroot_triple}:/usr/lib:/opt/sysroot/lib/#{sysroot_triple}:/opt/sysroot/lib"
+      clang_rt_dir = "/usr/lib/clang/#{Bootstrap::SysrootBuilder::DEFAULT_LLVM_VER.split(".").first}/lib/#{sysroot_triple}"
+      env["LDFLAGS"].should eq "-L#{clang_rt_dir} -L/usr/lib/#{sysroot_triple} -L/usr/lib"
+      env["LIBRARY_PATH"].should eq "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib"
+      env["LD_LIBRARY_PATH"].should eq "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib:/opt/sysroot/lib/#{sysroot_triple}:/opt/sysroot/lib"
     end
   end
 
