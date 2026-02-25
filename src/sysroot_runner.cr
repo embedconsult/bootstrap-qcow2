@@ -32,7 +32,8 @@ module Bootstrap
     property dry_run : Bool
     property dry_run_io : IO?
     property resume : Bool
-    property altcmd : String?
+    property altcmd_argv : Array(String)
+    property altcmd_shell : String?
 
     def initialize(@state : SysrootBuildState = SysrootBuildState.new,
                    @step_runner : StepRunner = StepRunner.new,
@@ -42,8 +43,9 @@ module Bootstrap
                    @dry_run : Bool = false,
                    @dry_run_io : IO? = nil,
                    @resume : Bool = true,
-                   @altcmd : String? = nil) : Nil
-      Log.debug { "Created new SysrootRunner (phase=#{@phase}, packages=#{packages}, report=#{report}, dry_run=#{dry_run}, resume=#{@resume}, altcmd=#{@altcmd})" }
+                   @altcmd_argv : Array(String) = [] of String,
+                   @altcmd_shell : String? = nil) : Nil
+      Log.debug { "Created new SysrootRunner (phase=#{@phase}, packages=#{packages}, report=#{report}, dry_run=#{dry_run}, resume=#{@resume}, altcmd_argv=#{@altcmd_argv}, altcmd_shell=#{@altcmd_shell})" }
     end
 
     # Summarize the sysroot runner CLI behavior for help output.
@@ -160,8 +162,12 @@ module Bootstrap
         end
         Log.info { "Building #{step.name} in #{step.workdir} (phase=#{phase.name})" }
         begin
-          if (altcmd = @altcmd)
-            status = @step_runner.run_alt_cmd(phase, step, altcmd)
+          if @altcmd_shell
+            status = @step_runner.run_alt_cmd_shell(phase, step, @altcmd_shell.not_nil!)
+            raise AltCommandExit.new(status.exit_code)
+          end
+          unless @altcmd_argv.empty?
+            status = @step_runner.run_alt_cmd(phase, step, @altcmd_argv)
             raise AltCommandExit.new(status.exit_code)
           end
           @step_runner.run(phase, step)
@@ -192,7 +198,8 @@ module Bootstrap
       invalidate_overrides = false
       host_workdir : Path? = nil
       extra_binds = [] of Tuple(Path, Path)
-      altcmd : String? = nil
+      altcmd_argv = [] of String
+      altcmd_shell : String? = nil
       parser, _remaining, help = CLI.parse(args, "Usage: bq2 sysroot-runner [options]") do |p|
         p.on("--phase NAME", "Select first build phase to run (default: auto)") { |name| start_phase = name }
         p.on("--package NAME", "Only run the named package(s) (repeatable)") { |name| packages << name }
@@ -204,11 +211,16 @@ module Bootstrap
         p.on("--bind=SRC:DST", "Bind-mount SRC into DST inside the rootfs (repeatable)") do |val|
           extra_binds << parse_bind_spec(val)
         end
-        p.on("--altcmd CMD", "Run CMD in place of the build step (debug)") { |cmd| altcmd = cmd }
+        p.on("--altcmd ARG", "Run alt command argv (repeatable, debug)") { |arg| altcmd_argv << arg }
+        p.on("--altcmd-shell CMD", "Run CMD via /bin/sh -lc (debug)") { |cmd| altcmd_shell = cmd }
       end
       return CLI.print_help(parser) if help
 
-      if altcmd && resume
+      if !altcmd_argv.empty? && altcmd_shell
+        raise "Use either --altcmd or --altcmd-shell, not both"
+      end
+
+      if (!altcmd_argv.empty? || altcmd_shell) && resume
         Log.warn { "--altcmd disables resume/state tracking for this run" }
         resume = false
       end
@@ -228,7 +240,17 @@ module Bootstrap
 
       step_runner = StepRunner.new(workspace: workspace)
       step_runner.skip_existing_sources = resume
-      runner = SysrootRunner.new(state: build_state, step_runner: step_runner, phase: start_phase, packages: packages, report: report, resume: resume, dry_run: dry_run, altcmd: altcmd)
+      runner = SysrootRunner.new(
+        state: build_state,
+        step_runner: step_runner,
+        phase: start_phase,
+        packages: packages,
+        report: report,
+        resume: resume,
+        dry_run: dry_run,
+        altcmd_argv: altcmd_argv,
+        altcmd_shell: altcmd_shell
+      )
       begin
         runner.run_plan
         0

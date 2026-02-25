@@ -284,7 +284,7 @@ module Bootstrap
       end
     end
 
-    def run_alt_cmd(phase : BuildPhase, step : BuildStep, command : String) : Process::Status
+    def run_alt_cmd(phase : BuildPhase, step : BuildStep, argv : Array(String)) : Process::Status
       workdir = step.workdir
       Log.info { "Starting alt command for #{step.name} in #{workdir || "(no chdir)"}" }
       status = nil
@@ -292,10 +292,11 @@ module Bootstrap
         @command_log_prefix = log_prefix_for(phase, step)
         apply_patches(step.patches)
         env = effective_env(phase, step)
-        Log.info { "Running alt command in #{Dir.current}: #{command}" }
+        raise "Alt command argv is empty" if argv.empty?
+        Log.info { "Running alt command in #{Dir.current}: #{argv.join(" ")}" }
         status = Process.run(
-          "/bin/sh",
-          ["-lc", command],
+          argv[0],
+          argv[1..],
           env: env,
           input: Process::Redirect::Inherit,
           output: Process::Redirect::Inherit,
@@ -308,6 +309,10 @@ module Bootstrap
         run_block.call
       end
       status.not_nil!
+    end
+
+    def run_alt_cmd_shell(phase : BuildPhase, step : BuildStep, command : String) : Process::Status
+      run_alt_cmd(phase, step, ["/bin/sh", "-lc", command])
     end
 
     # Returns true when shards install should be performed during build steps.
