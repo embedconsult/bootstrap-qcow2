@@ -893,7 +893,13 @@ module Bootstrap
             {clang_rt_atomic, "/usr/lib/libclang_rt.atomic.so"},
             {clang_rt_atomic, "/usr/lib/libatomic.so.1"},
             {"libatomic.so.1", "/usr/lib/libatomic.so"},
-          ]),
+          ]) + [
+            build_step(
+              name: "bq2-install-symlinks",
+              strategy: "bq2-install",
+              workdir: "/usr",
+            ),
+          ],
         ),
         # Inputs: prefix-free system rootfs staged in the bq2 rootfs.
         # Outputs: developer tooling added to /usr in the bq2 rootfs.

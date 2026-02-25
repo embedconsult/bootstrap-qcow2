@@ -255,6 +255,8 @@ module Bootstrap
           run_cmd(["make", "-j#{cpus}", "crystal"], env: env)
           install_env = destdir ? env.merge({"DESTDIR" => destdir}) : env
           run_cmd(["make", "install", "PREFIX=#{install_prefix}"], env: install_env)
+        when "bq2-install"
+          run_cmd(["bq2", "--install"], env: env)
         else # autotools/default
           if File.exists?("configure")
             if step.clean_build && File.exists?("Makefile")
