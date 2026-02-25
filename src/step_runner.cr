@@ -294,8 +294,7 @@ module Bootstrap
         env = effective_env(phase, step)
         Log.info { "Running alt command in #{Dir.current}: #{command}" }
         status = Process.run(
-          "/bin/sh",
-          ["-lc", command],
+          command,
           env: env,
           input: Process::Redirect::Inherit,
           output: Process::Redirect::Inherit,
