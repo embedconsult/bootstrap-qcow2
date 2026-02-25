@@ -705,7 +705,7 @@ module Bootstrap
           "LDFLAGS"           => "-L#{clang_rt_dir} -L/usr/lib/#{sysroot_triple} -L/usr/lib",
           "LIBRARY_PATH"      => "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib",
           "LD_LIBRARY_PATH"   => "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib",
-          "CRYSTAL_OPTS"      => "--link-flags=-L#{clang_rt_dir} --link-flags=-L/usr/lib/#{sysroot_triple} --link-flags=-L/usr/lib",
+          "CRYSTAL_OPTS"      => "-Dlibressl_version=#{DEFAULT_LIBRESSL}",
         },
       }
       post_llvm_env_overrides.each do |name, overrides|
@@ -886,6 +886,11 @@ module Bootstrap
               "-DHAVE_SYS_CDEFS_H=0",
             ],
             "libxml2" => libxml2_cmake_flags,
+          },
+          patch_overrides: {
+            "bootstrap-qcow2" => [
+              "#{bootstrap_repo_dir}/patches/crystal-#{DEFAULT_CRYSTAL}/libressl-force-flag.patch",
+            ],
           },
           extra_steps: symlink_steps([
             {clang_rt_atomic, "/usr/lib/libatomic.so.1"},
