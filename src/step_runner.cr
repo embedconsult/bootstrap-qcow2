@@ -284,6 +284,24 @@ module Bootstrap
       end
     end
 
+    def run_alt_cmd(phase : BuildPhase, step : BuildStep, command : String) : Process::Status
+      workdir = step.workdir
+      Log.info { "Starting alt command for #{step.name} in #{workdir || "(no chdir)"}" }
+      status = nil
+      run_block = -> {
+        @command_log_prefix = log_prefix_for(phase, step)
+        apply_patches(step.patches)
+        env = effective_env(phase, step)
+        status = run_cmd_result(["/bin/sh", "-lc", command], env: env).status
+      }
+      if workdir
+        Dir.cd(workdir, &run_block)
+      else
+        run_block.call
+      end
+      status.not_nil!
+    end
+
     # Returns true when shards install should be performed during build steps.
     private def run_shards_install?(env : Hash(String, String)) : Bool
       truthy_env?(env["BQ2_FORCE_SHARDS_INSTALL"]?)
