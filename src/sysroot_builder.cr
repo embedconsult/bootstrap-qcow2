@@ -351,7 +351,10 @@ module Bootstrap
           DEFAULT_CRYSTAL,
           URI.parse("https://github.com/crystal-lang/crystal/archive/refs/tags/#{DEFAULT_CRYSTAL}.tar.gz"),
           strategy: "crystal-compiler",
-          patches: ["#{bootstrap_repo_dir}/patches/crystal-#{DEFAULT_CRYSTAL}/use-libcxx.patch"],
+          patches: [
+            "#{bootstrap_repo_dir}/patches/crystal-#{DEFAULT_CRYSTAL}/libressl-force-flag.patch",
+            "#{bootstrap_repo_dir}/patches/crystal-#{DEFAULT_CRYSTAL}/use-libcxx.patch",
+          ],
           phases: ["sysroot-from-seed", "system-from-sysroot"],
         ),
         PackageSpec.new(
@@ -524,11 +527,14 @@ module Bootstrap
       flags.concat([
         "-DLLVM_INCLUDE_TESTS=OFF",
         "-DLLVM_INCLUDE_EXAMPLES=OFF",
+        "-DLLVM_BUILD_EXAMPLES=OFF",
         "-DLLVM_INCLUDE_BENCHMARKS=OFF",
         "-DLLVM_BUILD_DOCS=OFF",
         "-DLLVM_ENABLE_DOXYGEN=OFF",
         "-DLLVM_ENABLE_SPHINX=OFF",
         "-DLLVM_ENABLE_LIBEDIT=OFF",
+        "-DLLVM_ENABLE_PLUGINS=OFF",
+        "-DLLVM_EXPORT_SYMBOLS_FOR_PLUGINS=OFF",
         "-DLLVM_ENABLE_SHARED=ON",
         "-DLLVM_BUILD_LLVM_DYLIB=ON",
         "-DLLVM_LINK_LLVM_DYLIB=ON",
@@ -623,8 +629,12 @@ module Bootstrap
       libcxx_include = "#{sysroot_prefix}/include/c++/v1"
       libcxx_target_include = "#{sysroot_prefix}/include/#{sysroot_triple}/c++/v1"
       libcxx_libdir = "#{sysroot_prefix}/lib/#{sysroot_triple}"
+      usr_libcxx_include = "/usr/include/c++/v1"
+      usr_libcxx_target_include = "/usr/include/#{sysroot_triple}/c++/v1"
+      usr_libcxx_libdir = "/usr/lib/#{sysroot_triple}"
       cmake_c_flags = "--target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -Wno-unused-command-line-argument"
       cmake_cxx_flags = "#{cmake_c_flags} -nostdinc++ -isystem #{libcxx_include} -isystem #{libcxx_target_include} -nostdlib++ -stdlib=libc++ -L#{libcxx_libdir} -L#{sysroot_prefix}/lib -Wl,--start-group -lc++ -lc++abi -lunwind -Wl,--end-group"
+      usr_cxx_flags = "#{cmake_c_flags} -nostdinc++ -isystem #{usr_libcxx_include} -isystem #{usr_libcxx_target_include} -nostdlib++ -stdlib=libc++ -L#{usr_libcxx_libdir} -L/usr/lib -Wl,--start-group -lc++ -lc++abi -lunwind -Wl,--end-group"
       cmake_archive_create = "#{sysroot_prefix}/bin/llvm-ar qc <TARGET> <OBJECTS>"
       cmake_archive_append = "#{sysroot_prefix}/bin/llvm-ar q <TARGET> <OBJECTS>"
       cmake_archive_finish = "#{sysroot_prefix}/bin/llvm-ranlib <TARGET>"
@@ -632,6 +642,7 @@ module Bootstrap
       compiler_rt_arch = sysroot_triple.split("-").first
       clang_rt_dir = "/usr/lib/clang/#{llvm_major}/lib/#{sysroot_triple}"
       clang_rt_atomic = "#{clang_rt_dir}/libclang_rt.atomic.so"
+      sysroot_clang_rt_atomic = "#{sysroot_prefix}/lib/clang/#{llvm_major}/lib/#{sysroot_triple}/libclang_rt.atomic.so"
       libxml2_env = {
         "CPPFLAGS" => "-I#{sysroot_prefix}/include",
         "LDFLAGS"  => "-L#{sysroot_prefix}/lib",
@@ -648,6 +659,24 @@ module Bootstrap
       system_from_sysroot_env = rootfs_env.dup
       existing_ld = system_from_sysroot_env["LD_LIBRARY_PATH"]?
       system_from_sysroot_env["LD_LIBRARY_PATH"] = existing_ld && !existing_ld.empty? ? "#{sysroot_ld_lib}:#{existing_ld}" : sysroot_ld_lib
+      system_from_sysroot_env["LD"] = "#{sysroot_prefix}/bin/ld.lld"
+      post_llvm_env = {
+        "CC"     => "/usr/bin/clang #{cmake_c_flags}",
+        "CXX"    => "/usr/bin/clang++ #{usr_cxx_flags}",
+        "AR"     => "/usr/bin/llvm-ar",
+        "NM"     => "/usr/bin/llvm-nm",
+        "RANLIB" => "/usr/bin/llvm-ranlib",
+        "STRIP"  => "/usr/bin/llvm-strip",
+        "LD"     => "/usr/bin/ld.lld",
+        "PATH"   => "/usr/bin:/bin:/usr/sbin:/sbin",
+      }
+      system_from_sysroot_packages = packages.select do |pkg|
+        phases = pkg.phases
+        phases && phases.includes?("system-from-sysroot")
+      end
+      llvm_index = system_from_sysroot_packages.index { |pkg| pkg.name == "llvm-project" }
+      post_llvm_packages = llvm_index ? system_from_sysroot_packages[(llvm_index + 1)..].map(&.name) : [] of String
+      post_llvm_env_overrides = post_llvm_packages.to_h { |name| {name, post_llvm_env} }
       musl_arch = case @architecture
                   when "aarch64", "arm64"
                     "aarch64"
@@ -657,6 +686,35 @@ module Bootstrap
                     @architecture
                   end
       musl_ld_path = "/etc/ld-musl-#{musl_arch}.path"
+      system_from_sysroot_env_overrides = {
+        "libxml2" => libxml2_env,
+        "zlib"    => {
+          "CFLAGS"   => "-fPIC",
+          "LDSHARED" => "#{system_from_sysroot_env["CC"]} -shared -Wl,-soname,libz.so.1",
+        },
+        "m4" => {
+          "INSTALL" => "./build-aux/install-sh",
+        },
+        "crystal" => {
+          "CRYSTAL_CACHE_DIR" => "/tmp/crystal_cache",
+          "CRYSTAL"           => "#{sysroot_prefix}/bin/crystal",
+          "LLVM_CONFIG"       => "/usr/bin/llvm-config",
+          "LDFLAGS"           => "-L#{clang_rt_dir} -L/usr/lib/#{sysroot_triple} -L/usr/lib",
+          "LIBRARY_PATH"      => "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib",
+          "LD_LIBRARY_PATH"   => "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib:#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
+        },
+        "bootstrap-qcow2" => {
+          "SHARDS_CACHE_PATH" => "#{SHARDS_CACHE_DIR}",
+          "LDFLAGS"           => "-L#{clang_rt_dir} -L/usr/lib/#{sysroot_triple} -L/usr/lib",
+          "LIBRARY_PATH"      => "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib",
+          "LD_LIBRARY_PATH"   => "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib",
+          "CRYSTAL_OPTS"      => "-Dlibressl_version=#{DEFAULT_LIBRESSL}",
+        },
+      }
+      post_llvm_env_overrides.each do |name, overrides|
+        existing = system_from_sysroot_env_overrides[name]? || ({} of String => String)
+        system_from_sysroot_env_overrides[name] = existing.merge(overrides)
+      end
       [
         # Inputs: host repo workspace, source tarballs cache, seed rootfs spec.
         # Outputs: populated workspace sources, seed rootfs filesystem tree,
@@ -689,6 +747,20 @@ module Bootstrap
           workdir: workspace_from_seed,
           pre_steps: seed_bootstrap_pre_steps(rootfs_resolv_conf_content),
           package_allowlist: nil,
+          extra_steps: [
+            build_step(
+              name: "sysroot-libatomic-link-0",
+              strategy: "symlink",
+              install_prefix: "#{sysroot_prefix}/lib/libatomic.so.1",
+              content: sysroot_clang_rt_atomic,
+            ),
+            build_step(
+              name: "sysroot-libatomic-link-1",
+              strategy: "symlink",
+              install_prefix: "#{sysroot_prefix}/lib/libatomic.so",
+              content: "libatomic.so.1",
+            ),
+          ],
           env_overrides: {
             "cmake" => {
               "CPPFLAGS" => "-I#{sysroot_prefix}/include -Wno-deprecated-literal-operator",
@@ -781,26 +853,14 @@ module Bootstrap
           BuildPhase.new(
             name: "system-from-sysroot",
             description: "Rebuild sysroot packages into /usr inside the new rootfs (prefix-free).",
-            namespace: SysrootWorkspace::Namespace::Seed.label,
+            namespace: SysrootWorkspace::Namespace::BQ2.label,
             install_prefix: "/usr",
-            destdir: bq2_from_seed,
+            destdir: nil,
             env: system_from_sysroot_env,
           ),
-          workdir: workspace_from_seed,
+          workdir: workspace_from_bq2,
           package_allowlist: nil,
-          env_overrides: {
-            "libxml2" => libxml2_env,
-            "zlib"    => {
-              "CFLAGS"   => "-fPIC",
-              "LDSHARED" => "#{system_from_sysroot_env["CC"]} -shared -Wl,-soname,libz.so.1",
-            },
-            "m4" => {
-              "INSTALL" => "./build-aux/install-sh",
-            },
-            "bootstrap-qcow2" => {
-              "SHARDS_CACHE_PATH" => "#{SHARDS_CACHE_DIR}",
-            },
-          },
+          env_overrides: system_from_sysroot_env_overrides,
           configure_overrides: {
             "cmake" => [
               "-DOPENSSL_ROOT_DIR=/usr",
@@ -831,9 +891,8 @@ module Bootstrap
             "libxml2" => libxml2_cmake_flags,
           },
           extra_steps: symlink_steps([
-            {"bq2", "/usr/bin/curl"},
-            {"bq2", "/usr/bin/git-remote-https"},
-            {"bq2", "/usr/bin/pkg-config"},
+            {"/usr/bin/ld.lld", "/usr/bin/ld"},
+            {clang_rt_atomic, "/usr/lib/libclang_rt.atomic.so"},
             {clang_rt_atomic, "/usr/lib/libatomic.so.1"},
             {"libatomic.so.1", "/usr/lib/libatomic.so"},
           ]),
@@ -1299,7 +1358,8 @@ module Bootstrap
       stage2_env["LD_LIBRARY_PATH"] = ld_parts.join(":")
       base_flags = configure_flags_for(pkg, spec)
       patches = patches_for(pkg, spec)
-      stage1_flags = llvm_stage1_flags(base_flags, spec.phase.env)
+      disable_stage1_runtimes = spec.phase.name == "system-from-sysroot"
+      stage1_flags = llvm_stage1_flags(base_flags, spec.phase.env, disable_stage1_runtimes)
       stage2_flags = llvm_stage2_flags(base_flags, spec.phase.install_prefix, toolchain_prefix, sysroot_target_triple, build_root)
       [
         BuildStep.new(
@@ -1331,11 +1391,11 @@ module Bootstrap
       {compiler, flags}
     end
 
-    # Stage 1 LLVM flags use the host compiler, keep LLVM static, and still
-    # build runtimes so stage 2 can link against libunwind/libc++ while it
-    # assembles the shared toolchain.
+    # Stage 1 LLVM flags use the host compiler, keep LLVM static, and (optionally)
+    # drop the runtimes build when the sysroot already supplies libunwind/libc++.
     private def llvm_stage1_flags(base_flags : Array(String),
-                                  phase_env : Hash(String, String)) : Array(String)
+                                  phase_env : Hash(String, String),
+                                  disable_runtimes : Bool) : Array(String)
       cc_value = phase_env["CC"]? || "clang"
       cxx_value = phase_env["CXX"]? || "clang++"
       cc, cc_flags = split_compiler_flags(cc_value)
@@ -1347,7 +1407,12 @@ module Bootstrap
           flag.starts_with?("-DLLVM_ENABLE_LIBCXX=") ||
           flag.starts_with?("-DLLVM_BUILD_LLVM_DYLIB=") ||
           flag.starts_with?("-DLLVM_LINK_LLVM_DYLIB=") ||
-          flag.starts_with?("-DLLVM_TOOL_LLVM_SHLIB_BUILD=")
+          flag.starts_with?("-DLLVM_TOOL_LLVM_SHLIB_BUILD=") ||
+          (disable_runtimes &&
+            (flag.starts_with?("-DLLVM_ENABLE_RUNTIMES=") ||
+              flag.starts_with?("-DLIBUNWIND_") ||
+              flag.starts_with?("-DLIBCXX") ||
+              flag.starts_with?("-DLIBCXXABI=")))
       end
       flags << "-DCMAKE_C_COMPILER=#{cc}"
       flags << "-DCMAKE_CXX_COMPILER=#{cxx}"
@@ -1384,7 +1449,18 @@ module Bootstrap
       build_rpath = File.join(build_root, "build-stage2", "lib")
       install_rpath = "#{install_libdir}:#{install_prefix}/lib"
       cxx_standard_libs = "-lc++ -lc++abi -lunwind"
+      runtime_sysroot = "--sysroot=#{toolchain_prefix}"
+      runtime_c_flags = "#{runtime_sysroot} --target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -Wno-unused-command-line-argument"
+      runtime_cxx_flags = "#{runtime_c_flags} -nostdinc++ -stdlib=libc++"
       linker_flags = "--rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -L#{toolchain_libcxx_libdir} -L#{toolchain_prefix}/lib"
+      runtimes_cmake_args = [
+        "-DCMAKE_C_FLAGS=#{runtime_c_flags}",
+        "-DCMAKE_CXX_FLAGS=#{runtime_cxx_flags}",
+        "-DCMAKE_CXX_STANDARD_LIBRARIES=#{cxx_standard_libs}",
+        "-DCMAKE_EXE_LINKER_FLAGS=#{linker_flags}",
+        "-DCMAKE_SHARED_LINKER_FLAGS=#{linker_flags}",
+        "-DCMAKE_MODULE_LINKER_FLAGS=#{linker_flags}",
+      ]
 
       flags = base_flags.dup
       flags << "-DCMAKE_C_COMPILER=#{cc}"
@@ -1396,7 +1472,7 @@ module Bootstrap
         flags << "-DCMAKE_CXX_FLAGS=#{cxx_flags}"
       end
       unless flags.any? { |flag| flag.starts_with?("-DCMAKE_CXX_FLAGS=") }
-        flags << "-DCMAKE_CXX_FLAGS=-nostdinc++ -isystem #{toolchain_libcxx_include} -isystem #{toolchain_libcxx_target_include}"
+        flags << "-DCMAKE_CXX_FLAGS=-nostdinc++ -isystem #{toolchain_libcxx_include} -isystem #{toolchain_libcxx_target_include} -stdlib=libc++"
       end
       flags << "-DCMAKE_CXX_STANDARD_LIBRARIES=#{cxx_standard_libs}"
       flags << "-DCMAKE_EXE_LINKER_FLAGS=#{linker_flags}"
@@ -1405,6 +1481,7 @@ module Bootstrap
       flags << "-DCMAKE_BUILD_RPATH=#{build_rpath}:#{install_rpath}"
       flags << "-DCMAKE_INSTALL_RPATH=#{install_rpath}"
       flags << "-DCMAKE_POSITION_INDEPENDENT_CODE=ON"
+      flags << "-DRUNTIMES_CMAKE_ARGS=#{runtimes_cmake_args.join(";")}"
       flags
     end
 
@@ -1507,7 +1584,7 @@ module Bootstrap
                     begin
                       SysrootWorkspace.new(host_workdir: host_workdir)
                     rescue ex
-                      STDERR.puts "No valid workspace found, build out the workspace first with `bq2 sysroot-builder`: #{ex.message}"
+                      Log.error { "No valid workspace found, build out the workspace first with `bq2 sysroot-builder`: #{ex.message}" }
                       return -1
                     end
                   elsif host_workdir
@@ -1521,11 +1598,11 @@ module Bootstrap
       plan_path = builder.write_plan
       workspace_label = builder.workspace.host_workdir || builder.workspace.log_path
       if plan_only
-        puts "Using existing sysroot workspace at #{workspace_label}"
+        Log.info { "Using existing sysroot workspace at #{workspace_label}" }
       else
-        puts "Prepared sysroot workspace at #{workspace_label}"
+        Log.info { "Prepared sysroot workspace at #{workspace_label}" }
       end
-      puts "Wrote build plan at #{plan_path}"
+      Log.info { "Wrote build plan at #{plan_path}" }
       0
     end
 
@@ -1545,19 +1622,18 @@ module Bootstrap
       begin
         workspace = SysrootWorkspace.new(host_workdir: host_workdir)
       rescue ex
-        STDERR.puts "No valid workspace found, build out the workspace first with `bq2 sysroot-builder`: #{ex.message}"
+        Log.error { "No valid workspace found, build out the workspace first with `bq2 sysroot-builder`: #{ex.message}" }
         return -1
       end
 
       if workspace.host_workdir.nil?
-        host_workdir ||= Path[SysrootWorkspace::DEFAULT_HOST_WORKDIR]
-        STDERR.puts "Workspace does not include host workdir; defaulting to #{host_workdir} (pass --workdir to override)"
-        workspace = SysrootWorkspace.new(host_workdir: host_workdir)
+        Log.error { "Workspace does not include host workdir; pass --workdir to avoid incorrect overrides." }
+        return -1
       end
 
       plan_path = workspace.log_path / SysrootBuildState::PLAN_FILE
       unless File.exists?(plan_path)
-        STDERR.puts "No build plan found at #{plan_path}, run `bq2 sysroot-builder` first"
+        Log.error { "No build plan found at #{plan_path}, run `bq2 sysroot-builder` first" }
         return -1
       end
 
@@ -1575,8 +1651,8 @@ module Bootstrap
       build_state.overrides_digest = SysrootBuildState.digest_for?(overrides_path)
       build_state.touch
 
-      puts "Wrote build plan overrides to #{overrides_path}"
-      puts "Overrides phases=#{overrides.phases.size}"
+      Log.info { "Wrote build plan overrides to #{overrides_path}" }
+      Log.info { "Overrides phases=#{overrides.phases.size}" }
       0
     end
   end

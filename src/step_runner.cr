@@ -284,6 +284,31 @@ module Bootstrap
       end
     end
 
+    def run_alt_cmd(phase : BuildPhase, step : BuildStep, command : String) : Process::Status
+      workdir = step.workdir
+      Log.info { "Starting alt command for #{step.name} in #{workdir || "(no chdir)"}" }
+      status = nil
+      run_block = -> {
+        @command_log_prefix = log_prefix_for(phase, step)
+        apply_patches(step.patches)
+        env = effective_env(phase, step)
+        Log.info { "Running alt command in #{Dir.current}: #{command}" }
+        status = Process.run(
+          command,
+          env: env,
+          input: Process::Redirect::Inherit,
+          output: Process::Redirect::Inherit,
+          error: Process::Redirect::Inherit
+        )
+      }
+      if workdir
+        Dir.cd(workdir, &run_block)
+      else
+        run_block.call
+      end
+      status.not_nil!
+    end
+
     # Returns true when shards install should be performed during build steps.
     private def run_shards_install?(env : Hash(String, String)) : Bool
       truthy_env?(env["BQ2_FORCE_SHARDS_INSTALL"]?)
@@ -535,6 +560,7 @@ module Bootstrap
 
     # Run a command array and raise if it fails.
     private def run_cmd(argv : Array(String), env : Hash(String, String) = {} of String => String)
+      Log.debug { "run_cmd(#{argv}, #{env})" }
       result = run_cmd_result(argv, env: env)
       unless result.status.success?
         Log.error { "Command failed (#{result.status.exit_code}): #{argv.join(" ")}" }

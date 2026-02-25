@@ -17,6 +17,17 @@ private def with_temp_workdir(&block : Path ->)
   end
 end
 
+private def sysroot_triple_for(arch : String) : String
+  case arch
+  when "aarch64", "arm64"
+    "aarch64-bq2-linux-musl"
+  when "x86_64", "amd64"
+    "x86_64-bq2-linux-musl"
+  else
+    "#{arch}-bq2-linux-musl"
+  end
+end
+
 describe Bootstrap::SysrootBuilder do
   it "exposes workspace directories" do
     with_temp_workdir do |dir|
@@ -97,6 +108,31 @@ describe Bootstrap::SysrootBuilder do
     end
   end
 
+  it "skips LLVM runtimes in stage1 when rebuilding the system toolchain" do
+    with_temp_workdir do |_dir|
+      builder = Bootstrap::SysrootBuilder.new
+      plan = builder.build_plan
+      sysroot_phase = plan.phases.find(&.name.==("sysroot-from-seed")).not_nil!
+      sysroot_stage1 = sysroot_phase.steps.find(&.name.==("llvm-project-stage1")).not_nil!
+      sysroot_stage1.configure_flags.any? { |flag| flag.starts_with?("-DLLVM_ENABLE_RUNTIMES=") }.should be_true
+
+      system_phase = plan.phases.find(&.name.==("system-from-sysroot")).not_nil!
+      system_stage1 = system_phase.steps.find(&.name.==("llvm-project-stage1")).not_nil!
+      system_stage1.configure_flags.any? { |flag| flag.starts_with?("-DLLVM_ENABLE_RUNTIMES=") }.should be_false
+      system_stage2 = system_phase.steps.find(&.name.==("llvm-project-stage2")).not_nil!
+      system_stage2.configure_flags.any? do |flag|
+        flag.starts_with?("-DCMAKE_CXX_FLAGS=") && flag.includes?("-stdlib=libc++")
+      end.should be_true
+      system_stage2.configure_flags.any? do |flag|
+        flag.starts_with?("-DRUNTIMES_CMAKE_ARGS=") &&
+          flag.includes?("-DCMAKE_C_FLAGS=") &&
+          flag.includes?("-DCMAKE_CXX_FLAGS=") &&
+          flag.includes?("--sysroot=/opt/sysroot") &&
+          !flag.includes?("/opt/sysroot/include/c++/v1")
+      end.should be_true
+    end
+  end
+
   it "lists build phase names" do
     with_temp_workdir do |_dir|
       phases = Bootstrap::SysrootBuilder.new.phase_specs.map { |spec| spec.phase.name }
@@ -113,10 +149,60 @@ describe Bootstrap::SysrootBuilder do
       phases["host-setup"].workdir.should be_nil
       phases["sysroot-from-seed"].workdir.should eq seed_workspace
       phases["rootfs-from-sysroot"].workdir.should eq seed_workspace
-      phases["system-from-sysroot"].workdir.should eq seed_workspace
       bq2_workspace = Bootstrap::SysrootWorkspace.workspace_from(Bootstrap::SysrootWorkspace::Namespace::BQ2, host_workdir).to_s
+      phases["system-from-sysroot"].workdir.should eq bq2_workspace
       phases["tools-from-system"].workdir.should eq bq2_workspace
       phases["finalize-rootfs"].workdir.should eq bq2_workspace
+    end
+  end
+
+  it "sets the system-from-sysroot linker" do
+    with_temp_workdir do |_dir|
+      builder = Bootstrap::SysrootBuilder.new
+      phase = builder.phase_specs.find { |spec| spec.phase.name == "system-from-sysroot" }.not_nil!
+      sysroot_prefix = "/#{Bootstrap::SysrootWorkspace::SYSROOT_DIR_NAME}"
+      phase.phase.env["LD"].should eq "#{sysroot_prefix}/bin/ld.lld"
+    end
+  end
+
+  it "sets crystal env for system-from-sysroot" do
+    with_temp_workdir do |_dir|
+      builder = Bootstrap::SysrootBuilder.new
+      phase = builder.phase_specs.find { |spec| spec.phase.name == "system-from-sysroot" }.not_nil!
+      env = phase.env_overrides["crystal"]
+      sysroot_triple = sysroot_triple_for(Bootstrap::SysrootBuilder::DEFAULT_ARCH)
+      env["CRYSTAL_CACHE_DIR"].should eq "/tmp/crystal_cache"
+      env["CRYSTAL"].should eq "/opt/sysroot/bin/crystal"
+      env["LLVM_CONFIG"].should eq "/usr/bin/llvm-config"
+      clang_rt_dir = "/usr/lib/clang/#{Bootstrap::SysrootBuilder::DEFAULT_LLVM_VER.split(".").first}/lib/#{sysroot_triple}"
+      env["LDFLAGS"].should eq "-L#{clang_rt_dir} -L/usr/lib/#{sysroot_triple} -L/usr/lib"
+      env["LIBRARY_PATH"].should eq "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib"
+      env["LD_LIBRARY_PATH"].should eq "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib:/opt/sysroot/lib/#{sysroot_triple}:/opt/sysroot/lib"
+    end
+  end
+
+  it "sets bootstrap-qcow2 env in system-from-sysroot" do
+    with_temp_workdir do |_dir|
+      builder = Bootstrap::SysrootBuilder.new
+      phase = builder.phase_specs.find { |spec| spec.phase.name == "system-from-sysroot" }.not_nil!
+      env = phase.env_overrides["bootstrap-qcow2"]
+      sysroot_triple = sysroot_triple_for(Bootstrap::SysrootBuilder::DEFAULT_ARCH)
+      cmake_c_flags = "--target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -Wno-unused-command-line-argument"
+      usr_cxx_flags = "#{cmake_c_flags} -nostdinc++ -isystem /usr/include/c++/v1 -isystem /usr/include/#{sysroot_triple}/c++/v1 -nostdlib++ -stdlib=libc++ -L/usr/lib/#{sysroot_triple} -L/usr/lib -Wl,--start-group -lc++ -lc++abi -lunwind -Wl,--end-group"
+      clang_rt_dir = "/usr/lib/clang/#{Bootstrap::SysrootBuilder::DEFAULT_LLVM_VER.split(".").first}/lib/#{sysroot_triple}"
+      env["SHARDS_CACHE_PATH"].should eq Bootstrap::SysrootBuilder::SHARDS_CACHE_DIR
+      env["LDFLAGS"].should eq "-L#{clang_rt_dir} -L/usr/lib/#{sysroot_triple} -L/usr/lib"
+      env["LIBRARY_PATH"].should eq "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib"
+      env["LD_LIBRARY_PATH"].should eq "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib"
+      env["CRYSTAL_OPTS"].should eq "-Dlibressl_version=#{Bootstrap::SysrootBuilder::DEFAULT_LIBRESSL}"
+      env["CC"].should eq "/usr/bin/clang #{cmake_c_flags}"
+      env["CXX"].should eq "/usr/bin/clang++ #{usr_cxx_flags}"
+      env["AR"].should eq "/usr/bin/llvm-ar"
+      env["NM"].should eq "/usr/bin/llvm-nm"
+      env["RANLIB"].should eq "/usr/bin/llvm-ranlib"
+      env["STRIP"].should eq "/usr/bin/llvm-strip"
+      env["LD"].should eq "/usr/bin/ld.lld"
+      env["PATH"].should eq "/usr/bin:/bin:/usr/sbin:/sbin"
     end
   end
 
@@ -163,8 +249,10 @@ describe Bootstrap::SysrootBuilder do
       sysroot_phase = plan.phases.find(&.name.==("sysroot-from-seed")).not_nil!
       sysroot_phase.install_prefix.should eq "/opt/sysroot"
       sysroot_phase.destdir.should be_nil
-      sysroot_phase.steps.size.should eq 4
+      sysroot_phase.steps.size.should eq 6
       sysroot_phase.steps.any? { |step| step.name == "seed-resolv-conf" }.should be_true
+      sysroot_phase.steps.any? { |step| step.name == "sysroot-libatomic-link-0" }.should be_true
+      sysroot_phase.steps.any? { |step| step.name == "sysroot-libatomic-link-1" }.should be_true
       sysroot_phase.steps.any? { |step| step.strategy == "apk-add" }.should be_false
       sysroot_phase.steps.find(&.name.==("pkg")).not_nil!.configure_flags.should eq ["--foo"]
 
