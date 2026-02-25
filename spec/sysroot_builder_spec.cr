@@ -195,6 +195,10 @@ describe Bootstrap::SysrootBuilder do
       env["LD_LIBRARY_PATH"].should eq "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib"
       env["CC"].should eq "/usr/bin/clang #{cmake_c_flags}"
       env["CXX"].should eq "/usr/bin/clang++ #{usr_cxx_flags}"
+      env["AR"].should eq "/usr/bin/llvm-ar"
+      env["NM"].should eq "/usr/bin/llvm-nm"
+      env["RANLIB"].should eq "/usr/bin/llvm-ranlib"
+      env["STRIP"].should eq "/usr/bin/llvm-strip"
     end
   end
 

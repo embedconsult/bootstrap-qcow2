@@ -658,8 +658,12 @@ module Bootstrap
       system_from_sysroot_env["LD_LIBRARY_PATH"] = existing_ld && !existing_ld.empty? ? "#{sysroot_ld_lib}:#{existing_ld}" : sysroot_ld_lib
       system_from_sysroot_env["LD"] = "#{sysroot_prefix}/bin/ld.lld"
       post_llvm_env = {
-        "CC"  => "/usr/bin/clang #{cmake_c_flags}",
-        "CXX" => "/usr/bin/clang++ #{usr_cxx_flags}",
+        "CC"     => "/usr/bin/clang #{cmake_c_flags}",
+        "CXX"    => "/usr/bin/clang++ #{usr_cxx_flags}",
+        "AR"     => "/usr/bin/llvm-ar",
+        "NM"     => "/usr/bin/llvm-nm",
+        "RANLIB" => "/usr/bin/llvm-ranlib",
+        "STRIP"  => "/usr/bin/llvm-strip",
       }
       system_from_sysroot_packages = packages.select do |pkg|
         phases = pkg.phases
