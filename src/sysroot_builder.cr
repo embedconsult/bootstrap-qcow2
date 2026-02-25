@@ -705,7 +705,7 @@ module Bootstrap
           "LDFLAGS"           => "-L#{clang_rt_dir} -L/usr/lib/#{sysroot_triple} -L/usr/lib",
           "LIBRARY_PATH"      => "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib",
           "LD_LIBRARY_PATH"   => "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib",
-          "CRYSTAL_OPTS"      => "-L#{clang_rt_dir} -L/usr/lib/#{sysroot_triple} -L/usr/lib",
+          "CRYSTAL_OPTS"      => "--link-flags=-L#{clang_rt_dir} --link-flags=-L/usr/lib/#{sysroot_triple} --link-flags=-L/usr/lib",
         },
       }
       post_llvm_env_overrides.each do |name, overrides|

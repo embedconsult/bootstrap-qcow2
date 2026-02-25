@@ -193,7 +193,7 @@ describe Bootstrap::SysrootBuilder do
       env["LDFLAGS"].should eq "-L#{clang_rt_dir} -L/usr/lib/#{sysroot_triple} -L/usr/lib"
       env["LIBRARY_PATH"].should eq "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib"
       env["LD_LIBRARY_PATH"].should eq "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib"
-      env["CRYSTAL_OPTS"].should eq "-L#{clang_rt_dir} -L/usr/lib/#{sysroot_triple} -L/usr/lib"
+      env["CRYSTAL_OPTS"].should eq "--link-flags=-L#{clang_rt_dir} --link-flags=-L/usr/lib/#{sysroot_triple} --link-flags=-L/usr/lib"
       env["CC"].should eq "/usr/bin/clang #{cmake_c_flags}"
       env["CXX"].should eq "/usr/bin/clang++ #{usr_cxx_flags}"
       env["AR"].should eq "/usr/bin/llvm-ar"
