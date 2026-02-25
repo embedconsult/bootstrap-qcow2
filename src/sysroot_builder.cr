@@ -665,6 +665,7 @@ module Bootstrap
         "RANLIB" => "/usr/bin/llvm-ranlib",
         "STRIP"  => "/usr/bin/llvm-strip",
         "LD"     => "/usr/bin/ld.lld",
+        "PATH"   => "/usr/bin:/bin:/usr/sbin:/sbin",
       }
       system_from_sysroot_packages = packages.select do |pkg|
         phases = pkg.phases

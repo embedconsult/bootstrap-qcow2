@@ -201,6 +201,7 @@ describe Bootstrap::SysrootBuilder do
       env["RANLIB"].should eq "/usr/bin/llvm-ranlib"
       env["STRIP"].should eq "/usr/bin/llvm-strip"
       env["LD"].should eq "/usr/bin/ld.lld"
+      env["PATH"].should eq "/usr/bin:/bin:/usr/sbin:/sbin"
     end
   end
 
