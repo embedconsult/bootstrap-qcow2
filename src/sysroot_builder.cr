@@ -42,35 +42,33 @@ module Bootstrap
     {% else %}
       DEFAULT_ARCH = "aarch64"
     {% end %}
-    DEFAULT_ROOTFS_SEED    = "Alpine"
-    BQ2_SEED_NAME          = "bq2-rootfs-0.3.3"
-    DEFAULT_ROOTFS_BRANCH  = "v3.23"
-    DEFAULT_ROOTFS_VERSION = "3.23.2"
-    DEFAULT_LLVM_VER       = "18.1.7"
-    DEFAULT_LIBRESSL       = "3.8.2"
-    DEFAULT_BUSYBOX        = "1.36.1"
-    DEFAULT_MUSL           = "1.2.5"
-    DEFAULT_CMAKE          = "3.29.6"
-    DEFAULT_SHARDS         = "0.18.0"
-    DEFAULT_M4             = "1.4.19"
-    DEFAULT_GNU_MAKE       = "4.4.1"
-    DEFAULT_ZLIB           = "1.3.1"
-    DEFAULT_LINUX          = "6.12.38"
-    DEFAULT_PCRE2          = "10.44"
-    DEFAULT_LIBATOMIC_OPS  = "7.8.2"
-    DEFAULT_GMP            = "6.3.0"
-    DEFAULT_LIBICONV       = "1.17"
-    DEFAULT_LIBXML2        = "2.12.7"
-    DEFAULT_LIBYAML        = "0.2.5"
-    DEFAULT_LIBFFI         = "3.4.6"
-    DEFAULT_BDWGC          = "8.2.6"
-    DEFAULT_SQLITE         = "3460000" # Source: https://www.sqlite.org/2024/sqlite-autoconf-3460000.tar.gz (SQLite 3.46.0).
-    DEFAULT_FOSSIL         = "2.25"
-    DEFAULT_GIT            = "2.45.2"
-    DEFAULT_CRYSTAL        = "1.19.1"
-    # Source: https://dl.beagle.cc/images/bq2-rootfs-0.3.3.tar.gz
-    DEFAULT_BQ2_SEED_URL = "https://dl.beagle.cc/images/bq2-rootfs-0.3.3.tar.gz"
-    SHARDS_CACHE_DIR     = "/tmp/.shards-cache" # Cache directory name for prefetched shards dependencies.
+    BQ2_SEED_NAME         = "bq2-rootfs-0.4.0"
+    DEFAULT_ROOTFS_SEED   = BQ2_SEED_NAME
+    ALPINE_ROOTFS_BRANCH  = "v3.23"
+    ALPINE_ROOTFS_VERSION = "3.23.2"
+    DEFAULT_LLVM_VER      = "18.1.7"
+    DEFAULT_LIBRESSL      = "3.8.2"
+    DEFAULT_BUSYBOX       = "1.36.1"
+    DEFAULT_MUSL          = "1.2.5"
+    DEFAULT_CMAKE         = "3.29.6"
+    DEFAULT_SHARDS        = "0.18.0"
+    DEFAULT_M4            = "1.4.19"
+    DEFAULT_GNU_MAKE      = "4.4.1"
+    DEFAULT_ZLIB          = "1.3.1"
+    DEFAULT_LINUX         = "6.12.38"
+    DEFAULT_PCRE2         = "10.44"
+    DEFAULT_LIBATOMIC_OPS = "7.8.2"
+    DEFAULT_GMP           = "6.3.0"
+    DEFAULT_LIBICONV      = "1.17"
+    DEFAULT_LIBXML2       = "2.12.7"
+    DEFAULT_LIBYAML       = "0.2.5"
+    DEFAULT_LIBFFI        = "3.4.6"
+    DEFAULT_BDWGC         = "8.2.6"
+    DEFAULT_SQLITE        = "3460000" # Source: https://www.sqlite.org/2024/sqlite-autoconf-3460000.tar.gz (SQLite 3.46.0).
+    DEFAULT_FOSSIL        = "2.25"
+    DEFAULT_GIT           = "2.45.2"
+    DEFAULT_CRYSTAL       = "1.19.1"
+    SHARDS_CACHE_DIR      = "/tmp/.shards-cache" # Cache directory name for prefetched shards dependencies.
     # Source: https://curl.se/ca/cacert.pem (Mozilla CA certificate bundle).
     CA_BUNDLE_PEM      = {{ read_file("#{__DIR__}/../data/ca-bundle/ca-certificates.crt") }}
     DEFAULT_NAMESERVER = "8.8.8.8"
@@ -165,12 +163,12 @@ module Bootstrap
     # convention when available.
     def seed_rootfs_spec : PackageSpec
       if @seed == "Alpine"
-        file = "alpine-minirootfs-#{DEFAULT_ROOTFS_VERSION}-#{@architecture}.tar.gz"
-        url = URI.parse("https://dl-cdn.alpinelinux.org/alpine/#{DEFAULT_ROOTFS_BRANCH}/releases/#{@architecture}/#{file}")
+        file = "alpine-minirootfs-#{ALPINE_ROOTFS_VERSION}-#{@architecture}.tar.gz"
+        url = URI.parse("https://dl-cdn.alpinelinux.org/alpine/#{ALPINE_ROOTFS_BRANCH}/releases/#{@architecture}/#{file}")
         checksum_url = URI.parse("#{url}.sha256") rescue nil
-        PackageSpec.new("bootstrap-rootfs", "#{DEFAULT_ROOTFS_VERSION}", url, nil, checksum_url)
+        PackageSpec.new("bootstrap-rootfs", "#{ALPINE_ROOTFS_VERSION}", url, nil, checksum_url)
       elsif @seed == BQ2_SEED_NAME
-        url = URI.parse(DEFAULT_BQ2_SEED_URL)
+        url = URI.parse("https://dl.beagle.cc/images/#{BQ2_SEED_NAME}-#{kernel_headers_arch}.tar.gz")
         PackageSpec.new("bootstrap-rootfs", BQ2_SEED_NAME, url)
       else
         raise "Not currently defined seed: #{@seed}"
@@ -1243,7 +1241,7 @@ module Bootstrap
           resolv_conf_content,
         ),
       ] of BuildStep
-      if @seed == DEFAULT_ROOTFS_SEED
+      if @seed == "Alpine"
         steps << apk_add_step(
           "alpine-apk-add",
           AlpineSetup::SYSROOT_RUNNER_PACKAGES,

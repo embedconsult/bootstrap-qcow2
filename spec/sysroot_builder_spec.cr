@@ -68,13 +68,12 @@ describe Bootstrap::SysrootBuilder do
       spec = builder.seed_rootfs_spec
       spec.name.should eq "bootstrap-rootfs"
       spec.version.should eq Bootstrap::SysrootBuilder::BQ2_SEED_NAME
-      spec.url.to_s.should eq Bootstrap::SysrootBuilder::DEFAULT_BQ2_SEED_URL
     end
   end
 
   it "includes apk bootstrap only for Alpine seed" do
     with_temp_workdir do |_dir|
-      alpine_builder = Bootstrap::SysrootBuilder.new
+      alpine_builder = Bootstrap::SysrootBuilder.new(seed: "Alpine")
       alpine_phase = alpine_builder.build_plan.phases.find(&.name.==("sysroot-from-seed")).not_nil!
       alpine_phase.steps.any? { |step| step.name == "alpine-apk-add" }.should be_true
 
