@@ -292,7 +292,15 @@ module Bootstrap
         @command_log_prefix = log_prefix_for(phase, step)
         apply_patches(step.patches)
         env = effective_env(phase, step)
-        status = run_cmd_result(["/bin/sh", "-lc", command], env: env).status
+        Log.info { "Running alt command in #{Dir.current}: #{command}" }
+        status = Process.run(
+          "/bin/sh",
+          ["-lc", command],
+          env: env,
+          input: Process::Redirect::Inherit,
+          output: Process::Redirect::Inherit,
+          error: Process::Redirect::Inherit
+        )
       }
       if workdir
         Dir.cd(workdir, &run_block)
