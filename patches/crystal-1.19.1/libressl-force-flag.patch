@@ -1,0 +1,21 @@
+--- /usr/share/crystal/src/openssl/lib_ssl.cr
++++ /usr/share/crystal/src/openssl/lib_ssl.cr
+@@ -12,6 +12,10 @@
+ # See https://crystal-lang.org/reference/man/required_libraries.html#tls
+ {% begin %}
+   lib LibSSL
++    {% if flag?(:libressl_version) %}
++      LIBRESSL_VERSION = {{ flag?(:libressl_version) }}
++      OPENSSL_VERSION = "0.0.0"
++    {% else %}
+     {% if flag?(:msvc) %}
+       {% from_libressl = false %}
+       {% ssl_version = nil %}
+@@ -39,6 +43,7 @@
+     {% else %}
+       LIBRESSL_VERSION = "0.0.0"
+       OPENSSL_VERSION = {{ ssl_version }}
++    {% end %}
+     {% end %}
+   end
+ {% end %}
