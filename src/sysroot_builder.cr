@@ -351,7 +351,10 @@ module Bootstrap
           DEFAULT_CRYSTAL,
           URI.parse("https://github.com/crystal-lang/crystal/archive/refs/tags/#{DEFAULT_CRYSTAL}.tar.gz"),
           strategy: "crystal-compiler",
-          patches: ["#{bootstrap_repo_dir}/patches/crystal-#{DEFAULT_CRYSTAL}/use-libcxx.patch"],
+          patches: [
+            "#{bootstrap_repo_dir}/patches/crystal-#{DEFAULT_CRYSTAL}/libressl-force-flag.patch",
+            "#{bootstrap_repo_dir}/patches/crystal-#{DEFAULT_CRYSTAL}/use-libcxx.patch",
+          ],
           phases: ["sysroot-from-seed", "system-from-sysroot"],
         ),
         PackageSpec.new(
@@ -886,11 +889,6 @@ module Bootstrap
               "-DHAVE_SYS_CDEFS_H=0",
             ],
             "libxml2" => libxml2_cmake_flags,
-          },
-          patch_overrides: {
-            "crystal" => [
-              "#{bootstrap_repo_dir}/patches/crystal-#{DEFAULT_CRYSTAL}/libressl-force-flag.patch",
-            ],
           },
           extra_steps: symlink_steps([
             {clang_rt_atomic, "/usr/lib/libatomic.so.1"},
