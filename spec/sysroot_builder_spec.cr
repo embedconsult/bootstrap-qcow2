@@ -180,12 +180,12 @@ describe Bootstrap::SysrootBuilder do
     end
   end
 
-  it "sets bootstrap-qcow2 crystal opts in system-from-sysroot" do
+  it "sets bootstrap-qcow2 env in system-from-sysroot" do
     with_temp_workdir do |_dir|
       builder = Bootstrap::SysrootBuilder.new
       phase = builder.phase_specs.find { |spec| spec.phase.name == "system-from-sysroot" }.not_nil!
       env = phase.env_overrides["bootstrap-qcow2"]
-      env["CRYSTAL_OPTS"].should eq "-Dwithout_openssl -Dwithout_zlib"
+      env["SHARDS_CACHE_PATH"].should eq Bootstrap::SysrootBuilder::SHARDS_CACHE_DIR
     end
   end
 

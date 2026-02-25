@@ -825,7 +825,6 @@ module Bootstrap
               "LD_LIBRARY_PATH"   => "/usr/lib/#{sysroot_triple}:/usr/lib:#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
             },
             "bootstrap-qcow2" => {
-              "CRYSTAL_OPTS"      => "-Dwithout_openssl -Dwithout_zlib",
               "SHARDS_CACHE_PATH" => "#{SHARDS_CACHE_DIR}",
             },
           },
