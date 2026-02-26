@@ -26,7 +26,7 @@ module Bootstrap
   # SysrootNamespace directly.
   class SysrootWorkspace
     DEFAULT_HOST_WORKDIR = "data/sysroot"
-    SYSROOT_DIR_NAME = "opt/sysroot"
+    SYSROOT_DIR_NAME     = "opt/sysroot"
     enum Namespace
       Host
       Seed
@@ -46,53 +46,47 @@ module Bootstrap
     macro path(name, space, rel_path)
       {% name_c = name.stringify.upcase.id %}
 
-      # Constant defaults
-      {% if space == Host %}
-        # Host from Host
+      {% if space.stringify == "Host" %}
         HOST_{{name_c}} = "{{rel_path}}"
-      {% elsif space == Seed %}
-        # Seed from Host
+      {% elsif space.stringify == "Seed" %}
         HOST_{{name_c}} = "seed-rootfs/{{rel_path}}"
-        # Seed from Seed
         SEED_{{name_c}} = "{{rel_path}}"
-      {% elsif space == BQ2 %}
-        # BQ2 from Host
+      {% elsif space.stringify == "BQ2" %}
         HOST_{{name_c}} = "seed-rootfs/bq2-rootfs/{{rel_path}}"
-        # BQ2 from Seed
         SEED_{{name_c}} = "bq2-rootfs/{{rel_path}}"
-        # BQ2 from BQ2
-        BQ2_{{name_c}} = "{{rel_path}}"
-      {% endif %}
+        BQ2_{{name_c}}  = "{{rel_path}}"
+      {% else %}
+        {% raise "unknown space: #{space.stringify}" %}
+      {% end %}
 
-      # {{name}} getter method
-      def {{name}}(from_namespace: Namespace = @namespace) : Path
+      def {{name}}(from_namespace : Namespace = @namespace) : Path
         case from_namespace
         when Host
-          @host_workdir / Path["HOST_{{name_c}}"]
+          @host_workdir / Path[{{ "HOST_#{name_c}".id }}]
         when Seed
-          {% if (space == Host) %}
-            raise "Cannot fetch path for '{{name}}' in {{space.stringify}} namespace from #{from_namespace.label} namespace"
+          {% if space.stringify == "Host" %}
+            raise "Cannot fetch path for {{name.stringify}} in Host namespace from #{from_namespace.label} namespace"
           {% else %}
-            Path["/#{SEED_{{name_c}}}"]
+            Path["/"] / Path[{{ "SEED_#{name_c}".id }}]
           {% end %}
         when BQ2
-          {% if (space == Host) || (space == Seed) %}
-            raise "Cannot fetch path for '{{name}}' in {{space.stringify}} from_namespace from BQ2 namespace"
+          {% if space.stringify == "Host" || space.stringify == "Seed" %}
+            raise "Cannot fetch path for {{name.stringify}} in {{space.stringify}} from_namespace from BQ2 namespace"
           {% else %}
-            Path["/#{BQ2_{{name_c}}}"]
+            Path["/"] / Path[{{ "BQ2_#{name_c}".id }}]
           {% end %}
         end
       end
     end
 
     path host_path, Host, ""
-    path cache_path, Host, "cache" # Cache directory for checksum metadata.
-    path checksum_path,Host, "cache/checksums" # Directory for checksum files keyed by package.
-    path sources_path,Host, "sources" # Directory where source tarballs are stored.
-    path seed_path,Seed, ""
-    path sysroot_path,Seed, SYSROOT_DIR_NAME
-    path bq2_path,BQ2, ""
-    path log_path,BQ2, "var/lib"
+    path cache_path, Host, "cache"              # Cache directory for checksum metadata.
+    path checksum_path, Host, "cache/checksums" # Directory for checksum files keyed by package.
+    path sources_path, Host, "sources"          # Directory where source tarballs are stored.
+    path seed_path, Seed, ""
+    path sysroot_path, Seed, SYSROOT_DIR_NAME
+    path bq2_path, BQ2, ""
+    path log_path, BQ2, "var/lib"
     path marker_path, BQ2, ".bq2-rootfs"
     path workspace_path, BQ2, "workspace"
 
@@ -101,7 +95,7 @@ module Bootstrap
     property extra_binds : Array(Tuple(Path, Path))
 
     PROBE_PATHS_FOR_MARKER = [
-      {namespace: Host, path: "#{DEFAULT_HOST_WORKDIR}/#{HOST_MARKER_PATH}"}, 
+      {namespace: Host, path: "#{DEFAULT_HOST_WORKDIR}/#{HOST_MARKER_PATH}"},
       {namespace: Seed, path: SEED_MARKER_PATH},
       {namespace: BQ2, path: BQ2_MARKER_PATH},
     ]
