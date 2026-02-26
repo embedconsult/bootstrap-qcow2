@@ -128,34 +128,13 @@ module Bootstrap
       @workspace = workspace || SysrootWorkspace.create
     end
 
-    # Host workspace path for the builder.
-    def host_workdir : Path
-      @workspace.host_workdir.not_nil!
-    end
+    # SysrootWorkspace::Namespace aliases
+    alias BQ2 = SysrootWorkspace::Namespace::BQ2
+    alias Seed = SysrootWorkspace::Namespace::Seed
+    alias Host = SysrootWorkspace::Namespace::Host
 
-    # Cache directory for checksum metadata.
-    def cache_dir : Path
-      host_workdir / "cache"
-    end
-
-    # Directory for checksum files keyed by package.
-    def checksum_dir : Path
-      cache_dir / "checksums"
-    end
-
-    # Directory where source tarballs are stored.
-    def sources_dir : Path
-      host_workdir / "sources"
-    end
-
-    # Path to the outer rootfs directory on the host.
-    def outer_rootfs_dir : Path
-      @workspace.seed_rootfs_path.not_nil!
-    end
-
-    # Path to the workspace directory inside the inner rootfs.
-    def inner_rootfs_workspace_dir : Path
-      @workspace.workspace_path
+    def bootstrap_repo_path(namespace : SysrootNamespace = @workspace.namespace) : Path
+      @workspace.workspace_path(namespace: namespace) / Path["bootstrap-qcow2-#{bootstrap_source_version}"]
     end
 
     # Build a PackageSpec pointing at the base rootfs tarball for the configured
@@ -166,23 +145,13 @@ module Bootstrap
         file = "alpine-minirootfs-#{ALPINE_ROOTFS_VERSION}-#{@architecture}.tar.gz"
         url = URI.parse("https://dl-cdn.alpinelinux.org/alpine/#{ALPINE_ROOTFS_BRANCH}/releases/#{@architecture}/#{file}")
         checksum_url = URI.parse("#{url}.sha256") rescue nil
-        PackageSpec.new("bootstrap-rootfs", "#{ALPINE_ROOTFS_VERSION}", url, nil, checksum_url)
+        PackageSpec.new("bootstrap-rootfs", ALPINE_ROOTFS_VERSION, url, nil, checksum_url)
       elsif @seed == BQ2_SEED_NAME
         url = URI.parse("https://dl.beagle.cc/images/#{BQ2_SEED_NAME}-#{kernel_headers_arch}.tar.gz")
         PackageSpec.new("bootstrap-rootfs", BQ2_SEED_NAME, url)
       else
         raise "Not currently defined seed: #{@seed}"
       end
-    end
-
-    # Return true when a serialized plan exists in the workspace.
-    def rootfs_ready? : Bool
-      build_state = SysrootBuildState.new(workspace: @workspace)
-      File.exists?(build_state.plan_path)
-    end
-
-    def bootstrap_repo_dir
-      "#{@workspace.workspace_path}/bootstrap-qcow2-#{bootstrap_source_version}"
     end
 
     # Declarative list of upstream sources that should populate the sysroot.
