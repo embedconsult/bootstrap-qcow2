@@ -103,7 +103,7 @@ module Bootstrap
 
         run_succeeded = true
       ensure
-        run_duration = monotonic_elapsed_since(run_started_at)
+        run_duration = monotonic_now - run_started_at
         state = run_succeeded ? "Completed" : "Failed"
         Log.info { "#{state} sysroot run in #{format_duration(run_duration)}" }
       end
@@ -124,7 +124,7 @@ module Bootstrap
         end
         phase_succeeded = true
       ensure
-        phase_duration = monotonic_elapsed_since(phase_started_at)
+        phase_duration = monotonic_now - phase_started_at
         status = phase_succeeded ? "Completed" : "Failed"
         Log.info { "#{status} phase #{phase.name} in #{format_duration(phase_duration)}" }
       end
@@ -270,11 +270,6 @@ module Bootstrap
 
     private def monotonic_now
       Time.monotonic
-    end
-
-    # Return elapsed monotonic time since +started_at+.
-    private def monotonic_elapsed_since(started_at) : Time::Span
-      monotonic_now - started_at
     end
 
     # Format elapsed monotonic duration in a stable human-readable form.

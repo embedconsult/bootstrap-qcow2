@@ -597,17 +597,13 @@ module Bootstrap
       FileUtils.mkdir_p(report_dir)
       timestamp = Time.utc.to_s("%Y%m%dT%H%M%S.%LZ")
       base = @command_log_prefix || argv.first? || "command"
-      slug = slugify(base)
+      slug = base.gsub(/[^A-Za-z0-9]+/, "_").gsub(/^_+|_+$/, "").downcase
       disambiguator = Random::Secure.hex(4)
       File.join(report_dir, "#{timestamp}-#{slug}-#{disambiguator}.log")
     end
 
     private def log_prefix_for(phase : BuildPhase, step : BuildStep) : String
       "#{phase.name}-#{step.name}"
-    end
-
-    private def slugify(value : String) : String
-      value.gsub(/[^A-Za-z0-9]+/, "_").gsub(/^_+|_+$/, "").downcase
     end
 
     # Runs `make install`, optionally staging through `DESTDIR`.

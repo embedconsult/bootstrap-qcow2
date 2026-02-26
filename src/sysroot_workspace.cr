@@ -102,8 +102,7 @@ module Bootstrap
     def self.sysroot_from(namespace : Namespace, host_workdir : Path? = nil)
       seed_rootfs_path = seed_rootfs_from(namespace, host_workdir)
       return nil if seed_rootfs_path.nil?
-      prefix = seed_rootfs_path.not_nil!
-      prefix / Path[SYSROOT_DIR_NAME]
+      seed_rootfs_path.not_nil! / Path[SYSROOT_DIR_NAME]
     end
 
     def self.bq2_rootfs_from(namespace : Namespace, host_workdir : Path? = nil)

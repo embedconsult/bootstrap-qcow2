@@ -141,19 +141,6 @@ module Bootstrap
       File.exists?(state_path)
     end
 
-    # Apply overrides to *plan* and return the resolved plan.
-    def resolve_plan(plan : BuildPlan,
-                     use_overrides : Bool = true) : BuildPlan
-      @plan = plan
-      path = use_overrides ? self.overrides_path : nil
-      if path && File.exists?(path)
-        Log.info { "Applying build plan overrides from #{path}" }
-        overrides = BuildPlanOverrides.from_json(File.read(path))
-        @plan = overrides.apply(@plan.not_nil!)
-      end
-      @plan.not_nil!
-    end
-
     # Persist the current build plan to the workspace and refresh its digest.
     def save_plan : String?
       plan_json = @plan.to_pretty_json
@@ -193,11 +180,6 @@ module Bootstrap
     # Load the build plan JSON from the workspace, or nil when missing.
     def on_disk_plan : BuildPlan?
       plan_exists? ? BuildPlan.parse(File.read(plan_path)) : nil
-    end
-
-    # Load overrides JSON from the workspace, or nil when missing.
-    def on_disk_overrides : BuildPlanOverrides?
-      overrides_exists? ? BuildPlanOverrides.from_json(File.read(overrides_path)) : nil
     end
 
     # Return the digest for the on-disk build plan, if present.
@@ -288,8 +270,7 @@ module Bootstrap
       return unless overrides_path && overrides_exists?
       Log.info { "Applying build plan overrides from #{overrides_path}" }
       overrides = BuildPlanOverrides.from_json(File.read(overrides_path))
-      old_plan = @plan.not_nil!
-      @plan = overrides.apply(old_plan)
+      @plan = overrides.apply(@plan)
     end
 
     private def update_overrides_tracking(previous_state : SysrootBuildState?,
