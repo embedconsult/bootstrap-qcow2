@@ -89,7 +89,7 @@ module Bootstrap
                    invalidate_on_overrides : Bool = false)
       Log.debug { "Initializing SysrootBuildState (workspace=#{workspace} workspace.host_dir=#{workspace.host_workdir})" }
       @plan = BuildPlan.new([] of BuildPhase)
-      saved_plan = on_disk_plan
+      saved_plan = plan_exists? ? BuildPlan.parse(File.read(plan_path)) : nil
       @plan = saved_plan.not_nil! unless saved_plan.nil?
       current_overrides_digest = on_disk_overrides_digest
       # Apply overrides before restoring state so the in-memory plan is the
@@ -188,16 +188,6 @@ module Bootstrap
       state = SysrootBuildState.from_json(File.read(state_path))
       state.workspace = workspace
       state
-    end
-
-    # Load the build plan JSON from the workspace, or nil when missing.
-    def on_disk_plan : BuildPlan?
-      plan_exists? ? BuildPlan.parse(File.read(plan_path)) : nil
-    end
-
-    # Load overrides JSON from the workspace, or nil when missing.
-    def on_disk_overrides : BuildPlanOverrides?
-      overrides_exists? ? BuildPlanOverrides.from_json(File.read(overrides_path)) : nil
     end
 
     # Return the digest for the on-disk build plan, if present.
