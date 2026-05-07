@@ -1644,7 +1644,7 @@ module Bootstrap
       FileUtils.mkdir_p(overrides_path.parent)
       File.write(overrides_path, overrides.to_pretty_json)
 
-      build_state = SysrootBuildState.new(workspace: workspace, ignore_overrides: true)
+      build_state = SysrootBuildState.new(workspace: workspace)
       build_state.plan_digest = SysrootBuildState.digest_for?(plan_path)
       build_state.overrides_digest = SysrootBuildState.digest_for?(overrides_path)
       build_state.touch

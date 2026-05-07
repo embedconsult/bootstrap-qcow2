@@ -209,7 +209,7 @@ describe Bootstrap::SysrootRunner do
     end
   end
 
-  it "applies overrides from a file when requested" do
+  it "ignores overrides and runs the persisted plan exactly" do
     steps = [Bootstrap::BuildStep.new(name: "pkg", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
     plan = Bootstrap::BuildPlan.new([
       Bootstrap::BuildPhase.new(name: "one", description: "a", namespace: "host", install_prefix: "/opt/sysroot", steps: steps),
@@ -225,11 +225,16 @@ describe Bootstrap::SysrootRunner do
       })
 
     with_recording_runner(plan: plan, overrides: overrides) do |build_state, step_runner|
+      plan_path = build_state.plan_path
+      original_plan_json = File.read(plan_path)
+
       plan_runner = Bootstrap::SysrootRunner.new(state: build_state, step_runner: step_runner)
       plan_runner.run_plan
+
+      File.read(plan_path).should eq original_plan_json
       step_runner.calls.size.should eq 1
-      step_runner.calls.first[:configure_flags].should eq ["--with-foo"]
-      step_runner.calls.first[:env]["CC"].should eq "clang"
+      step_runner.calls.first[:configure_flags].should be_empty
+      step_runner.calls.first[:env].should be_empty
     end
   end
 

@@ -71,7 +71,7 @@ describe Bootstrap::SysrootBuildState do
     end
   end
 
-  it "keeps completed steps when overrides content changes" do
+  it "loads the on-disk plan exactly when overrides are present" do
     with_tempdir do |dir|
       workspace = Bootstrap::SysrootWorkspace.create(Path[dir])
       plan_path = workspace.log_path / Bootstrap::SysrootBuildState::PLAN_FILE
@@ -84,55 +84,16 @@ describe Bootstrap::SysrootBuildState do
           description: "phase a",
           namespace: "host",
           install_prefix: "/opt/sysroot",
-          steps: [] of Bootstrap::BuildStep,
+          steps: [Bootstrap::BuildStep.new(name: "pkg", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)],
         ),
       ])
       File.write(plan_path, plan.to_json)
-      File.write(overrides_path, %({"phases":{}}))
+      File.write(overrides_path, %({"phases":{"phase-a":{"steps":{"pkg":{"configure_flags_add":["--with-foo"]}}}}}))
 
       state = Bootstrap::SysrootBuildState.new(workspace: workspace)
-      state.mark_success("phase-a", "musl")
-      state.save
 
-      File.write(overrides_path, %({"phases":{"phase-a":{"steps":{}}}}))
-
-      reloaded = Bootstrap::SysrootBuildState.new(workspace: workspace)
-      reloaded.completed?("phase-a", "musl").should be_true
-      reloaded.overrides_changed.should be_true
-      reloaded.invalidated_at.should be_nil
-      reloaded.invalidation_reason.should be_nil
-    end
-  end
-
-  it "clears completed steps when overrides change and invalidation is enabled" do
-    with_tempdir do |dir|
-      workspace = Bootstrap::SysrootWorkspace.create(Path[dir])
-      plan_path = workspace.log_path / Bootstrap::SysrootBuildState::PLAN_FILE
-      overrides_path = workspace.log_path / Bootstrap::SysrootBuildState::OVERRIDES_FILE
-
-      FileUtils.mkdir_p(plan_path.parent)
-      plan = Bootstrap::BuildPlan.new([
-        Bootstrap::BuildPhase.new(
-          name: "phase-a",
-          description: "phase a",
-          namespace: "host",
-          install_prefix: "/opt/sysroot",
-          steps: [] of Bootstrap::BuildStep,
-        ),
-      ])
-      File.write(plan_path, plan.to_json)
-      File.write(overrides_path, %({"phases":{}}))
-
-      state = Bootstrap::SysrootBuildState.new(workspace: workspace)
-      state.mark_success("phase-a", "musl")
-      state.save
-
-      File.write(overrides_path, %({"phases":{"phase-a":{"steps":{}}}}))
-
-      reloaded = Bootstrap::SysrootBuildState.new(workspace: workspace, invalidate_on_overrides: true)
-      reloaded.completed?("phase-a", "musl").should be_false
-      reloaded.invalidated_at.should_not be_nil
-      reloaded.invalidation_reason.should eq "Overrides changed; cleared completed steps"
+      state.plan.phases.first.steps.first.configure_flags.should be_empty
+      state.overrides_digest.should be_nil
     end
   end
 end
