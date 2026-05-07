@@ -233,6 +233,33 @@ describe Bootstrap::SysrootRunner do
     end
   end
 
+  it "never rewrites the persisted plan while applying overrides" do
+    steps = [Bootstrap::BuildStep.new(name: "pkg", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
+    plan = Bootstrap::BuildPlan.new([
+      Bootstrap::BuildPhase.new(name: "one", description: "a", namespace: "host", install_prefix: "/opt/sysroot", steps: steps),
+    ])
+
+    overrides = Bootstrap::BuildPlanOverrides.new(
+      {"one" => Bootstrap::PhaseOverride.new(
+        steps: {"pkg" => Bootstrap::StepOverride.new(
+          configure_flags_add: ["--with-foo"],
+          env: {"CC" => "clang"},
+        )},
+      ),
+      })
+
+    with_recording_runner(plan: plan, overrides: overrides) do |build_state, step_runner|
+      plan_path = build_state.plan_path
+      original_plan_json = File.read(plan_path)
+
+      plan_runner = Bootstrap::SysrootRunner.new(state: build_state, step_runner: step_runner)
+      plan_runner.run_plan
+
+      File.read(plan_path).should eq original_plan_json
+      step_runner.calls.first[:configure_flags].should eq ["--with-foo"]
+    end
+  end
+
   it "supports dry-run without executing steps" do
     steps = [Bootstrap::BuildStep.new(name: "pkg", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)]
     plan = Bootstrap::BuildPlan.new([

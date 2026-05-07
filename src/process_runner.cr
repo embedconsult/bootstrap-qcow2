@@ -148,7 +148,7 @@ module Bootstrap
       while (read = io.read(buffer)) > 0
         if capture_io
           if capture_mutex
-            capture_mutex.synchronize { capture_io.write(buffer[0, read]) }
+            capture_mutex.synchronize { capture_io.write(buffer[0, read]); nil }
           else
             capture_io.write(buffer[0, read])
           end

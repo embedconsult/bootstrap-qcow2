@@ -154,15 +154,6 @@ module Bootstrap
       @plan.not_nil!
     end
 
-    # Persist the current build plan to the workspace and refresh its digest.
-    def save_plan : String?
-      plan_json = @plan.to_pretty_json
-      FileUtils.mkdir_p(plan_path.parent)
-      File.write(plan_path, plan_json)
-      Log.info { "Saved build plan at #{plan_path}" }
-      @plan_digest = on_disk_plan_digest
-    end
-
     # Persist overrides to disk and refresh their digest.
     def save_overrides : String?
       overrides_json = @overrides.to_pretty_json
