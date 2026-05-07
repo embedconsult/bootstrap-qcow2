@@ -71,7 +71,7 @@ describe Bootstrap::SysrootBuildState do
     end
   end
 
-  it "loads the on-disk plan exactly when overrides are present" do
+  it "applies on-disk overrides without rewriting them" do
     with_tempdir do |dir|
       workspace = Bootstrap::SysrootWorkspace.create(Path[dir])
       plan_path = workspace.log_path / Bootstrap::SysrootBuildState::PLAN_FILE
@@ -87,13 +87,15 @@ describe Bootstrap::SysrootBuildState do
           steps: [Bootstrap::BuildStep.new(name: "pkg", strategy: "autotools", workdir: "/tmp", configure_flags: [] of String, patches: [] of String)],
         ),
       ])
+      overrides_json = %({"phases":{"phase-a":{"steps":{"pkg":{"configure_flags_add":["--with-foo"]}}}}})
       File.write(plan_path, plan.to_json)
-      File.write(overrides_path, %({"phases":{"phase-a":{"steps":{"pkg":{"configure_flags_add":["--with-foo"]}}}}}))
+      File.write(overrides_path, overrides_json)
 
       state = Bootstrap::SysrootBuildState.new(workspace: workspace)
 
-      state.plan.phases.first.steps.first.configure_flags.should be_empty
-      state.overrides_digest.should be_nil
+      state.plan.phases.first.steps.first.configure_flags.should eq ["--with-foo"]
+      state.overrides_digest.should eq Bootstrap::SysrootBuildState.digest_for?(overrides_path)
+      File.read(overrides_path).should eq overrides_json
     end
   end
 end

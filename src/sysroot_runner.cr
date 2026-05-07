@@ -189,6 +189,7 @@ module Bootstrap
       report = true
       resume = true
       dry_run = false
+      invalidate_overrides = false
       host_workdir : Path? = nil
       extra_binds = [] of Tuple(Path, Path)
       altcmd : String? = nil
@@ -196,6 +197,7 @@ module Bootstrap
         p.on("--phase NAME", "Select first build phase to run (default: auto)") { |name| start_phase = name }
         p.on("--package NAME", "Only run the named package(s) (repeatable)") { |name| packages << name }
         p.on("--no-report", "Disable failure report writing") { report = false }
+        p.on("--invalidate-overrides", "Invalidate completed steps when overrides change") { invalidate_overrides = true }
         p.on("--no-resume", "Disable resume/state tracking (useful when the default state path is not writable)") { resume = false }
         p.on("--dry-run", "Print plan entries and exit") { dry_run = true }
         p.on("--workdir=PATH", "Starting path for looking for build plan (default: #{SysrootWorkspace::DEFAULT_HOST_WORKDIR})") { |path| host_workdir = Path[path] }
@@ -218,8 +220,11 @@ module Bootstrap
         return -1
       end
 
-      build_state = SysrootBuildState.new(workspace: workspace)
-      Log.info { "Running plan #{build_state.plan_path} (namespace=#{workspace.namespace})" }
+      build_state = SysrootBuildState.new(workspace: workspace, invalidate_on_overrides: invalidate_overrides)
+      Log.info { "Running plan #{build_state.plan_path} with overrides #{build_state.overrides_path} (namespace=#{workspace.namespace})" }
+      if resume && build_state.overrides_changed && !invalidate_overrides
+        Log.warn { "Overrides changed; completed steps are preserved. To re-run affected steps, pass --invalidate-overrides, or clear the state." }
+      end
 
       step_runner = StepRunner.new(workspace: workspace)
       step_runner.skip_existing_sources = resume
