@@ -121,6 +121,11 @@ module Bootstrap
       configure_overrides : Hash(String, Array(String)) = {} of String => Array(String),
       patch_overrides : Hash(String, Array(String)) = {} of String => Array(String)
 
+    enum ToolchainKind
+      Sysroot
+      PrefixFree
+    end
+
     # Create a sysroot builder in workspace.
     def initialize(workspace : SysrootWorkspace | Nil = nil,
                    @architecture : String = DEFAULT_ARCH,
@@ -686,33 +691,28 @@ module Bootstrap
       musl_ld_path = "/etc/ld-musl-#{musl_arch}.path"
       system_from_sysroot_env_overrides = {
         "libxml2" => libxml2_env,
-        "zlib"    => {
-          "CFLAGS"   => "-fPIC",
-          "LDSHARED" => "#{system_from_sysroot_env["CC"]} -shared -Wl,-soname,libz.so.1",
-        },
-        "m4" => {
+        "m4"      => {
           "INSTALL" => "./build-aux/install-sh",
-        },
-        "crystal" => {
-          "CRYSTAL_CACHE_DIR" => "/tmp/crystal_cache",
-          "CRYSTAL"           => "#{sysroot_prefix}/bin/crystal",
-          "LLVM_CONFIG"       => "/usr/bin/llvm-config",
-          "LDFLAGS"           => "-L#{clang_rt_dir} -L/usr/lib/#{sysroot_triple} -L/usr/lib",
-          "LIBRARY_PATH"      => "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib",
-          "LD_LIBRARY_PATH"   => "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib:#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
-        },
-        "bootstrap-qcow2" => {
-          "SHARDS_CACHE_PATH" => "#{SHARDS_CACHE_DIR}",
-          "LDFLAGS"           => "-L#{clang_rt_dir} -L/usr/lib/#{sysroot_triple} -L/usr/lib",
-          "LIBRARY_PATH"      => "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib",
-          "LD_LIBRARY_PATH"   => "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib",
-          "CRYSTAL_OPTS"      => "-Dlibressl_version=#{DEFAULT_LIBRESSL}",
         },
       }
       post_llvm_env_overrides.each do |name, overrides|
         existing = system_from_sysroot_env_overrides[name]? || ({} of String => String)
         system_from_sysroot_env_overrides[name] = existing.merge(overrides)
       end
+      sysroot_toolchain_env_overrides = toolchain_env_overrides(
+        kind: ToolchainKind::Sysroot,
+        sysroot_prefix: sysroot_prefix,
+        sysroot_triple: sysroot_triple,
+        clang_rt_dir: clang_rt_dir,
+        phase_cc: sysroot_env["CC"],
+      )
+      prefix_free_toolchain_env_overrides = toolchain_env_overrides(
+        kind: ToolchainKind::PrefixFree,
+        sysroot_prefix: sysroot_prefix,
+        sysroot_triple: sysroot_triple,
+        clang_rt_dir: clang_rt_dir,
+        phase_cc: system_from_sysroot_env["CC"],
+      )
       [
         # Inputs: host repo workspace, source tarballs cache, seed rootfs spec.
         # Outputs: populated workspace sources, seed rootfs filesystem tree,
@@ -759,44 +759,7 @@ module Bootstrap
               content: "libatomic.so.1",
             ),
           ],
-          env_overrides: {
-            "cmake" => {
-              "CPPFLAGS" => "-I#{sysroot_prefix}/include -Wno-deprecated-literal-operator",
-              "LDFLAGS"  => "-L#{sysroot_prefix}/lib",
-            },
-            "zlib" => {
-              "CFLAGS"   => "-fPIC",
-              "LDSHARED" => "#{sysroot_env["CC"]} -shared -Wl,-soname,libz.so.1",
-            },
-            "libxml2" => libxml2_env,
-            "crystal" => {
-              "CRYSTAL_CACHE_DIR" => "/tmp/crystal_cache",
-              "CRYSTAL"           => "/usr/bin/crystal",
-              "SHARDS"            => "/usr/bin/shards",
-              "LLVM_CONFIG"       => "#{sysroot_prefix}/bin/llvm-config",
-              "CC"                => "#{sysroot_prefix}/bin/clang++ --target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -stdlib=libc++",
-              "CXX"               => "#{sysroot_prefix}/bin/clang++ --target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -stdlib=libc++",
-              "CPPFLAGS"          => "-I#{sysroot_prefix}/include",
-              "LDFLAGS"           => "-L#{sysroot_prefix}/lib/#{sysroot_triple} -L#{sysroot_prefix}/lib",
-              "LIBRARY_PATH"      => "#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
-              "LD_LIBRARY_PATH"   => "#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
-            },
-            "shards" => {
-              "SHARDS_CACHE_PATH" => "#{SHARDS_CACHE_DIR}",
-              "CC"                => "#{sysroot_prefix}/bin/clang --target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld",
-              "CXX"               => "#{sysroot_prefix}/bin/clang++ --target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -stdlib=libc++",
-              "LDFLAGS"           => "-L#{sysroot_prefix}/lib/#{sysroot_triple} -L#{sysroot_prefix}/lib",
-              "LIBRARY_PATH"      => "#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
-            },
-            "bootstrap-qcow2" => {
-              "CRYSTAL"         => "/usr/bin/crystal",
-              "SHARDS"          => "/usr/bin/shards",
-              "CPPFLAGS"        => "-I#{sysroot_prefix}/include",
-              "LDFLAGS"         => "-L#{sysroot_prefix}/lib",
-              "LIBRARY_PATH"    => "#{sysroot_prefix}/lib",
-              "PKG_CONFIG_PATH" => "#{sysroot_prefix}/lib/pkgconfig",
-            },
-          },
+          env_overrides: sysroot_toolchain_env_overrides.merge({"libxml2" => libxml2_env}),
           configure_overrides: {
             "libxml2" => libxml2_cmake_flags,
           },
@@ -858,7 +821,7 @@ module Bootstrap
           ),
           workdir: workspace_from_bq2,
           package_allowlist: nil,
-          env_overrides: system_from_sysroot_env_overrides,
+          env_overrides: system_from_sysroot_env_overrides.merge(prefix_free_toolchain_env_overrides),
           configure_overrides: {
             "cmake" => [
               "-DOPENSSL_ROOT_DIR=/usr",
@@ -946,6 +909,70 @@ module Bootstrap
           ],
         ),
       ]
+    end
+
+    # Return package env overrides grouped by toolchain family instead of phase.
+    private def toolchain_env_overrides(kind : ToolchainKind, sysroot_prefix : String, sysroot_triple : String, clang_rt_dir : String, phase_cc : String) : Hash(String, Hash(String, String))
+      shared = {
+        "cmake" => {
+          "CPPFLAGS" => "-I#{sysroot_prefix}/include -Wno-deprecated-literal-operator",
+          "LDFLAGS"  => "-L#{sysroot_prefix}/lib",
+        },
+        "zlib" => {
+          "CFLAGS"   => "-fPIC",
+          "LDSHARED" => "#{phase_cc} -shared -Wl,-soname,libz.so.1",
+        },
+      }
+      case kind
+      in .sysroot?
+        shared.merge({
+          "crystal" => {
+            "CRYSTAL_CACHE_DIR" => "/tmp/crystal_cache",
+            "CRYSTAL"           => "/usr/bin/crystal",
+            "SHARDS"            => "/usr/bin/shards",
+            "LLVM_CONFIG"       => "#{sysroot_prefix}/bin/llvm-config",
+            "CC"                => "#{sysroot_prefix}/bin/clang++ --target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -stdlib=libc++",
+            "CXX"               => "#{sysroot_prefix}/bin/clang++ --target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -stdlib=libc++",
+            "CPPFLAGS"          => "-I#{sysroot_prefix}/include",
+            "LDFLAGS"           => "-L#{sysroot_prefix}/lib/#{sysroot_triple} -L#{sysroot_prefix}/lib",
+            "LIBRARY_PATH"      => "#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
+            "LD_LIBRARY_PATH"   => "#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
+          },
+          "shards" => {
+            "SHARDS_CACHE_PATH" => "#{SHARDS_CACHE_DIR}",
+            "CC"                => "#{sysroot_prefix}/bin/clang --target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld",
+            "CXX"               => "#{sysroot_prefix}/bin/clang++ --target=#{sysroot_triple} --rtlib=compiler-rt --unwindlib=libunwind -fuse-ld=lld -stdlib=libc++",
+            "LDFLAGS"           => "-L#{sysroot_prefix}/lib/#{sysroot_triple} -L#{sysroot_prefix}/lib",
+            "LIBRARY_PATH"      => "#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
+          },
+          "bootstrap-qcow2" => {
+            "CRYSTAL"         => "/usr/bin/crystal",
+            "SHARDS"          => "/usr/bin/shards",
+            "CPPFLAGS"        => "-I#{sysroot_prefix}/include",
+            "LDFLAGS"         => "-L#{sysroot_prefix}/lib",
+            "LIBRARY_PATH"    => "#{sysroot_prefix}/lib",
+            "PKG_CONFIG_PATH" => "#{sysroot_prefix}/lib/pkgconfig",
+          },
+        })
+      in .prefix_free?
+        shared.merge({
+          "crystal" => {
+            "CRYSTAL_CACHE_DIR" => "/tmp/crystal_cache",
+            "CRYSTAL"           => "#{sysroot_prefix}/bin/crystal",
+            "LLVM_CONFIG"       => "/usr/bin/llvm-config",
+            "LDFLAGS"           => "-L#{clang_rt_dir} -L/usr/lib/#{sysroot_triple} -L/usr/lib",
+            "LIBRARY_PATH"      => "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib",
+            "LD_LIBRARY_PATH"   => "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib:#{sysroot_prefix}/lib/#{sysroot_triple}:#{sysroot_prefix}/lib",
+          },
+          "bootstrap-qcow2" => {
+            "SHARDS_CACHE_PATH" => "#{SHARDS_CACHE_DIR}",
+            "LDFLAGS"           => "-L#{clang_rt_dir} -L/usr/lib/#{sysroot_triple} -L/usr/lib",
+            "LIBRARY_PATH"      => "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib",
+            "LD_LIBRARY_PATH"   => "#{clang_rt_dir}:/usr/lib/#{sysroot_triple}:/usr/lib",
+            "CRYSTAL_OPTS"      => "-Dlibressl_version=#{DEFAULT_LIBRESSL}",
+          },
+        })
+      end
     end
 
     # Return the os-release contents for the generated rootfs.
