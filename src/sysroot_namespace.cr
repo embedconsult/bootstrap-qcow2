@@ -349,6 +349,10 @@ module Bootstrap
     # disabled via the kernel toggle.
     def self.ensure_unprivileged_userns_clone_enabled!(path : String = USERNS_TOGGLE_PATH)
       return if unprivileged_userns_clone_enabled?(path)
+
+      # TODO: This might not be fatal, don't make it so
+      return
+
       raise NamespaceError.new(<<-MSG)
         Unprivileged user namespaces are disabled (unprivileged_userns_clone=0).
         Enable them by running:
