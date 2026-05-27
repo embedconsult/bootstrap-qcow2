@@ -460,8 +460,22 @@ module Bootstrap
     private def self.setup_user_mapping(uid : Int32, gid : Int32)
       setgroups_path = "/proc/self/setgroups"
       if File.exists?(setgroups_path)
+        setgroups_file = nil
         begin
-          File.write(setgroups_path, "deny\n")
+          # Call the underlying OS open directly to get a raw file descriptor
+          fd = LibC.open(setgroups_path, LibC::O_WRONLY)
+          if fd < 0
+            # Map common permission errnos to the expected exception class
+            if Errno.value == Errno::EACCES || Errno.value == Errno::EPERM
+              raise File::AccessDeniedError.new("Failed to open #{setgroups_path}", file: setgroups_path)
+            else
+              raise NamespaceError.new("Failed to open #{setgroups_path} (errno: #{Errno.value})")
+            end
+          end
+
+          # Wrap the raw file descriptor using the public IO wrapper instead of File.new
+          setgroups_file = IO::FileDescriptor.new(fd)
+          setgroups_file.puts "deny"
         rescue error : File::AccessDeniedError
           # Privileged callers (uid 0 in the parent namespace) can still write
           # gid_map without disabling setgroups. Allow the flow to continue for
@@ -471,6 +485,8 @@ module Bootstrap
           unless uid == 0
             raise NamespaceError.new("Failed to write #{setgroups_path}: #{error.message}. This can be caused by LSM policies (e.g., AppArmor).")
           end
+        ensure
+          setgroups_file.close if setgroups_file
         end
       elsif LibC.getuid != 0
         raise NamespaceError.new("Missing #{setgroups_path}; unprivileged user namespaces are not available without uid 0.")
