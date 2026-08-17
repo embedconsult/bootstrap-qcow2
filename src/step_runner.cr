@@ -5,10 +5,14 @@ require "process"
 require "random/secure"
 require "set"
 require "time"
+require "http/client"
+require "uri"
+require "digest/sha256"
 require "./build_plan"
 require "./process_runner"
 require "./alpine_setup"
 require "./sysroot_workspace"
+require "./tarball"
 
 module Bootstrap
   # Raised when a command fails during a StepRunner invocation.
@@ -32,11 +36,13 @@ module Bootstrap
   # * AlpineSetup for Alpine seed rootfs configuration
   class StepRunner
     property clean_build_dirs : Bool
+    property report_dir : String?
     getter workspace : SysrootWorkspace?
     @command_log_prefix : String?
 
     def initialize(@clean_build_dirs : Bool = true, @workspace : SysrootWorkspace? = nil)
       @command_log_prefix = nil
+      @report_dir = nil
     end
 
     # Run a build step using the selected strategy.
@@ -244,47 +250,36 @@ module Bootstrap
       truthy_env?(env["BQ2_FORCE_SHARDS_INSTALL"]?)
     end
 
-    private def host_setup_builder(phase : BuildPhase, &block : SysrootBuilder ->) : Nil
-      builder = build_host_setup_builder(phase)
-      with_source_branch(phase.env) do
-        yield builder
-      end
-    end
-
     # Download all configured package sources and return their cached paths.
     def download_sources(step : BuildStep) : Array(Path)
-      step.sources.flat_map { |pkg| download_all(pkg) }
-      pkg.all_urls.map_with_index do |uri, idx|
-        checksum_uri = idx.zero? ? pkg.checksum_url : URI.parse("#{uri}.sha256") rescue nil
-        logical = idx.zero? ? pkg : pkg_with_url(pkg, uri, checksum_uri)
-        download_and_verify(logical)
-      end
+      sources = step.sources || raise "download-sources requires step.sources"
+      sources.map { |spec| download_and_verify(spec) }
     end
 
-    # Download a package tarball (if missing) into the source cache and verify
+    # Download a source tarball (if missing) into the source cache and verify
     # its checksum before returning the cached path.
-    def download_and_verify(pkg : PackageSpec) : Path
-      target = sources_dir / pkg.filename
+    def download_and_verify(spec : SourceSpec) : Path
+      target = sources_dir / spec.filename
       attempts = 3
       attempts.times do |idx|
         begin
           if File.exists?(target)
-            if File.size(target) > 0 && verify(pkg, target)
+            if File.size(target) > 0 && verify(spec, target)
               return target
             else
               File.delete(target)
             end
           end
 
-          Log.debug { "Downloading #{pkg.name} #{pkg.version} from #{pkg.url}" }
-          download_with_redirects(pkg.url, target)
-          raise "Empty download for #{pkg.name}" if File.size(target) == 0
-          verify(pkg, target)
+          Log.debug { "Downloading #{spec.name} #{spec.version} from #{spec.url}" }
+          download_with_redirects(spec.url, target)
+          raise "Empty download for #{spec.name}" if File.size(target) == 0
+          verify(spec, target)
           return target
         rescue error
           File.delete(target) if File.exists?(target)
           raise error if idx == attempts - 1
-          Log.warn { "Retrying #{pkg.name} after error: #{error.message}" }
+          Log.warn { "Retrying #{spec.name} after error: #{error.message}" }
           sleep 2.seconds
         end
       end
@@ -304,6 +299,30 @@ module Bootstrap
       else
         ENV.delete("BQ2_SOURCE_BRANCH")
       end
+    end
+
+    # Extract all configured package sources into the workdir.
+    def extract_sources(step : BuildStep) : Nil
+      sources = step.sources || raise "extract-sources requires step.sources"
+      destination = Path[step.workdir]
+      sources.each do |spec|
+        archive = sources_dir / spec.filename
+        raise "Missing source tarball #{archive}" unless File.exists?(archive)
+        Log.info { "Extracting #{archive} into #{destination}" }
+        Tarball.extract(archive, destination, preserve_ownership: false, owner_uid: nil, owner_gid: nil)
+      end
+    end
+
+    # Populate the seed rootfs using the base rootfs tarball.
+    def populate_seed(step : BuildStep) : Nil
+      sources = step.sources || raise "populate-seed requires step.sources"
+      raise "populate-seed expects at least one source" if sources.empty?
+      workspace = @workspace || raise "populate-seed requires a workspace"
+      seed_rootfs = workspace.seed_rootfs_path || raise "populate-seed requires seed rootfs path"
+      archive = sources_dir / sources.first.filename
+      raise "Missing seed rootfs tarball #{archive}" unless File.exists?(archive)
+      Log.info { "Populating seed rootfs from #{archive} into #{seed_rootfs}" }
+      Tarball.extract(archive, seed_rootfs, preserve_ownership: false, owner_uid: nil, owner_gid: nil)
     end
 
     # Many release tarballs include pre-generated autotools artifacts
@@ -358,6 +377,82 @@ module Bootstrap
 
         raise CommandFailedError.new(dry_run, dry_status.exit_code, "Patch failed (#{dry_status.exit_code}): #{patch}")
       end
+    end
+
+    private def sources_dir : Path
+      if workspace = @workspace
+        if host_workdir = workspace.host_workdir
+          return host_workdir / "sources"
+        end
+        return workspace.workspace_path / "sources"
+      end
+      Path["/workspace/sources"]
+    end
+
+    private def verify(spec : SourceSpec, path : Path) : Bool
+      expected = spec.sha256
+      if expected.nil? && (checksum_url = spec.checksum_url)
+        expected = fetch_checksum(checksum_url, spec.filename)
+      end
+      return true unless expected
+      actual = sha256(path)
+      raise "Checksum mismatch for #{spec.name} (expected #{expected}, got #{actual})" unless actual == expected
+      true
+    end
+
+    private def fetch_checksum(url : String, filename : String) : String
+      response = request_with_redirects("GET", url, max_redirects: 10)
+      body = response.body
+      body.each_line do |line|
+        next if line.strip.empty?
+        parts = line.split(/\s+/)
+        next if parts.empty?
+        if parts.size >= 2 && parts[1].includes?(filename)
+          return parts[0]
+        end
+      end
+      body.lines.first?.try(&.split(/\s+/).first) || raise "Unable to parse checksum from #{url}"
+    end
+
+    private def sha256(path : Path) : String
+      digest = Digest::SHA256.new
+      File.open(path) do |file|
+        buffer = Bytes.new(8192)
+        while (read = file.read(buffer)) > 0
+          digest.update(buffer[0, read])
+        end
+      end
+      digest.final.hexstring
+    end
+
+    private def download_with_redirects(url : String, target : Path, max_redirects : Int32 = 10) : Nil
+      response = request_with_redirects("GET", url, max_redirects: max_redirects)
+      FileUtils.mkdir_p(target.parent)
+      File.open(target, "w") { |io| IO.copy(response.body_io, io) }
+    end
+
+    private def request_with_redirects(method : String, url : String, max_redirects : Int32) : HTTP::Client::Response
+      redirects = 0
+      current_url = url
+      loop do
+        response = HTTP::Client.exec(method, current_url)
+        return response unless redirect?(response.status_code)
+        raise "Redirect missing Location header" unless response.headers["Location"]?
+        raise "Too many redirects" if redirects >= max_redirects
+        current_url = resolve_redirect(current_url, response.headers["Location"])
+        redirects += 1
+      end
+    end
+
+    private def redirect?(status : Int32) : Bool
+      status == 301 || status == 302 || status == 303 || status == 307 || status == 308
+    end
+
+    private def resolve_redirect(base : String, location : String) : String
+      base_uri = URI.parse(base)
+      target = URI.parse(location)
+      return target.to_s if target.scheme
+      base_uri.resolve(target).to_s
     end
 
     # Run a command array and raise if it fails.
