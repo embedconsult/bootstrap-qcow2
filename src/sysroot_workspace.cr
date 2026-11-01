@@ -38,66 +38,60 @@ module Bootstrap
       end
     end
 
-    alias Host = Bootstrap::SysrootWorkspace::Namespace::Host
-    alias Seed = Bootstrap::SysrootWorkspace::Namespace::Seed
-    alias BQ2 = Bootstrap::SysrootWorkspace::Namespace::BQ2
-
     # Defines path constants and generates path `getter` based on namespace
     macro path(name, space, rel_path)
-      {% name_c = name.stringify.upcase.id %}
+      {% space_s = space.stringify %}
 
-      {% if space.stringify == "Host" %}
-        HOST_{{name_c}} = "{{rel_path}}"
-      {% elsif space.stringify == "Seed" %}
-        HOST_{{name_c}} = "seed-rootfs/{{rel_path}}"
-        SEED_{{name_c}} = "{{rel_path}}"
-      {% elsif space.stringify == "BQ2" %}
-        HOST_{{name_c}} = "seed-rootfs/bq2-rootfs/{{rel_path}}"
-        SEED_{{name_c}} = "bq2-rootfs/{{rel_path}}"
-        BQ2_{{name_c}}  = "{{rel_path}}"
-      {% else %}
-        {% raise "unknown space: #{space.stringify}" %}
-      {% end %}
-
+      # {{name}} getter method
       def {{name}}(from_namespace : Namespace = @namespace) : Path
         case from_namespace
-        when Host
-          @host_workdir / Path[{{ "HOST_#{name_c}".id }}]
-        when Seed
-          {% if space.stringify == "Host" %}
-            raise "Cannot fetch path for {{name.stringify}} in Host namespace from #{from_namespace.label} namespace"
-          {% else %}
-            Path["/"] / Path[{{ "SEED_#{name_c}".id }}]
+        when Namespace::Host
+          @host_workdir / Path[
+            {% if space_s == "Host" %}
+              {{rel_path}}
+            {% elsif space_s == "Seed" %}
+              "seed-rootfs/" + {{rel_path}}
+            {% elsif space_s == "BQ2" %}
+              "seed-rootfs/bq2-rootfs/" + {{rel_path}}
+            {% end %}
+          ]
+        when Namespace::Seed
+          {% if space_s == "Host" %}
+            raise "Cannot fetch path for {{name}} from Seed namespace"
+          {% elsif space_s == "Seed" %}
+            Path["/"] / Path[{{rel_path}}]
+          {% elsif space_s == "BQ2" %}
+            Path["/"] / Path["bq2-rootfs/" + {{rel_path}}]
           {% end %}
-        when BQ2
-          {% if space.stringify == "Host" || space.stringify == "Seed" %}
-            raise "Cannot fetch path for {{name.stringify}} in {{space.stringify}} from_namespace from BQ2 namespace"
+        when Namespace::BQ2
+          {% if space_s == "BQ2" %}
+            Path["/"] / Path[{{rel_path}}]
           {% else %}
-            Path["/"] / Path[{{ "BQ2_#{name_c}".id }}]
+            raise "Cannot fetch path for {{name}} from BQ2 namespace"
           {% end %}
         end
       end
     end
 
-    path host_path, Host, ""
-    path cache_path, Host, "cache"              # Cache directory for checksum metadata.
-    path checksum_path, Host, "cache/checksums" # Directory for checksum files keyed by package.
-    path sources_path, Host, "sources"          # Directory where source tarballs are stored.
-    path seed_path, Seed, ""
-    path sysroot_path, Seed, SYSROOT_DIR_NAME
-    path bq2_path, BQ2, ""
-    path log_path, BQ2, "var/lib"
-    path marker_path, BQ2, ".bq2-rootfs"
-    path workspace_path, BQ2, "workspace"
+    path(host_path, Namespace::Host, "")
+    path(cache_path, Namespace::Host, "cache")              # Cache directory for checksum metadata.
+    path(checksum_path, Namespace::Host, "cache/checksums") # Directory for checksum files keyed by package.
+    path(sources_path, Namespace::Host, "sources")          # Directory where source tarballs are stored.
+    path(seed_path, Namespace::Seed, "")
+    path(sysroot_path, Namespace::Seed, SYSROOT_DIR_NAME)
+    path(bq2_path, Namespace::BQ2, "")
+    path(log_path, Namespace::BQ2, "var/lib")
+    path(marker_path, Namespace::BQ2, ".bq2-rootfs")
+    path(workspace_path, Namespace::BQ2, "workspace")
 
     property host_workdir : Path
     property namespace : Namespace
     property extra_binds : Array(Tuple(Path, Path))
 
     PROBE_PATHS_FOR_MARKER = [
-      {namespace: Host, path: "#{DEFAULT_HOST_WORKDIR}/#{HOST_MARKER_PATH}"},
-      {namespace: Seed, path: SEED_MARKER_PATH},
-      {namespace: BQ2, path: BQ2_MARKER_PATH},
+      {namespace: Namespace::Host, path: "#{DEFAULT_HOST_WORKDIR}/#{HOST_MARKER_PATH}"},
+      {namespace: Namespace::Seed, path: seed_marker_path},
+      {namespace: Namespace::BQ2, path: bq2_marker_path},
     ]
 
     def initialize(@host_workdir : Path? = nil,

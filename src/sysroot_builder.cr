@@ -128,11 +128,6 @@ module Bootstrap
       @workspace = workspace || SysrootWorkspace.create
     end
 
-    # SysrootWorkspace::Namespace aliases
-    alias BQ2 = SysrootWorkspace::Namespace::BQ2
-    alias Seed = SysrootWorkspace::Namespace::Seed
-    alias Host = SysrootWorkspace::Namespace::Host
-
     def bootstrap_repo_path(namespace : SysrootNamespace = @workspace.namespace) : Path
       @workspace.workspace_path(namespace: namespace) / Path["bootstrap-qcow2-#{bootstrap_source_version}"]
     end
